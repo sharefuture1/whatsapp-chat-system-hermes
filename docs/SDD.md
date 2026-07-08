@@ -222,9 +222,9 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 - 定位：`storage.py:74-81 fetch_session_messages`（拉取全部 whatsapp 消息）被 `dashboard`、`conversations`、`conversations/{id}` 反复调用；`_load_origins` 每次重读 `sessions.json`。
 - 建议：加带 TTL 的内存缓存或按 `last_timestamp` 增量；`conversations/{id}` 用 `WHERE session_id IN (...)` 只取该用户消息，而非全表过滤。
 
-**P-2 [P1] 前端每次写操作后全量 `loadBase()`**
-- 定位：`App.jsx:442,459,502`，回复/隐藏/任务后都重拉 dashboard+conversations+settings。
-- 建议：改为局部更新或仅刷新受影响的会话详情。
+**P-2 [P1] 前端每次写操作后全量 `loadBase()`** ✅ 已完成
+- 定位：`App.jsx`，回复/隐藏/任务后都重拉 dashboard+conversations+settings。
+- 处理：拆分为 `refreshWorkspace()`（dashboard+conversations+当前详情）与 `refreshSettings()`；隐藏消息只刷新会话详情；保存设置只刷新设置；health 只在启动时拉取。
 
 **P-3 [P2] 读路径产生写副作用**
 - 定位：`messaging.py:72-95 refresh_aliases` 每次都 `save_json` 写别名文件，即使由只读的 `prepare_reply` 触发。
@@ -255,8 +255,8 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 **M-5 [P2] 函数内局部 import**
 - `web_api.py:179 import secrets`、`rewriter.py:118/151 import re`。移到模块顶部。
 
-**M-6 [P2] 前端单文件 550 行**
-- `App.jsx` 建议按组件拆分到 `web/src/components/`，并抽出 `api.js` 封装 fetch 与 token 注入。
+**M-6 [P2] 前端单文件 550 行** ✅ 已完成
+- 已拆分为 `web/src/components/`（LoginScreen/TopBar/SettingsPanel/ConversationList/ConversationDetail/ReplyPreview/MemorySummary/AliasPanel/StatCard），并新增 `api.js`（统一 fetch、token 注入、`res.ok` 校验、401 自动登出）与 `format.js`。附带修复：token 不再经 settings 对象透传给预览请求；写操作错误不再被静默吞掉，改为可关闭的错误横幅；登录框占位符不再泄漏默认密码；实现了此前从未生效的 `ui.auto_refresh_seconds` 自动刷新；登录支持回车提交。
 
 **M-7 [P2] Web 层缺乏结构化错误处理与日志**
 - 后端任务有 `EventLogger`，但 HTTP 层异常直接冒泡。建议加统一异常处理与访问日志。
@@ -276,7 +276,7 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 | C-3 | P1 | 正确性 | 清理死配置 |
 | C-4 | P1 | 正确性 | 移除硬编码语料 |
 | P-1 | P1 | 性能 | 查询缓存/增量 |
-| P-2 | P1 | 性能 | 前端局部刷新 |
+| P-2 | P1 | 性能 | 前端局部刷新 ✅ |
 | M-1 | P1 | 架构 | 抽取 origin 归集 |
 | M-2 | P1 | 测试 | 自包含测试 |
 | S-7/C-5/P-3~5/M-3~7 | P2 | 各类 | 见上文 |
