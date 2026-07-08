@@ -25,19 +25,21 @@ When using a single frontend entrypoint, expose:
 
 The Vite dev server proxies `/api` to the backend.
 
+## Production frontend host
+
+Current intended public frontend host:
+- `https://whats.future1.us`
+
 ## Vercel-ready frontend
 
-The frontend should be deployable independently and talk to a remote backend.
+The frontend supports a production API base via environment variable.
 
-Recommended pattern:
-- keep FastAPI backend running on your Hermes host
-- expose backend publicly through a stable domain or tunnel
-- configure the frontend to call that backend directly in production
+Set on Vercel:
+- `VITE_API_BASE=https://whats.future1.us/api`
 
-Suggested production env var for the web app:
-- `VITE_API_BASE=https://your-backend-host/api`
-
-Then the frontend should use that base URL instead of assuming local `/api`.
+Behavior:
+- local dev: falls back to `/api`
+- Vercel production: calls `VITE_API_BASE`
 
 ## Vercel
 
@@ -51,19 +53,17 @@ profile directly.
 
 ## Production recommendations
 
-Do not use Vite dev server forever.
-
 Recommended production shape:
 - build frontend with `npm run build`
-- serve static assets via Caddy or Nginx, or deploy the frontend to Vercel
+- deploy frontend to Vercel or serve static assets via Caddy/Nginx
 - run backend via systemd on localhost only
-- reverse proxy `/api` to backend, or configure `VITE_API_BASE`
-- put the tunnel or HTTPS gateway in front of the single frontend origin
+- expose backend through a domain/tunnel reachable as `https://whats.future1.us/api`
+- keep the tunnel/proxy in front of the single frontend origin
 
 ## Security checklist
 
 Before wider use:
-- change the default bootstrap password immediately
+- change the bootstrap/default password immediately
 - rotate any profile-local API keys if this project or profile files were copied around
 - keep login throttling enabled
 - keep session TTL enabled

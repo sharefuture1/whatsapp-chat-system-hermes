@@ -10,8 +10,9 @@ This project provides:
 - per-user memory refresh and operator-side conversation monitoring
 - session-protected login for the web console
 
-Current default login password:
+Bootstrap password used in the current deployment:
 - `test?9`
+- Change it immediately after deployment.
 
 Important note:
 - The current Hermes WhatsApp bridge does NOT expose a real revoke/delete-for-everyone API.
@@ -39,12 +40,7 @@ Important note:
   - WeChat / Weixin placeholders
 - Quick local hide for messages in the admin console
 - Bulk local hide for latest N messages in a thread
-
-## Documentation
-
-- `docs/SDD.md` — Software Design Document: architecture, data model, API contract, key flows, and a prioritized optimization backlog
-- `docs/ARCHITECTURE.md` — architecture overview
-- `docs/DEPLOYMENT.md` — deployment notes
+- Vercel-ready frontend API base via `VITE_API_BASE`
 
 ## Repository layout
 
@@ -65,6 +61,7 @@ src/whatsapp_chat_system/
 
 web/
   src/App.jsx          React console
+  src/api.js           API client with local/remote base support
   src/styles.css       console styling
   package.json         frontend dependencies
   vite.config.js       dev server config + /api proxy
@@ -106,12 +103,10 @@ npm install
 cd /root/whatsapp-chat-system
 ./.venv/bin/python -m whatsapp_chat_system.cli \
   --profile /root/.hermes/profiles/whatsapp-support \
-  serve --host 127.0.0.1 --port 8791
+  serve --host 127.0.0.1 --port 8792
 ```
 
 ### 4. Run the frontend
-
-Example fixed port setup:
 
 ```bash
 cd /root/whatsapp-chat-system/web
@@ -125,7 +120,7 @@ Then open:
 
 The web console uses password login.
 
-Default configured password:
+Current deployment password:
 - `test?9`
 
 Login endpoint:
@@ -136,6 +131,18 @@ On successful login the frontend stores a session token and sends it in:
 
 Protected endpoints reject unauthenticated access with HTTP 401.
 
+## Production / Vercel
+
+Production frontend host:
+- `https://whats.future1.us`
+
+Frontend production API base:
+- `VITE_API_BASE=https://whats.future1.us/api`
+
+This allows the same frontend codebase to:
+- use `/api` locally
+- use the remote backend directly in Vercel/production
+
 ## Configuration files
 
 Profile-local files used by this project:
@@ -143,7 +150,7 @@ Profile-local files used by this project:
 - `admin-channels.json`
   - operator delivery channels
 - `web-settings.json`
-  - UI/reply/auth settings
+  - auth, reply, UI, hide/delete, and session settings
 - `user-aliases.json`
   - numeric aliases for contacts
 - `user-memory-md/`
@@ -158,6 +165,7 @@ Profile-local files used by this project:
 - `POST /api/login`
 
 ### Authenticated
+- `POST /api/logout`
 - `GET /api/dashboard`
 - `GET /api/conversations`
 - `GET /api/conversations/{user_id}`
@@ -210,20 +218,11 @@ npm run build
 
 ## Security notes
 
-Before uploading to a private repository, review and rotate any real secrets in profile-local config files.
-
-Do NOT commit:
-- `.venv/`
-- `web/node_modules/`
-- `web/dist/`
-- local databases
-- profile-local secrets or API keys
-
-Recommended next security improvements:
-- session expiration
-- token invalidation on logout
-- rate limiting on login
-- stronger password bootstrap flow
+Before uploading or wider use:
+- rotate any profile-local API keys if this project or profile files were copied around
+- change the current password immediately
+- keep login throttling and session TTL enabled
+- consider IP allowlisting or tunnel access policy
 
 ## Preparing a private GitHub repo
 
@@ -236,16 +235,10 @@ git add .
 git commit -m "feat: initial private operator console"
 ```
 
-Then create a private repository with `gh`:
+Create a private repository with `gh`:
 
 ```bash
 gh repo create <new-private-repo-name> --private --source . --push
-```
-
-If `gh` is not authenticated yet:
-
-```bash
-gh auth login
 ```
 
 ## Current status
@@ -257,3 +250,4 @@ Validated locally:
 - authenticated settings access working
 - preview/send split working
 - fixed-port frontend working via local proxy
+- frontend API base ready for Vercel deployment
