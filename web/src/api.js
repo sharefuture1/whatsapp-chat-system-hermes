@@ -1,10 +1,18 @@
-const API = '/api'
+const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || '/api'
 
 let sessionToken = ''
 let onUnauthorized = null
 
+export function getApiBase() {
+  return DEFAULT_API_BASE
+}
+
 export function setSessionToken(token) {
   sessionToken = token || ''
+}
+
+export function clearSessionToken() {
+  sessionToken = ''
 }
 
 export function setUnauthorizedHandler(handler) {
@@ -22,7 +30,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (sessionToken) headers['x-session-token'] = sessionToken
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(`${DEFAULT_API_BASE}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

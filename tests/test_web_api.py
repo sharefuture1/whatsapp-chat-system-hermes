@@ -28,6 +28,7 @@ def test_login_endpoint():
     assert resp.status_code == 200
     assert resp.json()['success'] is True
     assert resp.json()['session_token']
+    assert resp.json()['expires_in'] > 0
 
 
 def test_settings_endpoint():
@@ -60,3 +61,20 @@ def test_reply_preview_only_does_not_fail():
     body = resp.json()
     assert body['preview_only'] is True
     assert 'rewrite' in body
+
+
+def test_logout_invalidates_session():
+    client = authed_client()
+    logout_resp = client.post('/api/logout')
+    assert logout_resp.status_code == 200
+    denied = client.get('/api/settings')
+    assert denied.status_code == 401
+
+
+def test_rate_limit_blocks_after_repeated_failures():
+    client = TestClient(build_app(PROFILE))
+    statuses = []
+    for _ in range(6):
+        resp = client.post('/api/login', json={'password': 'wrong-password'})
+        statuses.append(resp.status_code)
+    assert statuses[-1] == 429

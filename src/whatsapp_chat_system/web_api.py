@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -104,7 +105,7 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
             item['languages'].add('Chinese')
         elif any('a' <= ch.lower() <= 'z' for ch in content):
             item['languages'].add('Latin')
-        if row['timestamp'] >= item['last_timestamp'] and row['session_id'] not in hidden:
+        if row['timestamp'] >= item['last_timestamp'] and row['message_id'] not in hidden:
             item['last_timestamp'] = row['timestamp']
             item['last_message'] = content
     results = []
@@ -135,12 +136,48 @@ def _dashboard_stats(conversations: list[dict[str, Any]], config: AppConfig) -> 
 
 
 def _is_authenticated(config: AppConfig, request: Request) -> bool:
-    stored = config.web_settings.get('auth') or {}
-    session_token = str(config.web_settings.get('session_token') or '')
-    if not stored:
+    if not bool(config.web_settings.get('auth_required', True)):
         return True
+    auth = config.web_settings.get('auth') or {}
+    sessions = config.web_settings.get('sessions') or {}
     token = request.headers.get('x-session-token', '')
-    return bool(session_token and token and token == session_token)
+    if not auth or not token:
+        return False
+    session = sessions.get(token)
+    if not isinstance(session, dict):
+        return False
+    expires_at = float(session.get('expires_at') or 0)
+    if time.time() >= expires_at:
+        sessions.pop(token, None)
+        config.web_settings['sessions'] = sessions
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return False
+    return True
+
+
+def _check_login_rate_limit(config: AppConfig, request: Request) -> None:
+    policy = config.web_settings.get('auth_policy') or {}
+    max_attempts = int(policy.get('max_attempts', 5))
+    window_seconds = int(policy.get('window_seconds', 300))
+    ip = (request.client.host if request.client else 'unknown') or 'unknown'
+    login_attempts = dict(config.web_settings.get('login_attempts') or {})
+    now = time.time()
+    attempts = [float(ts) for ts in login_attempts.get(ip, []) if now - float(ts) < window_seconds]
+    if len(attempts) >= max_attempts:
+        raise HTTPException(status_code=429, detail='Too many login attempts, try again later')
+    attempts.append(now)
+    login_attempts[ip] = attempts
+    config.web_settings['login_attempts'] = login_attempts
+    save_json(config.paths.web_settings_file, config.web_settings)
+
+
+def _clear_login_attempts(config: AppConfig, request: Request) -> None:
+    ip = (request.client.host if request.client else 'unknown') or 'unknown'
+    login_attempts = dict(config.web_settings.get('login_attempts') or {})
+    if ip in login_attempts:
+        login_attempts.pop(ip, None)
+        config.web_settings['login_attempts'] = login_attempts
+        save_json(config.paths.web_settings_file, config.web_settings)
 
 
 def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -> FastAPI:
@@ -150,11 +187,17 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
     forwarder = AdminForwarder(config)
     refresher = MemoryRefresher(config)
 
-    app = FastAPI(title='WhatsApp Chat System API', version='0.5.0')
+    app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=['*'],
-        allow_credentials=True,
+        allow_origins=[
+            'http://127.0.0.1:38998',
+            'http://127.0.0.1:38999',
+            'http://127.0.0.1:5174',
+            'https://whats.future1.us',
+            'https://www.whats.future1.us',
+        ],
+        allow_credentials=False,
         allow_methods=['*'],
         allow_headers=['*'],
     )
@@ -172,15 +215,28 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         return {'ok': True, 'profile': str(config.paths.profile), 'ts': time.time(), 'login_enabled': True}
 
     @app.post('/api/login')
-    def login(request: LoginRequest) -> dict[str, Any]:
+    def login(request: Request, payload: LoginRequest) -> dict[str, Any]:
+        _check_login_rate_limit(config, request)
         stored = config.web_settings.get('auth') or {}
-        if not verify_password(stored, request.password):
+        if not verify_password(stored, payload.password):
             raise HTTPException(status_code=401, detail='Invalid password')
-        import secrets
+        _clear_login_attempts(config, request)
         token = secrets.token_urlsafe(24)
-        config.web_settings['session_token'] = token
+        ttl = int(config.web_settings.get('auth_ttl_seconds') or 86400)
+        sessions = dict(config.web_settings.get('sessions') or {})
+        sessions[token] = {'issued_at': time.time(), 'expires_at': time.time() + ttl}
+        config.web_settings['sessions'] = sessions
         save_json(config.paths.web_settings_file, config.web_settings)
-        return {'success': True, 'session_token': token}
+        return {'success': True, 'session_token': token, 'expires_in': ttl}
+
+    @app.post('/api/logout')
+    def logout(request: Request) -> dict[str, Any]:
+        token = request.headers.get('x-session-token', '')
+        sessions = dict(config.web_settings.get('sessions') or {})
+        sessions.pop(token, None)
+        config.web_settings['sessions'] = sessions
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True}
 
     @app.get('/api/dashboard')
     def dashboard() -> dict[str, Any]:
@@ -214,12 +270,12 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             if sid not in session_ids:
                 session_ids.append(sid)
             messages.append({
-                'message_id': row.get('message_id', None) if isinstance(row, dict) else None,
+                'message_id': row['message_id'],
                 'session_id': sid,
                 'role': row['role'],
                 'content': row['content'] or '',
                 'timestamp': row['timestamp'],
-                'hidden': row.get('id') in hidden if isinstance(row, dict) else False,
+                'hidden': row['message_id'] in hidden,
             })
         if not messages:
             raise HTTPException(status_code=404, detail='Conversation not found')
@@ -266,7 +322,8 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
     def settings() -> dict[str, Any]:
         safe_web_settings = dict(config.web_settings)
         safe_web_settings.pop('auth', None)
-        safe_web_settings.pop('session_token', None)
+        safe_web_settings.pop('sessions', None)
+        safe_web_settings.pop('login_attempts', None)
         return {
             'channels': config.forwarding_channels,
             'aliases': load_json(config.paths.alias_file, {}),

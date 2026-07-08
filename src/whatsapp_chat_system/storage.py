@@ -74,7 +74,7 @@ class StateDB:
     def fetch_session_messages(self) -> list[sqlite3.Row]:
         with self._connect() as conn:
             return conn.execute(
-                "SELECT session_id, role, content, timestamp FROM messages "
+                "SELECT id AS message_id, session_id, role, content, timestamp FROM messages "
                 "WHERE session_id IN (SELECT id FROM sessions WHERE source = ?) "
                 "ORDER BY timestamp ASC",
                 ("whatsapp",),

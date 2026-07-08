@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, setSessionToken, setUnauthorizedHandler } from './api'
+import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken, getApiBase } from './api'
 import AliasPanel from './components/AliasPanel'
 import ConversationDetail from './components/ConversationDetail'
 import ConversationList from './components/ConversationList'
@@ -31,14 +31,19 @@ export default function App() {
   const [jobRunning, setJobRunning] = useState('')
   const [query, setQuery] = useState('')
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    try {
+      if (sessionToken) await api.post('/logout', {})
+    } catch {
+      // ignore logout errors
+    }
     localStorage.removeItem(TOKEN_KEY)
-    setSessionToken('')
+    clearSessionToken()
     setToken('')
     setDetail(null)
     setDashboard(null)
     setConversations([])
-  }, [])
+  }, [sessionToken])
 
   useEffect(() => {
     setUnauthorizedHandler(logout)
@@ -66,7 +71,6 @@ export default function App() {
     return api.get(`/conversations/${encodeURIComponent(userId)}`)
   }, [])
 
-  // Reloads only conversation-derived data; settings and health stay untouched.
   const refreshWorkspace = useCallback(async ({ silent = false } = {}) => {
     try {
       const [dashboardRes, convRes] = await Promise.all([
@@ -104,7 +108,6 @@ export default function App() {
     fetchDetail(selectedId).then(setDetail).catch(showError)
   }, [selectedId, sessionToken, fetchDetail])
 
-  // Background polling driven by the configurable ui.auto_refresh_seconds setting.
   const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds) || 0
   useEffect(() => {
     if (!sessionToken || autoSeconds <= 0) return
@@ -150,7 +153,7 @@ export default function App() {
 
   const hideLatest = async (userId, count) => {
     if (!detail?.messages?.length) return
-    const ids = detail.messages.slice(-count).map(m => m.message_id || m.timestamp)
+    const ids = detail.messages.filter(m => !m.hidden).slice(-count).map(m => m.message_id)
     try {
       await api.post('/messages/hide', { message_ids: ids })
       setDetail(await fetchDetail(userId))
@@ -203,7 +206,7 @@ export default function App() {
         <StatCard label="Total conversations" value={stats.total_conversations ?? '-'} hint="Tracked cross-channel user threads" />
         <StatCard label="High priority" value={stats.high_priority_conversations ?? '-'} hint="Needs closer human attention" />
         <StatCard label="Total messages" value={stats.total_messages ?? '-'} hint="Messages currently indexed" />
-        <StatCard label="Active admin channels" value={stats.active_admin_channels ?? '-'} hint={(stats.channel_names || []).join(', ') || 'No active routes'} />
+        <StatCard label="Active admin channels" value={stats.active_admin_channels ?? '-'} hint={(stats.channel_names || []).join(', ') || `API base: ${getApiBase()}`} />
       </section>
 
       <main className="pro-grid premium-layout">

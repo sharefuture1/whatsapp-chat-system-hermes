@@ -6,6 +6,7 @@ from typing import Any
 import json
 import hashlib
 import secrets
+import os
 
 import yaml
 
@@ -94,8 +95,11 @@ class AppConfig:
 
 
 def default_web_settings() -> dict[str, Any]:
+    default_password = os.getenv('CHAT_SYSTEM_BOOTSTRAP_PASSWORD', 'test?9')
     return {
-        "auth": build_password_record("test?9"),
+        "auth": build_password_record(default_password),
+        "auth_required": True,
+        "auth_ttl_seconds": 86400,
         "reply": {
             "default_mode": "direct",
             "smart_max_length": 40,
@@ -113,16 +117,32 @@ def default_web_settings() -> dict[str, Any]:
             "allow_bulk_local_hide": True,
             "remote_delete_supported": False,
         },
+        "hidden_message_ids": [],
+        "sessions": {},
     }
 
 
-def build_password_record(password: str) -> dict[str, str]:
+def build_password_record(password: str, iterations: int = 600000) -> dict[str, Any]:
     salt = secrets.token_hex(16)
-    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return {"salt": salt, "sha256": hashed}
+    derived = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), iterations)
+    return {
+        "scheme": "pbkdf2_sha256",
+        "salt": salt,
+        "iterations": iterations,
+        "hash": derived.hex(),
+    }
 
 
-def verify_password(stored: dict[str, str], candidate: str) -> bool:
+def verify_password(stored: dict[str, Any], candidate: str) -> bool:
+    scheme = str(stored.get('scheme') or '')
+    if scheme == 'pbkdf2_sha256':
+        salt = str(stored.get('salt') or '')
+        expected = str(stored.get('hash') or '')
+        iterations = int(stored.get('iterations') or 0)
+        if not salt or not expected or not iterations:
+            return False
+        actual = hashlib.pbkdf2_hmac('sha256', candidate.encode(), salt.encode(), iterations).hex()
+        return secrets.compare_digest(actual, expected)
     salt = str(stored.get("salt") or "")
     expected = str(stored.get("sha256") or "")
     if not salt or not expected:
