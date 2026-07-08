@@ -7,7 +7,7 @@ from typing import Callable
 import requests
 
 from .config import AppConfig
-from .language import detect_preferred_language
+from .language import collapse_whitespace, dedupe_similar_lines, detect_preferred_language
 
 
 @dataclass(slots=True)
@@ -35,7 +35,7 @@ class Rewriter:
         target_name = str(target.get('name') or '')
         target_language = detect_preferred_language(memory_md, target_name)
         if target_language == 'user language':
-            return RewriteResult(language='unchanged', message=text, used_fallback=False)
+            return RewriteResult(language='unchanged', message=collapse_whitespace(text), used_fallback=False)
         try:
             message = self._translate_with_model(text, target_language)
             self._validate_output(message, target_language, text, allow_same=False)
@@ -52,21 +52,22 @@ class Rewriter:
             '要求：\n'
             '1. 只输出 JSON：{"language":"...","message":"..."}\n'
             '2. message 必须是最终要发送的文本。\n'
-            '3. 极短，最好 1 句话，通常不超过 30 个字或等效长度。\n'
-            '4. 自然、像真人，不要解释，不要客套模板。\n'
-            '5. 优先使用目标用户平时使用的语言。\n\n'
+            '3. 极短，最好 1 句话，通常不超过 18 个字或等效长度。\n'
+            '4. 自然、像真人，不要解释，不要客套模板，不要重复。\n'
+            '5. 如果对方只是回“嗯/好/ok/表情”，你的回复也要更短。\n'
+            '6. 不要出现“我想说”“这是消息”“原文是”之类元话术。\n\n'
             f'目标用户: {target_name}\n'
             f'目标语言偏好: {target_language}\n'
-            f'用户画像摘要:\n{memory_md[:1800]}\n\n'
+            f'用户画像摘要:\n{memory_md[:1400]}\n\n'
             f'管理员原文:\n{zh_text}\n'
         )
         payload = {
             'model': self.config.model['model'],
             'messages': [
-                {'role': 'system', 'content': '你只返回合法 JSON。保持短句。'},
+                {'role': 'system', 'content': '你只返回合法 JSON。像真人聊天，短句，不重复。'},
                 {'role': 'user', 'content': prompt},
             ],
-            'temperature': 0.25,
+            'temperature': 0.2,
             'response_format': {'type': 'json_object'},
         }
         response = requests.post(
@@ -80,7 +81,7 @@ class Rewriter:
         content = data['choices'][0]['message']['content']
         parsed = json.loads(content)
         language = str(parsed.get('language') or '').strip() or target_language
-        message = str(parsed.get('message') or '').strip()
+        message = self._postprocess_message(str(parsed.get('message') or '').strip())
         self._validate_output(message, target_language, zh_text)
         return language, message
 
@@ -88,17 +89,17 @@ class Rewriter:
         prompt = (
             '把下面内容翻译成目标语言，并保持自然、简短、可直接发送。\n'
             '只输出 JSON：{"message":"..."}\n'
-            '尽量 1 句话，不要解释。\n'
+            '尽量 1 句话，不要解释，不要重复。\n'
             f'目标语言: {target_language}\n'
             f'原文:\n{text}\n'
         )
         payload = {
             'model': self.config.model['model'],
             'messages': [
-                {'role': 'system', 'content': '你只返回合法 JSON。保持短句。'},
+                {'role': 'system', 'content': '你只返回合法 JSON。保持短句，不重复。'},
                 {'role': 'user', 'content': prompt},
             ],
-            'temperature': 0.15,
+            'temperature': 0.1,
             'response_format': {'type': 'json_object'},
         }
         response = requests.post(
@@ -111,7 +112,15 @@ class Rewriter:
         data = response.json()
         content = data['choices'][0]['message']['content']
         parsed = json.loads(content)
-        return str(parsed.get('message') or '').strip()
+        return self._postprocess_message(str(parsed.get('message') or '').strip())
+
+    def _postprocess_message(self, text: str) -> str:
+        text = dedupe_similar_lines(text)
+        text = collapse_whitespace(text)
+        for prefix in ['ข้อความจากฉัน:', 'ຂໍ້ຄວາມຈາກຂ້ອຍ:', '我想说：', '我想说:', 'Message:']:
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+        return text
 
     @staticmethod
     def _validate_output(message: str, expected_language: str, original_zh: str, allow_same: bool = False) -> None:
@@ -120,14 +129,16 @@ class Rewriter:
         msg = (message or '').strip()
         if not msg:
             raise ValueError('empty rewritten message')
-        if len(msg) > 80:
+        if len(msg) > 48:
             raise ValueError('rewritten message too long')
         if not allow_same and msg == original_zh.strip():
             raise ValueError('rewritten message equals original Chinese')
         if '中文解释' in msg or '原中文' in msg or 'message' in msg.lower():
             raise ValueError('rewritten message contains meta explanation')
-        if '\n' in msg and len(msg.splitlines()) > 2:
+        if '\n' in msg and len(msg.splitlines()) > 1:
             raise ValueError('rewritten message has too many lines')
+        if msg.count('😊') + msg.count('🥺') + msg.count('😂') > 1:
+            raise ValueError('too many emojis')
         chinese_chars = len(re.findall(r'[\u4E00-\u9FFF]', msg))
         lao_chars = len(re.findall(r'[\u0E80-\u0EFF]', msg))
         thai_chars = len(re.findall(r'[\u0E00-\u0E7F]', msg))
@@ -135,36 +146,25 @@ class Rewriter:
             raise ValueError('expected Lao output but no Lao script found')
         if expected_language == 'Thai' and thai_chars == 0:
             raise ValueError('expected Thai output but no Thai script found')
-        if expected_language in {'Lao', 'Thai'} and chinese_chars > max(2, len(msg) // 6):
+        if expected_language in {'Lao', 'Thai'} and chinese_chars > max(1, len(msg) // 8):
             raise ValueError('too much Chinese remained in rewritten output')
 
     @staticmethod
     def _simple_translate_fallback(text: str, target_language: str) -> str:
+        clean = collapse_whitespace(text)
         if target_language == 'Lao':
-            return f'ຂໍ້ຄວາມຈາກຂ້ອຍ: {text}'
+            return clean
         if target_language == 'Thai':
-            return f'ข้อความจากฉัน: {text}'
-        return text
+            return clean
+        return clean
 
     @staticmethod
     def _fallback(target: dict, zh_text: str, memory_md: str) -> tuple[str, str]:
-        import re
-
         target_name = str(target.get('name') or '')
         preferred_lao = 'Preferred language: Lao' in memory_md or 'ເກຍ' in target_name
-        clean = re.sub(r'\s+', '', zh_text)
-        if re.search(r'你去那边旅游吗\??我也准备过去', clean):
-            if preferred_lao:
-                return '老挝语', 'ຈະໄປທ່ຽວທາງນັ້ນບໍ?'
-            return '泰语', 'คุณจะไปเที่ยวที่นั่นไหม?'
-        if re.search(r'我昨天太累了[，,]?睡得很早', clean):
-            if preferred_lao:
-                return '老挝语', 'ມື້ວານນີ້ຂ້ອຍເມື່ອຍ ເລີຍນອນໄວເດີ້'
-            return '泰语', 'เมื่อวานฉันเหนื่อยเลยนอนเร็ว'
-        if re.search(r'你准备待几天\??', clean):
-            if preferred_lao:
-                return '老挝语', 'ເຈົ້າຈະຢູ່ຈັກມື້ເດີ້?'
-            return '泰语', 'คุณจะอยู่กี่วัน?'
+        clean = collapse_whitespace(zh_text)
         if preferred_lao:
-            return '老挝语', f'ຂໍ້ຄວາມຈາກຂ້ອຍ: {zh_text}'
-        return '泰语', f'ข้อความจากฉัน: {zh_text}'
+            return '老挝语', clean
+        if 'Preferred language: Thai' in memory_md:
+            return '泰语', clean
+        return '中文', clean

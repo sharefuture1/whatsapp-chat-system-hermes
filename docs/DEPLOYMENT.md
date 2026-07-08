@@ -32,24 +32,30 @@ Current intended public frontend host:
 
 ## Vercel-ready frontend
 
-The frontend supports a production API base via environment variable.
-
 Set on Vercel:
 - `VITE_API_BASE=https://whats.future1.us/api`
 
-Behavior:
-- local dev: falls back to `/api`
-- Vercel production: calls `VITE_API_BASE`
+The frontend code supports:
+- local dev via `/api`
+- production direct API calls via `VITE_API_BASE`
 
-## Vercel
+Repo root `vercel.json` is configured to:
+- build only `web/`
+- publish `web/dist`
+- rewrite `/api/*` to `https://whats.future1.us/api/*`
+- rewrite all other paths to `/index.html`
 
-The repo root `vercel.json` builds only the React console (`web/`) and serves
-it as a static site. The Vercel GitHub integration deploys `main` to
-production and every branch push to a preview URL.
+## Vercel deployment steps
 
-To make a Vercel deployment fully functional, the backend must already be
-reachable from the public internet. The frontend cannot use the local Hermes
-profile directly.
+```bash
+cd /root/whatsapp-chat-system
+vercel pull --yes
+vercel build
+vercel deploy --prebuilt
+```
+
+If running CI or non-interactive deploys, set:
+- `VERCEL_TOKEN`
 
 ## Production recommendations
 

@@ -1,5 +1,6 @@
 from whatsapp_chat_system.parsing import parse_command, parse_incomplete
 from whatsapp_chat_system.rewriter import Rewriter
+from whatsapp_chat_system.language import dedupe_similar_lines, collapse_whitespace
 
 
 class DummyConfig:
@@ -25,3 +26,8 @@ def test_translate_only_unknown_keeps_text():
     result = rewriter.translate_only({'name': 'David', 'id': 'x'}, '你好', 'Preferred language: unknown')
     assert result.language == 'unchanged'
     assert result.message == '你好'
+
+
+def test_postprocess_dedupes_lines():
+    assert dedupe_similar_lines('你好\n你好\n你好') == '你好'
+    assert collapse_whitespace('  你好   啊 ') == '你好 啊'

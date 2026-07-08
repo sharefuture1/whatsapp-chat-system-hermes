@@ -5,7 +5,7 @@ from typing import Iterable
 
 LOW_INFO_PATTERNS = [
     r'^\s*[😂🤣😄😁😊🥺❤️♥️🤍🙏👍]+\s*$',
-    r'^\s*(ok|okay|โอเค|โดย|ໂດຍ|ครับ|ค่ะ|จ้า|อือ|อืม|嗯|嗯嗯|哦|好|555+|อืมๆ)\s*$',
+    r'^\s*(ok|okay|โอเค|โดย|ໂດຍ|ครับ|ค่ะ|จ้า|อือ|อืม|嗯|嗯嗯|哦|好|555+|อืมๆ|ໂອເຄ|ຄັບ)\s*$',
 ]
 CARE_PATTERNS = [
     r'ไม่สบาย', r'ບໍສະບາຍ', r'เหนื่อย', r'ເມືອຍ', r'ป่วย', r'เจ็บ', r'ปวด',
@@ -35,6 +35,19 @@ def is_low_info(text: str) -> bool:
     return (not s) or any(re.search(p, s, re.I) for p in LOW_INFO_PATTERNS)
 
 
+def collapse_whitespace(text: str) -> str:
+    return re.sub(r'\s+', ' ', (text or '').strip())
+
+
+def dedupe_similar_lines(text: str) -> str:
+    lines = [collapse_whitespace(x) for x in (text or '').splitlines() if collapse_whitespace(x)]
+    out = []
+    for line in lines:
+        if not out or out[-1] != line:
+            out.append(line)
+    return '\n'.join(out)
+
+
 def approx_translate(text: str) -> str:
     rules = [
         (r'ไม่สบาย|ບໍສະບາຍ', '在说自己不舒服/身体状态不好'),
@@ -44,7 +57,7 @@ def approx_translate(text: str) -> str:
         (r'คิดถึง|ຄິດຮອດ', '在表达想念/依恋'),
         (r'โทรหา|ໂທຫາ', '在说之后会打电话/联系'),
         (r'ขอบคุณ|ຂອບຄຸນ', '在表示感谢'),
-        (r'โอเค|โดย|ໂດຍ', '语气性短回复，类似“好/嗯/哦”'),
+        (r'โอเค|โดย|ໂດຍ|ໂອເຄ', '语气性短回复，类似“好/嗯/哦”'),
     ]
     for pattern, meaning in rules:
         if re.search(pattern, text, re.I):
@@ -59,7 +72,7 @@ def summarize_mood(text: str) -> str:
         return '语气偏亲密暧昧，适合轻柔陪伴式回复。'
     if re.search(r'กลับบ้าน|ກັບບ້ານ|ไป|ຈະໄປ|明天', text, re.I):
         return '主要是在报备行程/动态，适合短回复加一句关心。'
-    if re.search(r'โดย|ໂດຍ|โอเค|😂|😊|🥺', text, re.I):
+    if re.search(r'โดย|ໂດຍ|โอเค|ໂອເຄ|😂|😊|🥺', text, re.I):
         return '这是低信息量维持聊天节奏的消息，回复宜短。'
     return '普通闲聊，保持自然简短即可。'
 
