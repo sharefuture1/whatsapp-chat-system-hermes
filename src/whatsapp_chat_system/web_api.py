@@ -13,8 +13,10 @@ from pydantic import BaseModel, Field
 from .config import AppConfig, build_password_record, load_json, save_json, verify_password
 from .forwarder import AdminForwarder
 from .memory_refresh import MemoryRefresher
+from .origins import OriginsCache
 from .router import AdminRouter
 from .storage import StateDB
+from .structured_profile import read_sidecar
 
 
 class ChannelConfig(BaseModel):
@@ -34,6 +36,15 @@ class ReplyRequest(BaseModel):
     preview_only: bool = False
 
 
+class PaginationRequest(BaseModel):
+    page: int = 1
+    page_size: int = 50
+
+
+class SearchRequest(BaseModel):
+    q: str
+
+
 class SettingsUpdateRequest(BaseModel):
     channels: list[ChannelConfig]
     web_settings: dict[str, Any] | None = None
@@ -48,14 +59,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+_origins_cache = OriginsCache(ttl_seconds=30)
+
+
 def _load_origins(config: AppConfig) -> dict[str, dict[str, Any]]:
-    origins_raw = load_json(config.paths.sessions_json, {})
-    origins: dict[str, dict[str, Any]] = {}
-    for _session_key, rec in origins_raw.items():
-        sid = rec.get('session_id')
-        if sid:
-            origins[sid] = rec.get('origin') or {}
-    return origins
+    return _origins_cache.load(config.paths.sessions_json)
 
 
 def _load_memory_markdown(config: AppConfig, user_id: str) -> str:
@@ -112,13 +120,21 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
     for item in summary.values():
         user_id = item['user_id']
         memory_markdown = _load_memory_markdown(config, user_id)
+        sidecar = read_sidecar(user_id, config.paths.memory_dir)
+        priority = (sidecar or {}).get('priority') or _infer_priority(memory_markdown)
         results.append({
             **item,
             'languages': sorted(item['languages']),
             'memory_markdown': memory_markdown,
-            'priority': 'high' if '不舒服' in memory_markdown or 'emotionally vulnerable' in memory_markdown else 'normal',
+            'priority': priority,
         })
     return sorted(results, key=lambda x: x['last_timestamp'], reverse=True)
+
+
+def _infer_priority(memory_markdown: str) -> str:
+    if not memory_markdown:
+        return 'normal'
+    return 'high' if '不舒服' in memory_markdown or 'emotionally vulnerable' in memory_markdown else 'normal'
 
 
 def _dashboard_stats(conversations: list[dict[str, Any]], config: AppConfig) -> dict[str, Any]:
@@ -247,16 +263,78 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         }
 
     @app.get('/api/conversations')
-    def conversations() -> list[dict[str, Any]]:
-        return _compute_conversation_summaries(config, db)
+    def conversations(page: int = 1, page_size: int = 50) -> dict[str, Any]:
+        page = max(1, page)
+        page_size = max(1, min(200, page_size))
+        all_items = _compute_conversation_summaries(config, db)
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = all_items[start:end]
+        return {
+            'items': items,
+            'page': page,
+            'page_size': page_size,
+            'total': len(all_items),
+            'has_more': end < len(all_items),
+        }
 
-    @app.get('/api/conversations/{user_id}')
-    def conversation_detail(user_id: str) -> dict[str, Any]:
+    @app.get('/api/search')
+    def search(q: str = '', limit: int = 30) -> dict[str, Any]:
+        q = (q or '').strip()
+        if not q:
+            return {'q': q, 'results': []}
+        limit = max(1, min(100, limit))
         sessions = db.fetch_sessions()
         rows = db.fetch_session_messages()
         origins = _load_origins(config)
         hidden = set(config.web_settings.get('hidden_message_ids') or [])
-        messages = []
+        needle = q.lower()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            message_id = row['message_id']
+            if message_id in hidden:
+                continue
+            content = row['content'] or ''
+            if needle not in content.lower():
+                continue
+            sid = row['session_id']
+            session = sessions.get(sid, {})
+            origin = origins.get(sid, {})
+            user_id = str(session.get('user_id') or origin.get('user_id') or '')
+            if not user_id or user_id in config.admin_ids:
+                continue
+            user_name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
+            lower = content.lower()
+            idx = lower.find(needle)
+            start = max(0, idx - 30)
+            end = min(len(content), idx + len(q) + 30)
+            snippet = content[start:end]
+            if idx > 0:
+                snippet = '…' + snippet
+            if end < len(content):
+                snippet = snippet + '…'
+            results.append({
+                'message_id': message_id,
+                'user_id': user_id,
+                'user_name': user_name,
+                'role': row['role'],
+                'timestamp': row['timestamp'],
+                'snippet': snippet,
+                'content': content[:200],
+            })
+            if len(results) >= limit:
+                break
+        return {'q': q, 'results': results}
+
+    @app.get('/api/conversations/{user_id}')
+    def conversation_detail(user_id: str, page: int = 1, page_size: int = 50) -> dict[str, Any]:
+        page = max(1, page)
+        page_size = max(1, min(500, page_size))
+        sessions = db.fetch_sessions()
+        rows = db.fetch_session_messages()
+        origins = _load_origins(config)
+        hidden = set(config.web_settings.get('hidden_message_ids') or [])
+        user_messages: list[dict[str, Any]] = []
         user_name = user_id
         session_ids: list[str] = []
         for row in rows:
@@ -269,7 +347,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             user_name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
             if sid not in session_ids:
                 session_ids.append(sid)
-            messages.append({
+            user_messages.append({
                 'message_id': row['message_id'],
                 'session_id': sid,
                 'role': row['role'],
@@ -277,18 +355,33 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
                 'timestamp': row['timestamp'],
                 'hidden': row['message_id'] in hidden,
             })
-        if not messages:
+        if not user_messages:
             raise HTTPException(status_code=404, detail='Conversation not found')
+        user_messages.sort(key=lambda m: m['timestamp'])
+        total = len(user_messages)
+        start = (page - 1) * page_size
+        end = start + page_size
+        messages = user_messages[start:end]
         memory_text = _load_memory_markdown(config, user_id)
+        sidecar = read_sidecar(user_id, config.paths.memory_dir) or {}
+        priority = sidecar.get('priority') or _infer_priority(memory_text)
+        language_hint = sidecar.get('preferred_language') or (
+            'Lao' if 'Preferred language: Lao' in memory_text else
+            ('Thai' if 'Preferred language: Thai' in memory_text else 'Unknown')
+        )
         return {
             'user_id': user_id,
             'user_name': user_name,
             'session_ids': session_ids,
             'messages': messages,
             'memory_markdown': memory_text,
+            'page': page,
+            'page_size': page_size,
+            'total_messages': total,
+            'has_more': end < total,
             'profile_summary': {
-                'priority': 'high' if 'emotionally vulnerable' in memory_text else 'normal',
-                'language_hint': 'Lao' if 'Preferred language: Lao' in memory_text else ('Thai' if 'Preferred language: Thai' in memory_text else 'Unknown'),
+                'priority': priority,
+                'language_hint': language_hint,
             },
         }
 

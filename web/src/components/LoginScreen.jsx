@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useSettings } from '../settings'
 
 export default function LoginScreen({ onLogin, error, loading }) {
+  const { t } = useSettings()
   const [password, setPassword] = useState('')
   const submit = e => {
     e.preventDefault()
@@ -9,12 +11,26 @@ export default function LoginScreen({ onLogin, error, loading }) {
   return (
     <div className="login-shell">
       <form className="login-card" onSubmit={submit}>
-        <div className="eyebrow">Secure Access</div>
-        <h1>Operator Login</h1>
-        <div className="subtle">Enter the console password to access conversations and controls.</div>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Console password" autoFocus />
+        <div className="login-brand">
+          <div className="appbar-eyebrow">{t('secureAccess')}</div>
+          <h1>{t('loginTitle')}</h1>
+        </div>
+        <div className="subtle login-subtitle">{t('loginSubtitle')}</div>
+        <label className="login-label">
+          <span className="login-label-text">{t('passwordPlaceholder')}</span>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder={t('passwordPlaceholder')}
+            autoFocus
+            autoComplete="current-password"
+          />
+        </label>
         {error ? <div className="error-text">{error}</div> : null}
-        <button type="submit" disabled={loading || !password}>{loading ? 'Signing in...' : 'Sign in'}</button>
+        <button type="submit" disabled={loading || !password}>
+          {loading ? t('signingIn') : t('signIn')}
+        </button>
       </form>
     </div>
   )

@@ -7,6 +7,7 @@ import re
 from .config import AppConfig, load_json
 from .profile import render_md, summarize_user_messages
 from .storage import StateDB
+from .structured_profile import write_sidecar
 
 
 class MemoryRefresher:
@@ -78,5 +79,7 @@ class MemoryRefresher:
                 recent_assistant_msgs=info['assistant_msgs'],
             )
             filename = f"{self.safe_name(info['user_name'])}__{user_id}.md"
-            (self.config.paths.memory_dir / filename).write_text(rendered)
+            memory_path = self.config.paths.memory_dir / filename
+            memory_path.write_text(rendered)
+            write_sidecar(memory_path, profile)
         return 0

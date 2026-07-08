@@ -1,3 +1,5 @@
+import { useSettings } from '../settings'
+
 export default function StatCard({ label, value, hint }) {
   return (
     <div className="stat-card">
