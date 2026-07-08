@@ -40,6 +40,12 @@ Important note:
 - Quick local hide for messages in the admin console
 - Bulk local hide for latest N messages in a thread
 
+## Documentation
+
+- `docs/SDD.md` — Software Design Document: architecture, data model, API contract, key flows, and a prioritized optimization backlog
+- `docs/ARCHITECTURE.md` — architecture overview
+- `docs/DEPLOYMENT.md` — deployment notes
+
 ## Repository layout
 
 ```text
