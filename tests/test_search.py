@@ -50,9 +50,9 @@ def test_search_skips_hidden_messages(tmp_path):
         messages=[('user', 'secret needle here', 1700000000.0), ('user', 'other text', 1700000001.0)],
     )
     client = authed_client(profile)
-    detail = client.get('/api/conversations/u@lid').json()
-    mid = detail['messages'][0]['message_id']
-    client.post('/api/messages/hide', json={'message_ids': [mid]})
+    detail = client.get('/api/conversations/u@lid?page=1&page_size=10').json()
+    secret_mid = next(m['message_id'] for m in detail['messages'] if 'secret' in m['content'])
+    client.post('/api/messages/hide', json={'message_ids': [secret_mid]})
     resp = client.get('/api/search?q=secret')
     body = resp.json()
     assert body['results'] == []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import time
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from .origins import OriginsCache
 from .router import AdminRouter
 from .storage import StateDB
 from .structured_profile import read_sidecar
+from .translations import bulk_put, load_many, load_translations, put_translation
+from .rewriter import Rewriter as _Rewriter  # imported for translation helper below
 
 
 class ChannelConfig(BaseModel):
@@ -72,6 +75,14 @@ def _load_memory_markdown(config: AppConfig, user_id: str) -> str:
     return ''
 
 
+def _display_user_name(origin: dict[str, Any], user_id: str, session: dict[str, Any]) -> str:
+    name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
+    source = str(session.get('source') or '')
+    if source == 'telegram' and not name.endswith('-tg'):
+        return f'{name}-tg'
+    return name
+
+
 def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict[str, Any]]:
     sessions = db.fetch_sessions()
     rows = db.fetch_session_messages()
@@ -85,7 +96,7 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
         user_id = str(session.get('user_id') or origin.get('user_id') or '')
         if not user_id or user_id in config.admin_ids:
             continue
-        user_name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
+        user_name = _display_user_name(origin, user_id, session)
         item = summary.setdefault(user_id, {
             'user_id': user_id,
             'user_name': user_name,
@@ -122,11 +133,14 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
         memory_markdown = _load_memory_markdown(config, user_id)
         sidecar = read_sidecar(user_id, config.paths.memory_dir)
         priority = (sidecar or {}).get('priority') or _infer_priority(memory_markdown)
+        last_text = item.get('last_message') or ''
         results.append({
             **item,
             'languages': sorted(item['languages']),
             'memory_markdown': memory_markdown,
             'priority': priority,
+            'last_message_lang': _language_hint_for(last_text),
+            'last_message_translated': _maybe_translate_for_user(config, user_id, last_text),
         })
     return sorted(results, key=lambda x: x['last_timestamp'], reverse=True)
 
@@ -135,6 +149,106 @@ def _infer_priority(memory_markdown: str) -> str:
     if not memory_markdown:
         return 'normal'
     return 'high' if '不舒服' in memory_markdown or 'emotionally vulnerable' in memory_markdown else 'normal'
+
+
+def _language_hint_for(text: str) -> str:
+    if not text:
+        return 'Unknown'
+    if re.search(r'[\u0E80-\u0EFF]', text):
+        return 'Lao'
+    if re.search(r'[\u0E00-\u0E7F]', text):
+        return 'Thai'
+    if re.search(r'[\u4E00-\u9FFF]', text):
+        return 'Chinese'
+    if re.search(r'[A-Za-z]', text):
+        return 'Latin'
+    return 'Unknown'
+
+
+def _translation_worker(config: AppConfig) -> _Rewriter:
+    return _Rewriter(config, lambda *args, **kwargs: None)
+
+
+def _ensure_message_translations(config: AppConfig, user_id: str, items: list[dict[str, Any]]) -> None:
+    """Backfill missing translations in the on-disk cache.
+
+    Best-effort, fail-soft. The /api/conversations/{user_id} response
+    always includes the current cached `translated` value; clients can
+    re-poll the endpoint to pick up newly translated messages.
+    """
+    if not items:
+        return
+    auto = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+    if not auto:
+        return
+    cached = load_many(config.paths.memory_dir, user_id, [int(m['message_id']) for m in items if m.get('message_id') is not None])
+    pending: dict[str, dict[str, Any]] = {}
+    worker = _translation_worker(config)
+    for m in items:
+        mid = m.get('message_id')
+        if mid is None:
+            continue
+        content = m.get('content') or ''
+        source_lang = _language_hint_for(content)
+        if source_lang in ('Chinese', 'Unknown'):
+            continue
+        if str(mid) in cached and cached[str(mid)]:
+            continue
+        zh = worker.translate_to_zh(content, source_lang)
+        if not zh or zh == content:
+            continue
+        pending[str(mid)] = {
+            'source_lang': source_lang,
+            'source_text': content[:200],
+            'zh': zh,
+        }
+    if pending:
+        bulk_put(config.paths.memory_dir, user_id, pending)
+
+
+def _maybe_translate_for_user(config: AppConfig, user_id: str, text: str) -> str | None:
+    """Quick translation lookup for short previews (no model call).
+
+    Used by list previews so the chat list shows the Chinese version
+    of the last message even if the corresponding message_id is not
+    loaded. Returns None if not in cache or auto-translate is off.
+    """
+    if not text:
+        return None
+    source_lang = _language_hint_for(text)
+    if source_lang in ('Chinese', 'Unknown'):
+        return None
+    if not bool(config.web_settings.get('message_ops', {}).get('auto_translate', True)):
+        return None
+    data = load_translations(config.paths.memory_dir, user_id)
+    items = data.get('items', {})
+    for entry in items.values():
+        if entry.get('source_text') == text[:200]:
+            return entry.get('zh')
+    return None
+
+
+def _attach_translations(config: AppConfig, user_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    auto = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+    if not auto or not messages:
+        return [{**m, 'translated': None, 'lang': _language_hint_for(m.get('content') or '')} for m in messages]
+    _ensure_message_translations(config, user_id, messages)
+    cached = load_many(
+        config.paths.memory_dir,
+        user_id,
+        [int(m['message_id']) for m in messages if m.get('message_id') is not None],
+    )
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        lang = _language_hint_for(m.get('content') or '')
+        translated = None
+        mid = m.get('message_id')
+        if mid is not None and lang not in ('Chinese', 'Unknown'):
+            entry = cached.get(str(mid))
+            if entry:
+                translated = entry.get('zh')
+        out.append({**m, 'lang': lang, 'translated': translated})
+    return out
 
 
 def _dashboard_stats(conversations: list[dict[str, Any]], config: AppConfig) -> dict[str, Any]:
@@ -303,7 +417,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             user_id = str(session.get('user_id') or origin.get('user_id') or '')
             if not user_id or user_id in config.admin_ids:
                 continue
-            user_name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
+            user_name = _display_user_name(origin, user_id, session)
             lower = content.lower()
             idx = lower.find(needle)
             start = max(0, idx - 30)
@@ -344,7 +458,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             current_user_id = str(session.get('user_id') or origin.get('user_id') or '')
             if current_user_id != user_id:
                 continue
-            user_name = str(origin.get('user_name') or origin.get('chat_name') or user_id)
+            user_name = _display_user_name(origin, user_id, session)
             if sid not in session_ids:
                 session_ids.append(sid)
             user_messages.append({
@@ -357,11 +471,13 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             })
         if not user_messages:
             raise HTTPException(status_code=404, detail='Conversation not found')
-        user_messages.sort(key=lambda m: m['timestamp'])
+        user_messages.sort(key=lambda m: m['timestamp'], reverse=True)
         total = len(user_messages)
         start = (page - 1) * page_size
         end = start + page_size
-        messages = user_messages[start:end]
+        # Newest first; the chat pane will reverse to chronological for display.
+        page_slice = user_messages[start:end]
+        page_slice = _attach_translations(config, user_id, page_slice)
         memory_text = _load_memory_markdown(config, user_id)
         sidecar = read_sidecar(user_id, config.paths.memory_dir) or {}
         priority = sidecar.get('priority') or _infer_priority(memory_text)
@@ -369,16 +485,18 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             'Lao' if 'Preferred language: Lao' in memory_text else
             ('Thai' if 'Preferred language: Thai' in memory_text else 'Unknown')
         )
+        auto_translate = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
         return {
             'user_id': user_id,
             'user_name': user_name,
             'session_ids': session_ids,
-            'messages': messages,
+            'messages': page_slice,
             'memory_markdown': memory_text,
             'page': page,
             'page_size': page_size,
             'total_messages': total,
             'has_more': end < total,
+            'auto_translate': auto_translate,
             'profile_summary': {
                 'priority': priority,
                 'language_hint': language_hint,
@@ -444,6 +562,26 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             config.web_settings['auth'] = build_password_record(request.password)
             save_json(config.paths.web_settings_file, config.web_settings)
         return {'success': True, 'channels': payload}
+
+    @app.post('/api/messages/{message_id}/translate')
+    def translate_message(message_id: int, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = body or {}
+        user_id = str(body.get('user_id') or '')
+        text = str(body.get('content') or '')
+        if not user_id or not text:
+            raise HTTPException(status_code=400, detail='user_id and content required')
+        lang = _language_hint_for(text)
+        if lang in ('Chinese', 'Unknown'):
+            return {'message_id': message_id, 'lang': lang, 'translated': None}
+        worker = _translation_worker(config)
+        zh = worker.translate_to_zh(text, lang)
+        if zh and zh != text:
+            put_translation(config.paths.memory_dir, user_id, message_id, {
+                'source_lang': lang,
+                'source_text': text[:200],
+                'zh': zh,
+            })
+        return {'message_id': message_id, 'lang': lang, 'translated': zh or None}
 
     @app.post('/api/messages/hide')
     def hide_messages(payload: dict[str, Any]) -> dict[str, Any]:

@@ -6,6 +6,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
   const [ui, setUi] = useState(settings?.ui || {})
+  const [messageOps, setMessageOps] = useState(settings?.message_ops || { auto_translate: true })
   const [password, setPassword] = useState('')
   const [tab, setTab] = useState('reply')
 
@@ -14,6 +15,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
     setDraftChannels(channels)
     setReply(settings?.reply || {})
     setUi(settings?.ui || {})
+    setMessageOps(settings?.message_ops || { auto_translate: true })
     setPassword('')
   }, [open, channels, settings])
 
@@ -36,7 +38,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
 
   const save = () => onSave({
     channels: draftChannels,
-    web_settings: { reply, ui, message_ops: settings?.message_ops || {} },
+    web_settings: { reply, ui, message_ops: messageOps },
     password: password || null,
   }, () => setPassword(''))
 
@@ -68,11 +70,11 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
                     <option value="translate">{t('modeTranslate')}</option>
                   </select>
                 </label>
-                <label><span>Smart max length</span><input type="number" value={reply.smart_max_length || 40} onChange={e => setReply(prev => ({ ...prev, smart_max_length: Number(e.target.value) || 40 }))} /></label>
-                <label><span>Translate max length</span><input type="number" value={reply.translate_max_length || 60} onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))} /></label>
-                <label><span>Preview debounce ms</span><input type="number" value={reply.preview_debounce_ms || 320} onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))} /></label>
-                <label className="checkbox"><input type="checkbox" checked={!!reply.allow_fallback} onChange={e => setReply(prev => ({ ...prev, allow_fallback: e.target.checked }))} />Allow fallback</label>
-                <label className="checkbox"><input type="checkbox" checked={!!reply.prefer_detected_language} onChange={e => setReply(prev => ({ ...prev, prefer_detected_language: e.target.checked }))} />Prefer detected language</label>
+                <label><span>{t('settingSmartMax')}</span><input type="number" value={reply.smart_max_length || 40} onChange={e => setReply(prev => ({ ...prev, smart_max_length: Number(e.target.value) || 40 }))} /></label>
+                <label><span>{t('settingTranslateMax')}</span><input type="number" value={reply.translate_max_length || 60} onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))} /></label>
+                <label><span>{t('settingPreviewDebounce')}</span><input type="number" value={reply.preview_debounce_ms || 320} onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))} /></label>
+                <label className="checkbox"><input type="checkbox" checked={!!reply.allow_fallback} onChange={e => setReply(prev => ({ ...prev, allow_fallback: e.target.checked }))} />{t('settingAllowFallback')}</label>
+                <label className="checkbox"><input type="checkbox" checked={!!reply.prefer_detected_language} onChange={e => setReply(prev => ({ ...prev, prefer_detected_language: e.target.checked }))} />{t('settingPreferDetectedLanguage')}</label>
               </div>
             </div>
           )}
@@ -80,8 +82,14 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
             <div className="settings-section">
               <h3>{t('uiBehavior')}</h3>
               <div className="settings-grid">
-                <label><span>Auto refresh seconds</span><input type="number" value={ui.auto_refresh_seconds || 10} onChange={e => setUi(prev => ({ ...prev, auto_refresh_seconds: Number(e.target.value) || 10 }))} /></label>
-                <label className="checkbox"><input type="checkbox" checked={!!ui.show_preview_before_send} onChange={e => setUi(prev => ({ ...prev, show_preview_before_send: e.target.checked }))} />Show preview before send</label>
+                <label><span>{t('settingAutoRefresh')}</span><input type="number" value={ui.auto_refresh_seconds || 10} onChange={e => setUi(prev => ({ ...prev, auto_refresh_seconds: Number(e.target.value) || 10 }))} /></label>
+                <label className="checkbox"><input type="checkbox" checked={!!ui.show_preview_before_send} onChange={e => setUi(prev => ({ ...prev, show_preview_before_send: e.target.checked }))} />{t('settingPreviewBeforeSend')}</label>
+              </div>
+              <h3 style={{ marginTop: 18 }}>{t('messageOps') || 'Messages'}</h3>
+              <div className="settings-grid">
+                <label className="checkbox"><input type="checkbox" checked={!!messageOps.auto_translate} onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))} />{t('autoTranslate')}</label>
+                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_local_hide_delete} disabled />{t('settingAllowLocalHide')}</label>
+                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_bulk_local_hide} disabled />{t('settingAllowBulkHide')}</label>
               </div>
             </div>
           )}
@@ -95,11 +103,11 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
                       <strong>{channel.name}</strong>
                       <span className={`pill ${channel.enabled ? 'ok' : 'muted'}`}>{channel.enabled ? 'Enabled' : 'Disabled'}</span>
                     </div>
-                    <label><span>Channel name</span><input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} /></label>
-                    <label><span>Platform</span><input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} /></label>
-                    <label><span>Target</span><input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} /></label>
-                    <label><span>Message kinds</span><input value={(channel.kinds || []).join(', ')} onChange={e => updateKinds(idx, e.target.value)} /></label>
-                    <label className="checkbox"><input type="checkbox" checked={channel.enabled} onChange={e => updateField(idx, 'enabled', e.target.checked)} />Enable this channel</label>
+                    <label><span>{t('settingChannelName')}</span><input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} /></label>
+                    <label><span>{t('settingPlatform')}</span><input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} /></label>
+                    <label><span>{t('settingTarget')}</span><input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} /></label>
+                    <label><span>{t('settingKinds')}</span><input value={(channel.kinds || []).join(', ')} onChange={e => updateKinds(idx, e.target.value)} /></label>
+                    <label className="checkbox"><input type="checkbox" checked={channel.enabled} onChange={e => updateField(idx, 'enabled', e.target.checked)} />{t('settingEnableChannel')}</label>
                   </div>
                 ))}
               </div>

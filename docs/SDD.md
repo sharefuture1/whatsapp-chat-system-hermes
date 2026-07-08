@@ -58,7 +58,8 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 应用入口：
 - `web/src/App.jsx`
   - 顶层 `SettingsProvider` 包装
-  - 移动端 tab 路由（inbox / detail）
+  - 微信式 4 tab shell：Chats / Contacts / Discover / Me
+  - 聊天页作为主工作区；设置从 Me 页进入，不打断聊天
   - 监听 401 自动 logout
 - `web/src/settings.jsx` + `i18n.js`
   - 多语言 + 主题
@@ -68,23 +69,21 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
   - 401 自动触发 logout
   - `VITE_API_BASE` 切换后端
 - `web/src/components/`
-  - `TopBar.jsx` — 顶部栏（菜单 / 标题 / 健康 / 语言 / 主题 / 设置 / 登出）
-  - `MobileNav.jsx` — 手机端侧滑导航
+  - `ChatList.jsx` — 微信式会话列表
+  - `ChatPane.jsx` — 聊天窗口（底部最新消息、按需加载历史、常用 emoji、自动翻译行、下一会话切换）
+  - `ContactsPage.jsx` — 通讯录页
+  - `DiscoverPage.jsx` — 发现页
+  - `MePage.jsx` — 我页
+  - `TabBar.jsx` — 底部 4 tab
   - `SettingsPanel.jsx` — 设置 modal（reply policy / UI / channels / security）
   - `LoginScreen.jsx` — 登录页
-  - `ConversationList.jsx` — 会话侧栏
-  - `ConversationDetail.jsx` — 主工作区（消息 / 隐藏 / 回复）
-  - `ReplyPreview.jsx` — 智能回复预览
-  - `MemorySummary.jsx` — 用户画像 / 元信息
-  - `StatCard.jsx` — 统计卡
-  - `AliasPanel.jsx` — 别名目录
-- `web/src/styles.css` — 主题变量、玻璃卡片、响应式
+- `web/src/styles.css` — 微信式设计变量、聊天布局、登录页、设置页、响应式
 - `web/src/format.js` — 时间格式化
 
 响应式策略：
-- 桌面：3 列（侧栏 / 工作区 / 设置栈）
-- 平板：消息 + 设置栈
-- 手机：单 tab 路由，inbox ⇄ detail 切换
+- 桌面：会话列表 + 聊天窗双栏
+- 手机：底部 4 tab，聊天页单独占满内容区域
+- newest messages anchored at bottom，older history lazy-load on demand
 
 ## 4. 数据模型
 
@@ -103,6 +102,7 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 | `web-settings.json` | 鉴权记录、reply/ui/message_ops 策略、`sessions`、`hidden_message_ids`、`login_attempts` |
 | `user-aliases.json` | 联系人数字别名 |
 | `user-memory-md/*.md` | 生成的每用户画像（命名 `{safe_name}__{user_id}.md`） |
+| `user-memory-md/.translations__{user_id}.json` | 每用户消息翻译缓存（原文语言 / 中文翻译 / 更新时间） |
 | `.admin-command-router-state.json` | 路由游标 `last_message_id` + 已处理 ID |
 | `.admin-forward-state.json` | 转发游标 + 已转发配对 |
 | `channel_directory.json` | WhatsApp 目标目录 |

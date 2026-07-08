@@ -9,15 +9,19 @@ export default function LoginScreen({ onLogin, error, loading }) {
     if (password && !loading) onLogin(password)
   }
   return (
-    <div className="login-shell">
-      <form className="login-card" onSubmit={submit}>
-        <div className="login-brand">
-          <div className="appbar-eyebrow">{t('secureAccess')}</div>
-          <h1>{t('loginTitle')}</h1>
+    <div className="wx-login-shell">
+      <div className="wx-login-hero">
+        <div className="wx-login-brand-mark">微</div>
+        <div className="wx-login-brand-copy">
+          <div className="wx-login-eyebrow">{t('secureAccess')}</div>
+          <h1>{t('appTitle')}</h1>
+          <p>{t('loginSubtitle')}</p>
         </div>
-        <div className="subtle login-subtitle">{t('loginSubtitle')}</div>
-        <label className="login-label">
-          <span className="login-label-text">{t('passwordPlaceholder')}</span>
+      </div>
+      <form className="wx-login-card" onSubmit={submit}>
+        <div className="wx-login-title">{t('loginTitle')}</div>
+        <label className="wx-login-label">
+          <span>{t('passwordPlaceholder')}</span>
           <input
             type="password"
             value={password}
@@ -27,8 +31,8 @@ export default function LoginScreen({ onLogin, error, loading }) {
             autoComplete="current-password"
           />
         </label>
-        {error ? <div className="error-text">{error}</div> : null}
-        <button type="submit" disabled={loading || !password}>
+        {error ? <div className="wx-login-error">{error}</div> : null}
+        <button className="wx-login-submit" type="submit" disabled={loading || !password}>
           {loading ? t('signingIn') : t('signIn')}
         </button>
       </form>

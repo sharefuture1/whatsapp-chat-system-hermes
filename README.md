@@ -1,103 +1,107 @@
-# WhatsApp Chat System
+# Hermes Messaging Operations Console
 
-A private operator console for Hermes-based WhatsApp support workspaces.
+A private multi-channel operator console for Hermes-based messaging workspaces.
 
-This project provides:
-- a Python backend API built with FastAPI
-- a React operator console
-- configurable admin delivery channels
-- smart / translate / direct reply modes
-- per-user memory refresh and operator-side conversation monitoring
-- session-protected login for the web console
+This project now acts as a conversation-first control surface for Hermes profiles and messaging channels, with a WeChat-style UI direction and a FastAPI backend.
 
-Bootstrap password used in the current deployment:
-- `test?9`
-- Change it immediately after deployment.
+## What it does
 
-Important note:
-- The current Hermes WhatsApp bridge does NOT expose a real revoke/delete-for-everyone API.
-- This project therefore supports local admin-console hide/delete only, not bilateral WhatsApp deletion.
-
-## Features
-
-- Secure web login with password-based session token
-- Dashboard metrics for active conversations and admin delivery channels
-- Conversation browser with memory summary
-- Reply composer with:
+- secure web login with session-based auth
+- WeChat-style operator inbox UI
+- reply composer with:
   - direct send
   - smart rewrite
   - translate-first
   - preview before send
-- Configurable reply policy from the UI:
-  - default mode
-  - smart max length
-  - translate max length
-  - preview debounce
-  - fallback control
-- Configurable admin channel routing:
-  - WhatsApp
-  - Telegram
-  - WeChat / Weixin placeholders
-- Quick local hide for messages in the admin console
-- Bulk local hide for latest N messages in a thread
-- Vercel-ready frontend API base via `VITE_API_BASE`
+- automatic in-thread message translation to Chinese
+- local console hide/delete of messages
+- conversation memory generation
+- configurable admin delivery channels
+- Vercel-ready frontend that can call a remote backend API
+
+## Current UI model
+
+The frontend is now structured like a WeChat-style shell with 4 tabs:
+- Chats
+- Contacts
+- Discover
+- Me
+
+Design principles:
+- chat is the primary workspace
+- settings should not interrupt normal messaging
+- old messages should load on demand only
+- newest messages should stay anchored at the bottom
+- mobile and desktop should both be first-class experiences
+
+## Current password
+
+Current deployment password:
+- `test?99`
+
+If you change it in the UI, this README may become stale. The current runtime value always lives in:
+- `/root/.hermes/profiles/whatsapp-support/web-settings.json`
+
+## Important limitations
+
+The current Hermes WhatsApp bridge does NOT expose true revoke/delete-for-everyone.
+So this project supports:
+- local admin-console hide
+- local bulk hide
+
+It does NOT support:
+- bilateral WhatsApp revoke/delete-for-everyone
 
 ## Repository layout
 
 ```text
 src/whatsapp_chat_system/
-  cli.py               CLI entrypoints
-  web_api.py           FastAPI API
-  config.py            profile-aware config + web settings + password record
-  router.py            admin routing logic
-  rewriter.py          smart / translate rewrite logic
-  forwarder.py         assistant/user transcript forwarding to admins
-  memory_refresh.py    markdown profile generation from Hermes state.db
-  messaging.py         Hermes send wrapper + target resolution
-  storage.py           DB access helpers + event logger
-  parsing.py           admin command parsing
-  language.py          language and tone heuristics
-  profile.py           user profile synthesis
+  cli.py                    CLI entrypoints
+  web_api.py                FastAPI API
+  config.py                 profile-aware config + merged defaults + auth settings
+  router.py                 admin routing logic
+  rewriter.py               smart / translate / auto-translation logic
+  forwarder.py              transcript forwarding to admins
+  memory_refresh.py         markdown + structured sidecar generation
+  messaging.py              Hermes send wrapper + target resolution
+  storage.py                DB access helpers
+  origins.py                sessions.json cache
+  structured_profile.py     structured profile sidecar
+  translations.py           per-user translation cache
+  parsing.py                admin command parsing
+  language.py               heuristics + low-info handling
+  profile.py                user profile synthesis
 
-web/
-  src/App.jsx          React console
-  src/api.js           API client with local/remote base support
-  src/styles.css       console styling
-  package.json         frontend dependencies
-  vite.config.js       dev server config + /api proxy
+web/src/
+  App.jsx                   frontend shell
+  api.js                    API client
+  i18n.js                   translation strings
+  settings.jsx              theme/language provider
+  styles.css                WeChat-style UI stylesheet
+  components/
+    ChatList.jsx
+    ChatPane.jsx
+    ContactsPage.jsx
+    DiscoverPage.jsx
+    LoginScreen.jsx
+    MePage.jsx
+    SettingsPanel.jsx
+    TabBar.jsx
 
 tests/
-  pytest coverage for API and core parsing/rewrite flows
+  conftest.py               isolated profile fixtures
+  test_web_api.py
+  test_origins.py
+  test_structured_profile.py
+  test_pagination.py
+  test_search.py
+  test_translation.py
+  test_i18n_consistency.py
 ```
 
-## Requirements
+## Local development
 
-- Python 3.11+
-- Node.js 20+
-- npm 10+
-- A Hermes profile already configured for WhatsApp
-- A valid Hermes CLI installed on the machine
-
-## Quick start
-
-### 1. Create the Python venv and install backend deps
-
-```bash
-cd /root/whatsapp-chat-system
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
-pip install pytest fastapi uvicorn pydantic requests pyyaml httpx2
-```
-
-### 2. Install frontend deps
-
-```bash
-cd /root/whatsapp-chat-system/web
-npm install
-```
-
-### 3. Run the backend
+### Backend
 
 ```bash
 cd /root/whatsapp-chat-system
@@ -106,57 +110,29 @@ cd /root/whatsapp-chat-system
   serve --host 127.0.0.1 --port 8792
 ```
 
-### 4. Run the frontend
+### Frontend
 
 ```bash
 cd /root/whatsapp-chat-system/web
 npm run dev -- --host 127.0.0.1 --port 38998
 ```
 
-Then open:
+Open:
 - `http://127.0.0.1:38998/`
 
-## Authentication
-
-The web console uses password login.
-
-Current deployment password:
-- `test?9`
+## Authentication model
 
 Login endpoint:
 - `POST /api/login`
 
-On successful login the frontend stores a session token and sends it in:
+On successful login, the frontend stores a session token and sends:
 - `x-session-token`
 
-Protected endpoints reject unauthenticated access with HTTP 401.
-
-## Production / Vercel
-
-Production frontend host:
-- `https://whats.future1.us`
-
-Frontend production API base:
-- `VITE_API_BASE=https://whats.future1.us/api`
-
-This allows the same frontend codebase to:
-- use `/api` locally
-- use the remote backend directly in Vercel/production
-
-## Configuration files
-
-Profile-local files used by this project:
-
-- `admin-channels.json`
-  - operator delivery channels
-- `web-settings.json`
-  - auth, reply, UI, hide/delete, and session settings
-- `user-aliases.json`
-  - numeric aliases for contacts
-- `user-memory-md/`
-  - generated per-user markdown summaries
-- `.admin-command-router-state.json`
-- `.admin-forward-state.json`
+Current auth features:
+- PBKDF2-HMAC-SHA256 password hash
+- session TTL
+- server-side logout invalidation
+- login throttling
 
 ## API overview
 
@@ -167,38 +143,67 @@ Profile-local files used by this project:
 ### Authenticated
 - `POST /api/logout`
 - `GET /api/dashboard`
-- `GET /api/conversations`
-- `GET /api/conversations/{user_id}`
+- `GET /api/conversations?page=&page_size=`
+- `GET /api/conversations/{user_id}?page=&page_size=`
+- `GET /api/search?q=`
 - `POST /api/reply`
 - `GET /api/settings`
 - `PUT /api/settings`
 - `POST /api/messages/hide`
+- `POST /api/messages/{message_id}/translate`
 - `POST /api/jobs/run`
 
-## Reply modes
+## Translation behavior
 
-### direct
-Sends the operator text as-is.
+Auto-translation is now designed for chat readability, not literal academic translation.
 
-### smart
-Uses user memory + language/tone heuristics + model rewrite.
+It supports:
+- per-message Chinese translation shown below non-Chinese messages
+- deterministic handling for low-information Lao/Thai fillers
+- cached translation results per user
+- settings toggle in the UI
 
-### translate
-Translates toward the detected/preferred user language when appropriate.
-If the language is unknown, it keeps the original text instead of forcing a wrong translation.
+Examples:
+- `ໂດຍ` -> `嗯`
+- `โอเค` -> `好的`
 
-## Message deletion / hiding
+## Multi-channel direction
 
-What is supported now:
-- local admin-console hide of specific messages
-- local admin-console hide of latest N messages
+The current codebase is evolving from a single-workspace WhatsApp console into a multi-channel operator console.
 
-What is NOT supported now:
-- true WhatsApp bilateral delete / revoke for everyone
-- bulk remote deletion from the bridge
+Current support in the codebase:
+- conversations are no longer hard-filtered to WhatsApp only
+- Telegram display names get `-tg` suffix in summaries/details/search
+- admin delivery channels are configurable
 
-Reason:
-- the current Hermes WhatsApp bridge exposes send/edit/media/typing/chat/health, but no delete/revoke endpoint
+Recommended production architecture:
+- one Hermes profile per channel/account
+  - e.g. `whatsapp-support-a`
+  - `whatsapp-support-b`
+  - `telegram-support-a`
+- one aggregate operations console
+- route outbound messages by workspace/profile
+- display platform and account identity in the UI
+
+## Vercel deployment
+
+The frontend is designed to deploy independently to Vercel and call the backend over HTTPS.
+
+Production frontend host:
+- `https://whats.future1.us`
+
+Frontend production API base:
+- `VITE_API_BASE=https://whats.future1.us/api`
+
+Repo root `vercel.json` is configured to:
+- build only `web/`
+- publish `web/dist`
+- rewrite `/api/*` to `https://whats.future1.us/api/*`
+- rewrite all other paths to `/index.html`
+
+That means the deployed frontend should still reach the backend API as long as:
+- `https://whats.future1.us/api/...` is reachable from the public internet
+- the backend is running on the host and proxied correctly
 
 ## Testing
 
@@ -218,36 +223,20 @@ npm run build
 
 ## Security notes
 
-Before uploading or wider use:
-- rotate any profile-local API keys if this project or profile files were copied around
-- change the current password immediately
+Before wider use:
+- rotate any copied profile-local API keys
+- change the deployment password immediately if shared
 - keep login throttling and session TTL enabled
-- consider IP allowlisting or tunnel access policy
+- consider IP allowlisting / tunnel access policy
 
-## Preparing a private GitHub repo
-
-Suggested steps:
-
-```bash
-cd /root/whatsapp-chat-system
-git init
-git add .
-git commit -m "feat: initial private operator console"
-```
-
-Create a private repository with `gh`:
-
-```bash
-gh repo create <new-private-repo-name> --private --source . --push
-```
-
-## Current status
+## Status
 
 Validated locally:
 - backend tests passing
 - frontend production build passing
 - secure login working
-- authenticated settings access working
-- preview/send split working
-- fixed-port frontend working via local proxy
-- frontend API base ready for Vercel deployment
+- session logout working
+- paginated conversations and message history
+- automatic translation cache
+- WeChat-style shell with 4 tabs
+- Vercel-ready frontend API linkage

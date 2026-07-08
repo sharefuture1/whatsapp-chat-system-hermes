@@ -1,6 +1,6 @@
 # Deployment Notes
 
-## Local dev
+## Local development
 
 Backend:
 
@@ -11,41 +11,43 @@ cd /root/whatsapp-chat-system
   serve --host 127.0.0.1 --port 8792
 ```
 
-Frontend (fixed port example):
+Frontend:
 
 ```bash
 cd /root/whatsapp-chat-system/web
 npm run dev -- --host 127.0.0.1 --port 38998
 ```
 
-## Tunnel target
+The Vite dev server proxies `/api` to `127.0.0.1:8792`.
 
-When using a single frontend entrypoint, expose:
-- `http://127.0.0.1:38998`
+## Public host model
 
-The Vite dev server proxies `/api` to the backend.
-
-## Production frontend host
-
-Current intended public frontend host:
+Current intended public frontend/backend origin:
 - `https://whats.future1.us`
 
-## Vercel-ready frontend
+The intended public backend base is:
+- `https://whats.future1.us/api`
+
+## Vercel frontend deployment
 
 Set on Vercel:
 - `VITE_API_BASE=https://whats.future1.us/api`
 
-The frontend code supports:
-- local dev via `/api`
-- production direct API calls via `VITE_API_BASE`
+The frontend supports two modes:
+- local development: use `/api` through Vite proxy
+- production/Vercel: use `VITE_API_BASE`
 
-Repo root `vercel.json` is configured to:
-- build only `web/`
+Repo root `vercel.json` is already configured to:
+- install/build only `web/`
 - publish `web/dist`
 - rewrite `/api/*` to `https://whats.future1.us/api/*`
 - rewrite all other paths to `/index.html`
 
-## Vercel deployment steps
+That means the Vercel frontend can link to the backend API if and only if:
+- `https://whats.future1.us/api/health` is publicly reachable
+- the backend proxy/tunnel correctly forwards to the live 8792 backend
+
+## Vercel deployment commands
 
 ```bash
 cd /root/whatsapp-chat-system
@@ -54,23 +56,51 @@ vercel build
 vercel deploy --prebuilt
 ```
 
-If running CI or non-interactive deploys, set:
+For CI or non-interactive deploys, set:
 - `VERCEL_TOKEN`
 
-## Production recommendations
+## Recommended production topology
 
-Recommended production shape:
-- build frontend with `npm run build`
-- deploy frontend to Vercel or serve static assets via Caddy/Nginx
-- run backend via systemd on localhost only
-- expose backend through a domain/tunnel reachable as `https://whats.future1.us/api`
-- keep the tunnel/proxy in front of the single frontend origin
+Recommended shape:
+- frontend deployed to Vercel
+- backend running via systemd on localhost only
+- public hostname/tunnel/proxy forwards `/api/*` to backend 8792
+- frontend and backend share the same public origin family under `whats.future1.us`
+
+## Multi-channel / multi-account roadmap
+
+The best Hermes-native evolution path is:
+- one Hermes profile per channel/account
+- one aggregate console frontend/backend
+
+Examples:
+- `whatsapp-support-a`
+- `whatsapp-support-b`
+- `telegram-support-a`
+- future `wechat-*` bridge/profile
+
+Console responsibilities:
+- unify inbox view
+- label platform/account source
+- route sends through the correct Hermes profile
+- expose health/status per workspace
+
+## Current verified local behavior
+
+Verified:
+- backend on 8792
+- frontend on 38998
+- login works with current password
+- paginated conversation loading works
+- newest messages anchor at bottom
+- auto-translation fields return from API
+- frontend production build succeeds
 
 ## Security checklist
 
-Before wider use:
-- change the bootstrap/default password immediately
-- rotate any profile-local API keys if this project or profile files were copied around
-- keep login throttling enabled
+Before broader rollout:
+- rotate API keys if copied around
+- change the deployment password if shared
 - keep session TTL enabled
-- consider IP allowlisting or tunnel access policy
+- keep login throttling enabled
+- consider access policy / IP allowlisting on the public hostname

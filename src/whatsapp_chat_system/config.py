@@ -80,6 +80,11 @@ class AppConfig:
         if not isinstance(web_settings, dict):
             web_settings = default_web_settings()
             save_json(paths.web_settings_file, web_settings)
+        else:
+            merged = merge_web_settings(default_web_settings(), web_settings)
+            if merged != web_settings:
+                web_settings = merged
+                save_json(paths.web_settings_file, web_settings)
         return cls(
             paths=paths,
             admin_ids=admin_ids,
@@ -116,10 +121,21 @@ def default_web_settings() -> dict[str, Any]:
             "allow_local_hide_delete": True,
             "allow_bulk_local_hide": True,
             "remote_delete_supported": False,
+            "auto_translate": True,
         },
         "hidden_message_ids": [],
         "sessions": {},
     }
+
+
+def merge_web_settings(defaults: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(defaults)
+    for key, value in current.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_web_settings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def build_password_record(password: str, iterations: int = 600000) -> dict[str, Any]:

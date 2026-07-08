@@ -111,7 +111,7 @@ def test_rate_limit_blocks_after_repeated_failures(tmp_path):
 
 
 def test_hide_messages_round_trip(tmp_path):
-    profile = create_profile(tmp_path / 'p9')
+    profile = create_profile(tmp_path / 'p')
     seed_conversation(
         profile,
         user_id='u9@lid',
@@ -120,10 +120,10 @@ def test_hide_messages_round_trip(tmp_path):
         messages=[('user', 'm1', 1700000020.0), ('assistant', 'r1', 1700000021.0)],
     )
     client = authed_client(profile)
-    detail = client.get('/api/conversations/u9@lid').json()
-    msg_id = detail['messages'][0]['message_id']
+    detail = client.get('/api/conversations/u9@lid?page=1&page_size=10').json()
+    msg_id = detail['messages'][1]['message_id']  # oldest of the two
     hide = client.post('/api/messages/hide', json={'message_ids': [msg_id]})
     assert hide.status_code == 200
-    detail2 = client.get('/api/conversations/u9@lid').json()
+    detail2 = client.get('/api/conversations/u9@lid?page=1&page_size=10').json()
     target = next(m for m in detail2['messages'] if m['message_id'] == msg_id)
     assert target['hidden'] is True

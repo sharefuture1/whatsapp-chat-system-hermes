@@ -44,6 +44,72 @@ class Rewriter:
             self.logger('model_translate_failed', target=target.get('id'), error=str(exc), text=text)
             return RewriteResult(language=target_language, message=self._simple_translate_fallback(text, target_language), used_fallback=True)
 
+    def translate_to_zh(self, text: str, source_lang: str) -> str:
+        """Translate a single message (Lao/Thai/English) into Chinese.
+
+        Returns the Chinese translation (best effort). Returns the original
+        text on failure. This is a quiet, side-effect-free path used for
+        in-conversation auto-translation, not the reply pipeline.
+        """
+        text = collapse_whitespace(text or '').strip()
+        if not text or source_lang == 'Chinese':
+            return text
+
+        # Deterministic handling for low-information filler pings.
+        low_info_map = {
+            'ໂດຍ': '嗯',
+            'โดย': '嗯',
+            'ໂອເຄ': '好的',
+            'โอเค': '好的',
+            'ຄັບ': '好的😊',
+            'ครับ': '好的😊',
+            'ค่ะ': '好的😊',
+            'อืม': '嗯',
+            'อือ': '嗯',
+            '嗯嗯': '嗯嗯',
+            '嗯': '嗯',
+            '哦': '哦',
+            '好': '好',
+        }
+        if text in low_info_map:
+            return low_info_map[text]
+        try:
+            prompt = (
+                '你是一个高精度的对话翻译。\n'
+                '要求：\n'
+                '1. 把下面这段聊天消息准确翻译成简体中文。\n'
+                '2. 保持语气、情感、emoji、语气词。\n'
+                '3. 如果原文只是语气词/简短回应，翻译也必须非常短。\n'
+                '4. 1-2 句话，最多不超过 60 个汉字。\n'
+                '5. 只输出 JSON：{"zh":"..."}，不要解释。\n\n'
+                f'原文语言: {source_lang}\n'
+                f'原文: {text}\n'
+            )
+            payload = {
+                'model': self.config.model['model'],
+                'messages': [
+                    {'role': 'system', 'content': '你只返回合法 JSON，准确翻译。'},
+                    {'role': 'user', 'content': prompt},
+                ],
+                'temperature': 0.1,
+                'response_format': {'type': 'json_object'},
+            }
+            response = requests.post(
+                f"{self.config.model['base_url'].rstrip('/')}/chat/completions",
+                headers={'Authorization': f"Bearer {self.config.model['api_key']}", 'Content-Type': 'application/json'},
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+            content = data['choices'][0]['message']['content']
+            parsed = json.loads(content)
+            zh = collapse_whitespace(str(parsed.get('zh') or '').strip())
+            return zh or text
+        except Exception as exc:
+            self.logger('auto_translate_failed', error=str(exc), text=text, source_lang=source_lang)
+            return text
+
     def _rewrite_with_model(self, target: dict, zh_text: str, memory_md: str) -> tuple[str, str]:
         target_name = str(target.get('name') or '')
         target_language = detect_preferred_language(memory_md, target_name)

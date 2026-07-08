@@ -66,8 +66,7 @@ class StateDB:
     def fetch_sessions(self) -> dict[str, dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, user_id, title, started_at, source FROM sessions WHERE source = ?",
-                ("whatsapp",),
+                "SELECT id, user_id, title, started_at, source FROM sessions"
             ).fetchall()
             return {row["id"]: dict(row) for row in rows}
 
@@ -75,7 +74,6 @@ class StateDB:
         with self._connect() as conn:
             return conn.execute(
                 "SELECT id AS message_id, session_id, role, content, timestamp FROM messages "
-                "WHERE session_id IN (SELECT id FROM sessions WHERE source = ?) "
-                "ORDER BY timestamp ASC",
-                ("whatsapp",),
+                "WHERE session_id IN (SELECT id FROM sessions) "
+                "ORDER BY timestamp ASC"
             ).fetchall()
