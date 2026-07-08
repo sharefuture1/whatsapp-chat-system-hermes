@@ -108,6 +108,8 @@ class AdminRouter:
             },
             'mode': mode,
             'source_text': source_text,
+            'message_id': send_result.payload.get('messageId') or send_result.payload.get('message_id'),
+            'message_ids': send_result.payload.get('messageIds') or send_result.payload.get('message_ids') or [],
         }
 
     def _rewrite_for_mode(self, target: dict[str, Any], message: str, memory_md: str, mode: str) -> RewriteResult:

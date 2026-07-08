@@ -106,15 +106,15 @@ def default_web_settings() -> dict[str, Any]:
         "auth_required": True,
         "auth_ttl_seconds": 86400,
         "reply": {
-            "default_mode": "direct",
+            "default_mode": "smart",
             "smart_max_length": 40,
             "translate_max_length": 60,
             "allow_fallback": True,
-            "preview_debounce_ms": 320,
+            "preview_debounce_ms": 180,
             "prefer_detected_language": True,
         },
         "ui": {
-            "auto_refresh_seconds": 10,
+            "auto_refresh_seconds": 4,
             "show_preview_before_send": True,
         },
         "message_ops": {
@@ -123,6 +123,17 @@ def default_web_settings() -> dict[str, Any]:
             "remote_delete_supported": False,
             "auto_translate": True,
         },
+        "workspaces": [
+            {
+                "id": "whatsapp-support",
+                "label": "WhatsApp Support",
+                "platform": "whatsapp",
+                "profile": "whatsapp-support",
+                "profile_path": "/root/.hermes/profiles/whatsapp-support",
+                "enabled": True,
+                "primary": True,
+            }
+        ],
         "hidden_message_ids": [],
         "sessions": {},
     }

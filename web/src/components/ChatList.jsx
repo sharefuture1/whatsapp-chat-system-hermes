@@ -10,6 +10,12 @@ function initials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
+function platformLabel(platform) {
+  const value = String(platform || 'unknown').toLowerCase()
+  const map = { whatsapp: 'WA', telegram: 'TG', slack: 'SL', discord: 'DC' }
+  return map[value] || value.slice(0, 2).toUpperCase()
+}
+
 function avatarColor(name) {
   const colors = ['#5b8def', '#07c160', '#fa9d3b', '#f44c4c', '#9b59b6', '#16a085', '#e67e22', '#2ecc71']
   let h = 0
@@ -38,6 +44,9 @@ export default function ChatList({
   onLogout,
   unread,
   autoTranslate,
+  platformFilter,
+  platformOptions,
+  onPlatformFilterChange,
 }) {
   const { t } = useSettings()
   return (
@@ -72,6 +81,15 @@ export default function ChatList({
         </svg>
         <input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} />
       </div>
+      {platformOptions && platformOptions.length > 1 ? (
+        <div className="wx-platform-filter">
+          {platformOptions.map(platform => (
+            <button key={platform} className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>
+              {platform === 'all' ? 'ALL' : platformLabel(platform)}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {pinned && pinned.length > 0 ? (
         <div className="wx-pinned-section">
           {pinned.map(item => (
@@ -79,7 +97,7 @@ export default function ChatList({
               <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
               <div className="wx-list-text">
                 <div className="wx-list-row1">
-                  <div className="wx-list-name"><span className="wx-pin-star">★</span> {item.user_name}</div>
+                  <div className="wx-list-name"><span className="wx-pin-star">★</span> <span className="wx-platform-badge">{platformLabel(item.platform)}</span> {item.user_name}</div>
                 </div>
                 <div className="wx-list-row2">
                   <div className="wx-list-preview">{item.last_message || '…'}</div>
@@ -99,7 +117,7 @@ export default function ChatList({
               <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
               <div className="wx-list-text">
                 <div className="wx-list-row1">
-                  <div className="wx-list-name">{item.user_name}</div>
+                  <div className="wx-list-name"><span className="wx-platform-badge">{platformLabel(item.platform)}</span> {item.user_name}</div>
                   <div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div>
                 </div>
                 <div className="wx-list-row2">

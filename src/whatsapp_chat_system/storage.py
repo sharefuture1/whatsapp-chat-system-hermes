@@ -32,6 +32,16 @@ class EventLogger:
 
 
 class StateDB:
+    """SQLite access layer for the operations console.
+
+    Keep expensive filtering/pagination inside SQLite. The previous API path
+    loaded every message into Python for dashboard, conversations, search, and
+    detail views. That works for tiny databases but becomes progressively slow
+    and also makes it easy for the frontend to think messages are missing.
+    """
+
+    PUBLIC_ROLES = ("user", "assistant")
+
     def __init__(self, path: Path) -> None:
         self.path = path
 
@@ -40,8 +50,33 @@ class StateDB:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def _public_message_filter(include_internal: bool = False) -> str:
+        if include_internal:
+            return ""
+        return """
+          AND m.role IN ('user', 'assistant')
+          AND NOT (
+            m.role = 'assistant'
+            AND (
+              TRIM(COALESCE(m.content, '')) LIKE '📚 %'
+              OR TRIM(COALESCE(m.content, '')) LIKE '📨 %'
+              OR TRIM(COALESCE(m.content, '')) LIKE '🧠 %'
+              OR TRIM(COALESCE(m.content, '')) LIKE 'skill_view:%'
+              OR TRIM(COALESCE(m.content, '')) LIKE 'send_message:%'
+              OR TRIM(COALESCE(m.content, '')) LIKE 'memory:%'
+              OR TRIM(COALESCE(m.content, '')) LIKE '%\nskill_view:%'
+              OR TRIM(COALESCE(m.content, '')) LIKE '%\nsend_message:%'
+              OR TRIM(COALESCE(m.content, '')) LIKE '%\nmemory:%'
+            )
+          )
+        """
+
+
     def fetch_admin_messages(self, last_message_id: int, admin_ids: Iterable[str]) -> list[sqlite3.Row]:
         admin_list = sorted(set(admin_ids))
+        if not admin_list:
+            return []
         placeholders = ", ".join("?" for _ in admin_list)
         query = f"""
         SELECT m.id, m.session_id, m.role, m.content, m.timestamp, s.user_id
@@ -71,9 +106,174 @@ class StateDB:
             return {row["id"]: dict(row) for row in rows}
 
     def fetch_session_messages(self) -> list[sqlite3.Row]:
+        """Legacy full scan used by offline jobs.
+
+        New web endpoints should prefer SQL-level methods below.
+        """
         with self._connect() as conn:
             return conn.execute(
                 "SELECT id AS message_id, session_id, role, content, timestamp FROM messages "
                 "WHERE session_id IN (SELECT id FROM sessions) "
                 "ORDER BY timestamp ASC"
             ).fetchall()
+
+    def fetch_conversation_summaries(self, admin_ids: Iterable[str]) -> list[sqlite3.Row]:
+        admin_list = sorted(set(str(x) for x in admin_ids if str(x)))
+        admin_filter = ""
+        params: list[Any] = []
+        if admin_list:
+            placeholders = ", ".join("?" for _ in admin_list)
+            admin_filter = f"AND COALESCE(s.user_id, '') NOT IN ({placeholders})"
+            params.extend(admin_list)
+        query = f"""
+        WITH public_messages AS (
+          SELECT
+            m.id AS message_id,
+            m.session_id,
+            m.role,
+            COALESCE(m.content, '') AS content,
+            m.timestamp,
+            s.user_id,
+            s.title,
+            s.source
+          FROM messages m
+          JOIN sessions s ON s.id = m.session_id
+          WHERE 1 = 1
+            {self._public_message_filter(False)}
+            {admin_filter}
+        ), ranked AS (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY timestamp DESC, message_id DESC) AS rn
+          FROM public_messages
+          WHERE COALESCE(user_id, '') <> ''
+        )
+        SELECT
+          user_id,
+          MAX(title) AS title,
+          MAX(source) AS source,
+          COUNT(*) AS message_count,
+          SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS user_message_count,
+          SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistant_message_count,
+          MAX(timestamp) AS last_timestamp,
+          MAX(CASE WHEN rn = 1 THEN content ELSE NULL END) AS last_message,
+          GROUP_CONCAT(DISTINCT session_id) AS session_ids
+        FROM ranked
+        GROUP BY user_id
+        ORDER BY last_timestamp DESC
+        """
+        with self._connect() as conn:
+            return conn.execute(query, params).fetchall()
+
+    def fetch_user_messages(
+        self,
+        user_id: str,
+        limit: int,
+        offset: int = 0,
+        include_internal: bool = False,
+    ) -> list[sqlite3.Row]:
+        roles_clause = self._public_message_filter(include_internal)
+        query = f"""
+        SELECT
+          m.id AS message_id,
+          m.session_id,
+          m.role,
+          COALESCE(m.content, '') AS content,
+          m.timestamp
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+        WHERE s.user_id = ?
+          {roles_clause}
+        ORDER BY m.timestamp DESC, m.id DESC
+        LIMIT ? OFFSET ?
+        """
+        with self._connect() as conn:
+            return conn.execute(query, (user_id, limit, offset)).fetchall()
+
+    def count_user_messages(self, user_id: str, include_internal: bool = False) -> int:
+        roles_clause = self._public_message_filter(include_internal)
+        query = f"""
+        SELECT COUNT(*)
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+        WHERE s.user_id = ?
+          {roles_clause}
+        """
+        with self._connect() as conn:
+            return int(conn.execute(query, (user_id,)).fetchone()[0])
+
+    def fetch_user_messages_after(
+        self,
+        user_id: str,
+        after_id: int,
+        limit: int = 100,
+        include_internal: bool = False,
+    ) -> list[sqlite3.Row]:
+        roles_clause = self._public_message_filter(include_internal)
+        query = f"""
+        SELECT
+          m.id AS message_id,
+          m.session_id,
+          m.role,
+          COALESCE(m.content, '') AS content,
+          m.timestamp
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+        WHERE s.user_id = ?
+          AND m.id > ?
+          {roles_clause}
+        ORDER BY m.timestamp ASC, m.id ASC
+        LIMIT ?
+        """
+        with self._connect() as conn:
+            return conn.execute(query, (user_id, after_id, limit)).fetchall()
+
+
+    def count_user_hidden_messages(self, user_id: str, hidden_ids: Iterable[int]) -> int:
+        ids = [int(x) for x in hidden_ids if str(x).isdigit() or isinstance(x, int)]
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        query = f"""
+        SELECT COUNT(*)
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+        WHERE s.user_id = ?
+          AND m.id IN ({placeholders})
+          {self._public_message_filter(False)}
+        """
+        with self._connect() as conn:
+            return int(conn.execute(query, (user_id, *ids)).fetchone()[0])
+
+    def search_messages(self, query_text: str, limit: int, admin_ids: Iterable[str]) -> list[sqlite3.Row]:
+        needle = f"%{query_text.lower()}%"
+        admin_list = sorted(set(str(x) for x in admin_ids if str(x)))
+        admin_filter = ""
+        params: list[Any] = [needle]
+        if admin_list:
+            placeholders = ", ".join("?" for _ in admin_list)
+            admin_filter = f"AND COALESCE(s.user_id, '') NOT IN ({placeholders})"
+            params.extend(admin_list)
+        params.append(limit)
+        query = f"""
+        SELECT
+          m.id AS message_id,
+          m.session_id,
+          m.role,
+          COALESCE(m.content, '') AS content,
+          m.timestamp,
+          s.user_id,
+          s.title,
+          s.source
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+        WHERE 1 = 1
+          {self._public_message_filter(False)}
+          AND LOWER(COALESCE(m.content, '')) LIKE ?
+          AND COALESCE(s.user_id, '') <> ''
+          {admin_filter}
+        ORDER BY m.timestamp DESC, m.id DESC
+        LIMIT ?
+        """
+        with self._connect() as conn:
+            return conn.execute(query, params).fetchall()

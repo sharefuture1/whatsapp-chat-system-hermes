@@ -83,67 +83,61 @@ def _display_user_name(origin: dict[str, Any], user_id: str, session: dict[str, 
     return name
 
 
-def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict[str, Any]]:
-    sessions = db.fetch_sessions()
-    rows = db.fetch_session_messages()
+def _origin_by_session(config: AppConfig) -> dict[str, dict[str, Any]]:
     origins = _load_origins(config)
-    hidden = set(config.web_settings.get('hidden_message_ids') or [])
-    summary: dict[str, dict[str, Any]] = {}
+    return {
+        str(value.get('session_id') or ''): dict(value.get('origin') or {})
+        for value in origins.values()
+        if isinstance(value, dict) and value.get('session_id')
+    }
+
+
+def _name_for_user(config: AppConfig, user_id: str, session_ids: list[str], fallback: str = '') -> str:
+    origins_by_session = _origin_by_session(config)
+    for sid in session_ids:
+        origin = origins_by_session.get(sid) or {}
+        name = str(origin.get('user_name') or origin.get('chat_name') or '').strip()
+        if name:
+            return name
+    return fallback or user_id
+
+
+def _language_set_for_text(text: str) -> list[str]:
+    lang = _language_hint_for(text)
+    return [] if lang == 'Unknown' else [lang]
+
+
+def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict[str, Any]]:
+    rows = db.fetch_conversation_summaries(config.admin_ids)
+    results: list[dict[str, Any]] = []
     for row in rows:
-        sid = row['session_id']
-        session = sessions.get(sid, {})
-        origin = origins.get(sid, {})
-        user_id = str(session.get('user_id') or origin.get('user_id') or '')
-        if not user_id or user_id in config.admin_ids:
+        user_id = str(row['user_id'] or '')
+        if not user_id:
             continue
-        user_name = _display_user_name(origin, user_id, session)
-        item = summary.setdefault(user_id, {
-            'user_id': user_id,
-            'user_name': user_name,
-            'session_ids': [],
-            'last_timestamp': row['timestamp'],
-            'last_message': row['content'] or '',
-            'message_count': 0,
-            'user_message_count': 0,
-            'assistant_message_count': 0,
-            'languages': set(),
-        })
-        if sid not in item['session_ids']:
-            item['session_ids'].append(sid)
-        item['message_count'] += 1
-        if row['role'] == 'user':
-            item['user_message_count'] += 1
-        elif row['role'] == 'assistant':
-            item['assistant_message_count'] += 1
-        content = row['content'] or ''
-        if any('\u0e80' <= ch <= '\u0eff' for ch in content):
-            item['languages'].add('Lao')
-        elif any('\u0e00' <= ch <= '\u0e7f' for ch in content):
-            item['languages'].add('Thai')
-        elif any('\u4e00' <= ch <= '\u9fff' for ch in content):
-            item['languages'].add('Chinese')
-        elif any('a' <= ch.lower() <= 'z' for ch in content):
-            item['languages'].add('Latin')
-        if row['timestamp'] >= item['last_timestamp'] and row['message_id'] not in hidden:
-            item['last_timestamp'] = row['timestamp']
-            item['last_message'] = content
-    results = []
-    for item in summary.values():
-        user_id = item['user_id']
+        session_ids = [sid for sid in str(row['session_ids'] or '').split(',') if sid]
+        user_name = _name_for_user(config, user_id, session_ids, str(row['title'] or ''))
         memory_markdown = _load_memory_markdown(config, user_id)
         sidecar = read_sidecar(user_id, config.paths.memory_dir)
         priority = (sidecar or {}).get('priority') or _infer_priority(memory_markdown)
-        last_text = item.get('last_message') or ''
+        last_text = str(row['last_message'] or '')
         results.append({
-            **item,
-            'languages': sorted(item['languages']),
+            'user_id': user_id,
+            'user_name': user_name,
+            'session_ids': session_ids,
+            'platform': str(row['source'] or 'unknown'),
+            'workspace_id': str(row['source'] or 'unknown'),
+            'last_timestamp': row['last_timestamp'],
+            'last_message': last_text,
+            'message_count': int(row['message_count'] or 0),
+            'user_message_count': int(row['user_message_count'] or 0),
+            'assistant_message_count': int(row['assistant_message_count'] or 0),
+            'languages': _language_set_for_text(last_text),
             'memory_markdown': memory_markdown,
             'priority': priority,
             'last_message_lang': _language_hint_for(last_text),
             'last_message_translated': _maybe_translate_for_user(config, user_id, last_text),
         })
-    return sorted(results, key=lambda x: x['last_timestamp'], reverse=True)
-
+    return results
 
 def _infer_priority(memory_markdown: str) -> str:
     if not memory_markdown:
@@ -310,6 +304,42 @@ def _clear_login_attempts(config: AppConfig, request: Request) -> None:
         save_json(config.paths.web_settings_file, config.web_settings)
 
 
+
+def _platform_catalog() -> list[dict[str, Any]]:
+    return [
+        {'platform': 'whatsapp', 'label': 'WhatsApp', 'category': 'chat', 'login_type': 'qr', 'setup_command': 'hermes -p <profile> whatsapp'},
+        {'platform': 'telegram', 'label': 'Telegram', 'category': 'chat', 'login_type': 'manual', 'setup_command': 'hermes -p <profile> telegram'},
+        {'platform': 'slack', 'label': 'Slack', 'category': 'team', 'login_type': 'manual', 'setup_command': 'hermes -p <profile> slack'},
+        {'platform': 'discord', 'label': 'Discord', 'category': 'community', 'login_type': 'manual', 'setup_command': 'hermes -p <profile> discord'},
+    ]
+
+
+def _workspace_status(config: AppConfig) -> list[dict[str, Any]]:
+    catalog = {item['platform']: item for item in _platform_catalog()}
+    out: list[dict[str, Any]] = []
+    for item in config.web_settings.get('workspaces') or []:
+        if not isinstance(item, dict):
+            continue
+        platform = str(item.get('platform') or 'unknown')
+        profile = str(item.get('profile') or item.get('id') or platform)
+        profile_path = Path(str(item.get('profile_path') or f'/root/.hermes/profiles/{profile}'))
+        meta = catalog.get(platform, {})
+        status = 'not_configured'
+        if profile_path.exists():
+            status = 'configured'
+            if (profile_path / 'gateway.pid').exists():
+                status = 'running'
+        out.append({
+            **item,
+            'platform': platform,
+            'profile': profile,
+            'profile_path': str(profile_path),
+            'status': status,
+            'login_type': meta.get('login_type') or 'manual',
+            'setup_command': str(meta.get('setup_command') or '').replace('<profile>', profile),
+        })
+    return out
+
 def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
@@ -398,39 +428,29 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         if not q:
             return {'q': q, 'results': []}
         limit = max(1, min(100, limit))
-        sessions = db.fetch_sessions()
-        rows = db.fetch_session_messages()
-        origins = _load_origins(config)
         hidden = set(config.web_settings.get('hidden_message_ids') or [])
-        needle = q.lower()
         results: list[dict[str, Any]] = []
-        for row in rows:
+        for row in db.search_messages(q, limit * 2, config.admin_ids):
             message_id = row['message_id']
             if message_id in hidden:
                 continue
             content = row['content'] or ''
-            if needle not in content.lower():
-                continue
-            sid = row['session_id']
-            session = sessions.get(sid, {})
-            origin = origins.get(sid, {})
-            user_id = str(session.get('user_id') or origin.get('user_id') or '')
-            if not user_id or user_id in config.admin_ids:
-                continue
-            user_name = _display_user_name(origin, user_id, session)
             lower = content.lower()
+            needle = q.lower()
             idx = lower.find(needle)
-            start = max(0, idx - 30)
-            end = min(len(content), idx + len(q) + 30)
-            snippet = content[start:end]
-            if idx > 0:
+            start_idx = max(0, idx - 30) if idx >= 0 else 0
+            end_idx = min(len(content), idx + len(q) + 30) if idx >= 0 else min(len(content), 80)
+            snippet = content[start_idx:end_idx]
+            if start_idx > 0:
                 snippet = '…' + snippet
-            if end < len(content):
-                snippet = snippet + '…'
+            if end_idx < len(content):
+                snippet += '…'
+            user_id = str(row['user_id'] or '')
+            session_ids = [str(row['session_id'])]
             results.append({
                 'message_id': message_id,
                 'user_id': user_id,
-                'user_name': user_name,
+                'user_name': _name_for_user(config, user_id, session_ids, str(row['title'] or '')),
                 'role': row['role'],
                 'timestamp': row['timestamp'],
                 'snippet': snippet,
@@ -440,44 +460,56 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
                 break
         return {'q': q, 'results': results}
 
-    @app.get('/api/conversations/{user_id}')
-    def conversation_detail(user_id: str, page: int = 1, page_size: int = 50) -> dict[str, Any]:
-        page = max(1, page)
-        page_size = max(1, min(500, page_size))
-        sessions = db.fetch_sessions()
-        rows = db.fetch_session_messages()
-        origins = _load_origins(config)
+    @app.get('/api/conversations/{user_id}/messages')
+    def conversation_new_messages(user_id: str, after_id: int = 0, limit: int = 100) -> dict[str, Any]:
+        after_id = max(0, int(after_id or 0))
+        limit = max(1, min(200, int(limit or 100)))
         hidden = set(config.web_settings.get('hidden_message_ids') or [])
-        user_messages: list[dict[str, Any]] = []
-        user_name = user_id
-        session_ids: list[str] = []
-        for row in rows:
-            sid = row['session_id']
-            session = sessions.get(sid, {})
-            origin = origins.get(sid, {})
-            current_user_id = str(session.get('user_id') or origin.get('user_id') or '')
-            if current_user_id != user_id:
-                continue
-            user_name = _display_user_name(origin, user_id, session)
-            if sid not in session_ids:
-                session_ids.append(sid)
-            user_messages.append({
+        rows = db.fetch_user_messages_after(user_id, after_id, limit)
+        messages = [
+            {
                 'message_id': row['message_id'],
-                'session_id': sid,
+                'session_id': row['session_id'],
                 'role': row['role'],
                 'content': row['content'] or '',
                 'timestamp': row['timestamp'],
                 'hidden': row['message_id'] in hidden,
-            })
-        if not user_messages:
+            }
+            for row in rows
+        ]
+        messages = _attach_translations(config, user_id, messages)
+        return {
+            'user_id': user_id,
+            'messages': messages,
+            'count': len(messages),
+            'max_message_id': max((int(m['message_id']) for m in messages), default=after_id),
+        }
+
+    @app.get('/api/conversations/{user_id}')
+    def conversation_detail(user_id: str, page: int = 1, page_size: int = 80) -> dict[str, Any]:
+        page = max(1, page)
+        page_size = max(1, min(500, page_size))
+        offset = (page - 1) * page_size
+        hidden = set(config.web_settings.get('hidden_message_ids') or [])
+        rows = db.fetch_user_messages(user_id, page_size, offset)
+        if not rows and page == 1:
             raise HTTPException(status_code=404, detail='Conversation not found')
-        user_messages.sort(key=lambda m: m['timestamp'], reverse=True)
-        total = len(user_messages)
-        start = (page - 1) * page_size
-        end = start + page_size
-        # Newest first; the chat pane will reverse to chronological for display.
-        page_slice = user_messages[start:end]
-        page_slice = _attach_translations(config, user_id, page_slice)
+        sessions = db.fetch_sessions()
+        session_ids = [sid for sid, session in sessions.items() if str(session.get('user_id') or '') == user_id]
+        user_name = _name_for_user(config, user_id, session_ids)
+        user_messages = [
+            {
+                'message_id': row['message_id'],
+                'session_id': row['session_id'],
+                'role': row['role'],
+                'content': row['content'] or '',
+                'timestamp': row['timestamp'],
+                'hidden': row['message_id'] in hidden,
+            }
+            for row in rows
+        ]
+        total = db.count_user_messages(user_id)
+        page_slice = _attach_translations(config, user_id, user_messages)
         memory_text = _load_memory_markdown(config, user_id)
         sidecar = read_sidecar(user_id, config.paths.memory_dir) or {}
         priority = sidecar.get('priority') or _infer_priority(memory_text)
@@ -486,6 +518,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             ('Thai' if 'Preferred language: Thai' in memory_text else 'Unknown')
         )
         auto_translate = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+        hidden_count = db.count_user_hidden_messages(user_id, hidden)
         return {
             'user_id': user_id,
             'user_name': user_name,
@@ -495,7 +528,9 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             'page': page,
             'page_size': page_size,
             'total_messages': total,
-            'has_more': end < total,
+            'hidden_message_count': hidden_count,
+            'visible_message_count': max(0, total - hidden_count),
+            'has_more': offset + page_size < total,
             'auto_translate': auto_translate,
             'profile_summary': {
                 'priority': priority,
@@ -539,6 +574,8 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             'channels': config.forwarding_channels,
             'aliases': load_json(config.paths.alias_file, {}),
             'profile': str(config.paths.profile),
+            'platform_catalog': _platform_catalog(),
+            'workspaces': _workspace_status(config),
             'web_settings': safe_web_settings,
         }
 

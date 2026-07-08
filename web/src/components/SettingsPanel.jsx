@@ -1,12 +1,30 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../settings'
 
+const PLATFORM_OPTIONS = [
+  { platform: 'whatsapp', label: 'WhatsApp', category: '聊天', method: '二维码', command: 'hermes -p <profile> whatsapp' },
+  { platform: 'telegram', label: 'Telegram', category: '聊天', method: '手动配置', command: 'hermes -p <profile> telegram' },
+  { platform: 'slack', label: 'Slack', category: '团队', method: '手动配置', command: 'hermes -p <profile> slack' },
+  { platform: 'discord', label: 'Discord', category: '社区', method: '手动配置', command: 'hermes -p <profile> discord' },
+]
+
+function makeWorkspace(platform = 'whatsapp') {
+  const id = `${platform}-${Date.now()}`
+  return { id, label: `${platform} account`, platform, profile: id, profile_path: `/root/.hermes/profiles/${id}`, enabled: true, primary: false }
+}
+
+function commandFor(workspace) {
+  const option = PLATFORM_OPTIONS.find(item => item.platform === workspace.platform) || PLATFORM_OPTIONS[0]
+  return option.command.replace('<profile>', workspace.profile || workspace.id || workspace.platform)
+}
+
 export default function SettingsPanel({ open, onClose, settings, channels, onSave, saving }) {
   const { t } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
   const [ui, setUi] = useState(settings?.ui || {})
   const [messageOps, setMessageOps] = useState(settings?.message_ops || { auto_translate: true })
+  const [workspaces, setWorkspaces] = useState(settings?.workspaces || [])
   const [password, setPassword] = useState('')
   const [tab, setTab] = useState('reply')
 
@@ -16,6 +34,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
     setReply(settings?.reply || {})
     setUi(settings?.ui || {})
     setMessageOps(settings?.message_ops || { auto_translate: true })
+    setWorkspaces(settings?.workspaces || [])
     setPassword('')
   }, [open, channels, settings])
 
@@ -36,9 +55,21 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
     setDraftChannels(prev => prev.map((item, i) => i === index ? { ...item, kinds: value.split(',').map(s => s.trim()).filter(Boolean) } : item))
   }
 
+  const updateWorkspace = (index, key, value) => {
+    setWorkspaces(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
+  }
+
+  const addWorkspace = (platform = 'whatsapp') => {
+    setWorkspaces(prev => [...prev, makeWorkspace(platform)])
+  }
+
+  const removeWorkspace = (index) => {
+    setWorkspaces(prev => prev.filter((_, i) => i !== index))
+  }
+
   const save = () => onSave({
     channels: draftChannels,
-    web_settings: { reply, ui, message_ops: messageOps },
+    web_settings: { reply, ui, message_ops: messageOps, workspaces },
     password: password || null,
   }, () => setPassword(''))
 
@@ -55,6 +86,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
           <button role="tab" aria-selected={tab==='reply'} className={`tab ${tab==='reply' ? 'active' : ''}`} onClick={() => setTab('reply')}>{t('replyPolicy')}</button>
           <button role="tab" aria-selected={tab==='ui'} className={`tab ${tab==='ui' ? 'active' : ''}`} onClick={() => setTab('ui')}>{t('uiBehavior')}</button>
           <button role="tab" aria-selected={tab==='channels'} className={`tab ${tab==='channels' ? 'active' : ''}`} onClick={() => setTab('channels')}>{t('channels')}</button>
+          <button role="tab" aria-selected={tab==='platforms'} className={`tab ${tab==='platforms' ? 'active' : ''}`} onClick={() => setTab('platforms')}>平台账号</button>
           <button role="tab" aria-selected={tab==='security'} className={`tab ${tab==='security' ? 'active' : ''}`} onClick={() => setTab('security')}>{t('security')}</button>
         </div>
         <div className="modal-body">
@@ -64,7 +96,7 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
               <div className="settings-grid">
                 <label>
                   <span>{t('mode')}</span>
-                  <select value={reply.default_mode || 'direct'} onChange={e => setReply(prev => ({ ...prev, default_mode: e.target.value }))}>
+                  <select value={reply.default_mode || 'smart'} onChange={e => setReply(prev => ({ ...prev, default_mode: e.target.value }))}>
                     <option value="direct">{t('modeDirect')}</option>
                     <option value="smart">{t('modeSmart')}</option>
                     <option value="translate">{t('modeTranslate')}</option>
@@ -91,6 +123,56 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
                 <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_local_hide_delete} disabled />{t('settingAllowLocalHide')}</label>
                 <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_bulk_local_hide} disabled />{t('settingAllowBulkHide')}</label>
               </div>
+            </div>
+          )}
+          {tab === 'platforms' && (
+            <div className="settings-section">
+              <div className="platform-toolbar">
+                <div>
+                  <h3>平台账号</h3>
+                  <p className="subtle">添加多个 WhatsApp / Telegram / Slack / Discord 账号，按平台分组管理。页面只保存账号元数据，不保存敏感凭证。</p>
+                </div>
+                <div className="platform-add-row">
+                  {PLATFORM_OPTIONS.map(option => (
+                    <button key={option.platform} className="ghost-btn" onClick={() => addWorkspace(option.platform)}>+ {option.label}</button>
+                  ))}
+                </div>
+              </div>
+              {PLATFORM_OPTIONS.map(option => {
+                const group = workspaces.filter(item => item.platform === option.platform)
+                return (
+                  <div className="platform-group" key={option.platform}>
+                    <div className="platform-group-title"><span>{option.label}</span><small>{option.category} · {option.method}</small></div>
+                    {group.length === 0 ? <div className="subtle platform-empty">暂无账号，点击上方 + {option.label} 添加。</div> : null}
+                    {group.map((workspace) => {
+                      const idx = workspaces.indexOf(workspace)
+                      return (
+                        <div className="platform-card" key={workspace.id || idx}>
+                          <div className="platform-card-header">
+                            <strong>{workspace.label || workspace.id}</strong>
+                            <span className={`pill ${workspace.enabled ? 'ok' : 'muted'}`}>{workspace.enabled ? 'Enabled' : 'Disabled'}</span>
+                          </div>
+                          <div className="settings-grid">
+                            <label><span>显示名称</span><input value={workspace.label || ''} onChange={e => updateWorkspace(idx, 'label', e.target.value)} /></label>
+                            <label><span>平台</span><select value={workspace.platform || 'whatsapp'} onChange={e => updateWorkspace(idx, 'platform', e.target.value)}>{PLATFORM_OPTIONS.map(item => <option key={item.platform} value={item.platform}>{item.label}</option>)}</select></label>
+                            <label><span>Hermes Profile</span><input value={workspace.profile || ''} onChange={e => updateWorkspace(idx, 'profile', e.target.value)} /></label>
+                            <label><span>Profile 路径</span><input value={workspace.profile_path || ''} onChange={e => updateWorkspace(idx, 'profile_path', e.target.value)} /></label>
+                          </div>
+                          <div className="platform-command">
+                            <span>登录 / 配对命令</span>
+                            <code>{commandFor(workspace)}</code>
+                          </div>
+                          <div className="platform-actions">
+                            <label className="checkbox"><input type="checkbox" checked={!!workspace.enabled} onChange={e => updateWorkspace(idx, 'enabled', e.target.checked)} />启用</label>
+                            <label className="checkbox"><input type="checkbox" checked={!!workspace.primary} onChange={e => updateWorkspace(idx, 'primary', e.target.checked)} />主账号</label>
+                            <button className="ghost-btn danger" onClick={() => removeWorkspace(idx)}>删除</button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
             </div>
           )}
           {tab === 'channels' && (

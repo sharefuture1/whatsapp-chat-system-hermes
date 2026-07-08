@@ -37,6 +37,36 @@ function formatDay(ts) {
   return d.toLocaleDateString()
 }
 
+function mergeFreshMessages(serverItems, currentItems) {
+  const serverKeys = new Set(serverItems.map(item => `${item.role}:${item.content}`))
+  const unresolvedLocal = currentItems.filter(item => {
+    const id = String(item.message_id || '')
+    if (!id.startsWith('tmp-')) return false
+    if (!item.pending && !item.failed) return false
+    return !serverKeys.has(`${item.role}:${item.content}`)
+  })
+  return [...serverItems, ...unresolvedLocal]
+}
+
+function normalizeRewriteLanguage(language) {
+  return !language || language === 'direct' ? 'Chinese' : language
+}
+
+function maxMessageId(items) {
+  return items.reduce((max, item) => {
+    const id = Number(item.message_id)
+    return Number.isFinite(id) && id > max ? id : max
+  }, 0)
+}
+
+function mergeNewMessages(prev, incoming) {
+  if (!incoming.length) return prev
+  const seen = new Set(prev.map(item => String(item.message_id)))
+  const additions = incoming.filter(item => !seen.has(String(item.message_id)))
+  if (!additions.length) return prev
+  return [...prev, ...additions].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0) || Number(a.message_id || 0) - Number(b.message_id || 0))
+}
+
 export default function ChatPane({
   userId,
   userName,
@@ -52,17 +82,19 @@ export default function ChatPane({
   active,
   health,
   onNextConversation,
+  refreshTick,
 }) {
   const { t } = useSettings()
-  const [pageSize] = useState(20)
+  const [pageSize] = useState(80)
   const [page, setPage] = useState(1)
   const [messages, setMessages] = useState([])
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
+  const [hiddenCount, setHiddenCount] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [initialLoading, setInitialLoading] = useState(false)
   const [composer, setComposer] = useState('')
-  const [mode, setMode] = useState('direct')
+  const [mode, setMode] = useState('smart')
   const [preview, setPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [hiddenTranslations, setHiddenTranslations] = useState({})
@@ -100,10 +132,11 @@ export default function ChatPane({
     if (appendOlder) {
       setMessages(prev => [...items, ...prev])
     } else {
-      setMessages(items)
+      setMessages(prev => mergeFreshMessages(items, prev))
     }
     setHasMore(Boolean(res.has_more))
     setTotal(res.total_messages || 0)
+    setHiddenCount(res.hidden_message_count || 0)
     setPage(p)
     return res
   }
@@ -113,6 +146,7 @@ export default function ChatPane({
       setMessages([])
       setHasMore(false)
       setTotal(0)
+      setHiddenCount(0)
       setPage(1)
       fetchedFor.current = null
       return
@@ -124,7 +158,8 @@ export default function ChatPane({
     setMessages([])
     setHasMore(false)
     setTotal(0)
-    setMode(uiSettings?.reply?.default_mode || 'direct')
+    setHiddenCount(0)
+    setMode(uiSettings?.reply?.default_mode || 'smart')
     setComposer('')
     setPreview(null)
     setHiddenTranslations({})
@@ -133,6 +168,24 @@ export default function ChatPane({
       .catch(() => {})
       .finally(() => setInitialLoading(false))
   }, [userId, pageSize, uiSettings])
+
+  useEffect(() => {
+    if (!userId || !refreshTick || fetchedFor.current !== userId) return
+    const afterId = maxMessageId(messages)
+    if (!afterId) {
+      fetchPage(1, false).catch(() => {})
+      return
+    }
+    api.get(`/conversations/${encodeURIComponent(userId)}/messages?after_id=${afterId}&limit=100`)
+      .then(res => {
+        const items = res.messages || []
+        if (!items.length) return
+        lastBottomRef.current = true
+        setMessages(prev => mergeNewMessages(prev, items))
+        setTotal(prev => Math.max(prev, prev + items.length))
+      })
+      .catch(() => {})
+  }, [refreshTick, userId, messages])
 
   const loadMore = async () => {
     if (loadingMore || !hasMore || !userId) return
@@ -193,13 +246,37 @@ export default function ChatPane({
   const sendMessage = async () => {
     const text = composer.trim()
     if (!text || !userId) return
-    const ok = await onReply(userId, text, mode, () => {
-      setComposer('')
-      setPreview(null)
-      lastBottomRef.current = true
-    })
-    if (ok !== false) {
-      setMessages(prev => [...prev, { message_id: `tmp-${Date.now()}`, session_id: 'pending', role: 'assistant', content: text, timestamp: Date.now() / 1000, hidden: false, pending: true, translated: null, lang: 'Chinese' }])
+    const sendMode = mode || 'smart'
+    const tmpId = `tmp-${Date.now()}`
+    const optimisticText = sendMode === 'direct' ? text : (preview?.message || text)
+
+    setComposer('')
+    setPreview(null)
+    lastBottomRef.current = true
+    setMessages(prev => [
+      ...prev,
+      {
+        message_id: tmpId,
+        session_id: 'pending',
+        role: 'assistant',
+        content: optimisticText,
+        timestamp: Date.now() / 1000,
+        hidden: false,
+        pending: true,
+        translated: null,
+        lang: 'Chinese',
+      },
+    ])
+
+    try {
+      const data = await onReply(userId, text, sendMode)
+      const finalText = data?.rewrite?.message || optimisticText
+      const finalId = data?.message_id || data?.messageId || tmpId
+      const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, message_id: finalId, content: finalText, pending: false, sent: true, lang: finalLang, translated: null } : m))
+      setTimeout(() => fetchPage(1, false).catch(() => {}), 450)
+    } catch {
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: false, failed: true } : m))
     }
   }
 
@@ -242,7 +319,7 @@ export default function ChatPane({
         <div className="wx-avatar" style={{ background: avatarColor(userName) }}>{initials(userName)}</div>
         <div className="wx-chat-header-meta">
           <div className="wx-chat-title">{userName}</div>
-          <div className="wx-chat-sub"><span className={`wx-online-dot ${health ? '' : 'offline'}`} />{health ? t('online') : t('offline')} · {total} {t('totalMessages') || 'msgs'}</div>
+          <div className="wx-chat-sub"><span className={`wx-online-dot ${health ? '' : 'offline'}`} />{health ? t('online') : t('offline')} · {total} {t('totalMessages') || 'msgs'}{hiddenCount ? ` · ${hiddenCount} ${t('hiddenMessages')}` : ''}</div>
         </div>
         <div className="wx-chat-header-right">
           <button className="wx-icon-btn" onClick={() => onTogglePin(userId)} title={isPinned ? t('unpin') : t('pin')}><span aria-hidden="true">{isPinned ? '★' : '☆'}</span></button>
@@ -255,6 +332,7 @@ export default function ChatPane({
         <div className="wx-messages-inner">
           {hasMore ? <div className="wx-loadmore"><button onClick={loadMore} disabled={loadingMore}>{loadingMore ? t('loading') : t('loadMore')}</button></div> : null}
           {initialLoading ? <div className="wx-empty">{t('loading')}</div> : null}
+          {hiddenCount ? <div className="wx-hidden-note">{hiddenCount} {t('hiddenMessages')}</div> : null}
           {!initialLoading && messages.length === 0 ? <div className="wx-empty">{t('noMessages')}</div> : null}
           {grouped.map((item, idx) => {
             if (item.type === 'day') {
@@ -262,6 +340,8 @@ export default function ChatPane({
             }
             const isOut = item.role === 'assistant'
             const pending = item.pending
+            const failed = item.failed
+            const statusLabel = failed ? t('sendFailed') : pending ? t('sending') : item.sent ? t('sent') : ''
             const hideTranslation = hiddenTranslations[item.message_id]
             return (
               <div className={`wx-bubble-row ${isOut ? 'out' : 'in'}`} key={`${item.message_id}-${idx}`}>
@@ -275,7 +355,7 @@ export default function ChatPane({
                       {item.translated ? <button className="wx-bubble-action" onClick={() => setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true }))}>{t('hideTranslation')}</button> : null}
                     </div>
                   ) : null}
-                  <div className="wx-bubble-meta"><span>{fmtTime(item.timestamp)}</span>{pending ? <span className="wx-bubble-status">· sending</span> : null}</div>
+                  <div className="wx-bubble-meta"><span>{fmtTime(item.timestamp)}</span>{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>· {statusLabel}</span> : null}</div>
                 </div>
                 {!item.hidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={() => onHideMessage(item.message_id)}>{t('hide')}</button></div> : null}
               </div>

@@ -6,6 +6,8 @@ import re
 import subprocess
 from typing import Any
 
+import requests
+
 from .config import AppConfig, load_json, save_json
 
 
@@ -21,6 +23,7 @@ class SendResult:
 class HermesMessenger:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
+        self.bridge_base = "http://127.0.0.1:3000"
 
     def send(self, target: str, message: str, json_output: bool = True) -> SendResult:
         cmd = ["hermes", "--profile", self.config.paths.profile.name, "send", "--to", target]
@@ -37,8 +40,48 @@ class HermesMessenger:
         chat_id = str(payload.get("chat_id") or "")
         return SendResult(success=success, chat_id=chat_id, stdout=proc.stdout, stderr=proc.stderr, payload=payload)
 
+    def send_whatsapp_bridge(self, target_id: str, message: str) -> SendResult:
+        """Fast path: send directly through the local Baileys bridge.
+
+        This avoids spawning `hermes send` for every operator reply. If the
+        bridge is unavailable, callers can still fall back to Hermes CLI.
+        """
+        try:
+            res = requests.post(
+                f"{self.bridge_base}/send",
+                json={"chatId": target_id, "message": message},
+                timeout=12,
+            )
+            try:
+                payload = res.json()
+            except Exception:
+                payload = {}
+            success = res.ok and bool(payload.get("success"))
+            return SendResult(
+                success=success,
+                chat_id=target_id if success else "",
+                stdout=json.dumps(payload, ensure_ascii=False),
+                stderr="" if success else (payload.get("error") or res.text),
+                payload=payload,
+            )
+        except Exception as exc:
+            return SendResult(success=False, chat_id="", stdout="", stderr=str(exc), payload={})
+
     def send_whatsapp(self, target_id: str, message: str, json_output: bool = True) -> SendResult:
-        return self.send(f"whatsapp:{target_id}", message, json_output=json_output)
+        fast = self.send_whatsapp_bridge(target_id, message)
+        if fast.success:
+            return fast
+
+        fallback = self.send(f"whatsapp:{target_id}", message, json_output=json_output)
+        if fallback.success:
+            return fallback
+        return SendResult(
+            success=False,
+            chat_id=fallback.chat_id,
+            stdout=fallback.stdout,
+            stderr=f"bridge: {fast.stderr}\nhermes: {fallback.stderr}".strip(),
+            payload=fallback.payload,
+        )
 
     def send_admin_text(self, message: str, kind: str = 'reply_ack') -> list[SendResult]:
         return self.send_to_admin_channels(message, kind=kind)

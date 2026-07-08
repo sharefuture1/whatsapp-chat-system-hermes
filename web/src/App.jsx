@@ -56,7 +56,9 @@ function AppInner() {
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendingMeta, setSendingMeta] = useState(null)
+  const [refreshTick, setRefreshTick] = useState(0)
   const [query, setQuery] = useState('')
+  const [platformFilter, setPlatformFilter] = useState('all')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('chats')
   const [pinned, setPinned] = useState(() => {
@@ -129,6 +131,7 @@ function AppInner() {
       setConversationsTotal(convRes.total || 0)
       setConversationsHasMore(Boolean(convRes.has_more))
       setConversationsPage(convRes.page || 1)
+      setRefreshTick(prev => prev + 1)
 
       setSelectedId(prev => {
         const current = items.find(c => c.user_id === prev)
@@ -200,17 +203,16 @@ function AppInner() {
     }
   }
 
-  const sendReply = async (target, message, mode, done) => {
+  const sendReply = async (target, message, mode) => {
     setSending(true)
     try {
       const data = await api.post('/reply', { target, message, mode, preview_only: false })
       setSendingMeta({ mode: data.mode, language: data.rewrite?.language || 'direct' })
-      await refreshWorkspace()
-      done?.()
-      return true
+      refreshWorkspace({ silent: true })
+      return data
     } catch (e) {
       showError(e)
-      return false
+      throw e
     } finally {
       setSending(false)
     }
@@ -270,15 +272,24 @@ function AppInner() {
     if (found) markRead(found.user_id, found.last_timestamp)
   }, [conversations, selectedId, markRead])
 
+  const platformOptions = useMemo(() => {
+    const set = new Set((conversations || []).map(item => item.platform).filter(Boolean))
+    for (const workspace of settings.web_settings?.workspaces || []) {
+      if (workspace?.platform) set.add(workspace.platform)
+    }
+    return ['all', ...Array.from(set)]
+  }, [conversations, settings.web_settings?.workspaces])
+
   const filteredConversations = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return conversations
-    return conversations.filter(item =>
-      item.user_name?.toLowerCase().includes(q) ||
-      item.user_id?.toLowerCase().includes(q) ||
-      item.last_message?.toLowerCase().includes(q)
-    )
-  }, [conversations, query])
+    return conversations.filter(item => {
+      if (platformFilter !== 'all' && item.platform !== platformFilter) return false
+      if (!q) return true
+      return item.user_name?.toLowerCase().includes(q) ||
+        item.user_id?.toLowerCase().includes(q) ||
+        item.last_message?.toLowerCase().includes(q)
+    })
+  }, [conversations, query, platformFilter])
 
   const unread = useMemo(() => {
     const out = {}
@@ -328,6 +339,9 @@ function AppInner() {
               onLogout={logout}
               unread={unread}
               autoTranslate={autoTranslate}
+              platformFilter={platformFilter}
+              platformOptions={platformOptions}
+              onPlatformFilterChange={setPlatformFilter}
             />
             <ChatPane
               userId={selectedId}
@@ -344,6 +358,7 @@ function AppInner() {
               active
               health={health}
               onNextConversation={nextConversation}
+              refreshTick={refreshTick}
             />
           </div>
         )}
