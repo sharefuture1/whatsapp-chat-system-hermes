@@ -1,0 +1,15 @@
+from whatsapp_chat_system.language import approx_translate, detect_language, summarize_mood
+
+
+def test_detect_language():
+    assert detect_language('你好') == 'Chinese'
+    assert detect_language('สวัสดี') == 'Thai'
+    assert detect_language('ສະບາຍດີ') == 'Lao'
+
+
+def test_approx_translate_low_info():
+    assert '类似“好/嗯/哦”' in approx_translate('โดย')
+
+
+def test_summarize_mood_health():
+    assert '优先关怀' in summarize_mood('วันนี้ฉันรู้สึกฉันไม่สบาย')

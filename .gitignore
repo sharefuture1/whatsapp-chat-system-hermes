@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Node
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Local env / runtime
+.env
+*.log
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
