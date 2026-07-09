@@ -118,8 +118,9 @@ def default_web_settings() -> dict[str, Any]:
             "show_preview_before_send": True,
         },
         "message_ops": {
-            "allow_local_hide_delete": True,
-            "allow_bulk_local_hide": True,
+            "hide_messages_enabled": False,
+            "allow_local_hide_delete": False,
+            "allow_bulk_local_hide": False,
             "remote_delete_supported": False,
             "auto_translate": True,
         },

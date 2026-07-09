@@ -311,6 +311,7 @@ export default function ChatPane({
 
   const isPinned = pinned?.includes(userId)
   const autoTranslate = !!uiSettings?.message_ops?.auto_translate
+  const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
 
   return (
     <section className={`wx-chat is-active${active ? '' : ''}`}>
@@ -357,7 +358,7 @@ export default function ChatPane({
                   ) : null}
                   <div className="wx-bubble-meta"><span>{fmtTime(item.timestamp)}</span>{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>· {statusLabel}</span> : null}</div>
                 </div>
-                {!item.hidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={() => onHideMessage(item.message_id)}>{t('hide')}</button></div> : null}
+                {allowLocalHide && !item.hidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={() => onHideMessage(item.message_id)}>{t('hide')}</button></div> : null}
               </div>
             )
           })}

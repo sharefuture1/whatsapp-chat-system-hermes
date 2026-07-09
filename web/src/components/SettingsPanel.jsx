@@ -120,8 +120,8 @@ export default function SettingsPanel({ open, onClose, settings, channels, onSav
               <h3 style={{ marginTop: 18 }}>{t('messageOps') || 'Messages'}</h3>
               <div className="settings-grid">
                 <label className="checkbox"><input type="checkbox" checked={!!messageOps.auto_translate} onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))} />{t('autoTranslate')}</label>
-                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_local_hide_delete} disabled />{t('settingAllowLocalHide')}</label>
-                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_bulk_local_hide} disabled />{t('settingAllowBulkHide')}</label>
+                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_local_hide_delete} onChange={e => setMessageOps(prev => ({ ...prev, allow_local_hide_delete: e.target.checked }))} />{t('settingAllowLocalHide')}</label>
+                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_bulk_local_hide} onChange={e => setMessageOps(prev => ({ ...prev, allow_bulk_local_hide: e.target.checked }))} />{t('settingAllowBulkHide')}</label>
               </div>
             </div>
           )}
