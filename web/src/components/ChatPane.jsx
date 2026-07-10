@@ -103,6 +103,8 @@ export default function ChatPane({
   onHideMessage,
   sending,
   sendingMeta,
+  autoTranslate = false,
+  autoTranslateState = {},
   uiSettings,
   onOpenSettings,
   onOpenContactConfig,
@@ -131,6 +133,7 @@ export default function ChatPane({
   const [contactSaved, setContactSaved] = useState(false)
   const [activeMessageId, setActiveMessageId] = useState(null)
   const [hiddenTranslations, setHiddenTranslations] = useState({})
+  const [translationError, setTranslationError] = useState('')
   const scrollRef = useRef(null)
   const lastBottomRef = useRef(true)
   const fetchedFor = useRef(null)
@@ -210,6 +213,7 @@ export default function ChatPane({
     setPreviewError(false)
     setActiveMessageId(null)
     setHiddenTranslations({})
+    setTranslationError('')
     setInitialLoading(true)
     fetchPage(targetUserId, 1, false)
       .then(res => { if (res) lastBottomRef.current = true })
@@ -299,13 +303,21 @@ export default function ChatPane({
     if (!msg?.message_id || msg.translated || msg.lang === 'Chinese') return
     try {
       const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
-      if (res?.success === false || !res?.translated) return
+      if (res?.success === false || !res?.translated) {
+        const code = res?.error?.code || 'translation_failed'
+        setTranslationError(code === 'configuration_error' ? t('translationAiNotConfigured') : t('translationFailed'))
+        return
+      }
+      setTranslationError('')
       setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, translated: res.translated, lang: res.lang || m.lang } : m))
-    } catch {}
+    } catch (error) {
+      const code = error?.data?.detail?.code || error?.data?.code || error?.code
+      setTranslationError(code === 'auto_translate_disabled' ? t('translationDisabled') : t('translationFailed'))
+    }
   }
 
   useEffect(() => {
-    if (!uiSettings?.message_ops?.auto_translate) return
+    if (!autoTranslate) return
     const pending = messages.filter(m => !m.hidden && !m.translated && m.content && m.lang !== 'Chinese')
     if (pending.length === 0) return
     let cancelled = false
@@ -316,7 +328,7 @@ export default function ChatPane({
       }
     })()
     return () => { cancelled = true }
-  }, [messages, uiSettings?.message_ops?.auto_translate, userId])
+  }, [messages, autoTranslate, userId])
 
   const deliverMessage = async (tmpId, target, sourceText, sendMode, optimisticText) => {
     setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: true, failed: false, error: '' } : m))
@@ -462,7 +474,6 @@ export default function ChatPane({
     return <section className={`wx-chat empty is-active${active ? '' : ''}`}><div className="wx-empty wx-chat-empty"><svg viewBox="0 0 64 64"><path d="M11 14h42v30H29l-12 8v-8h-6z"/><path d="M21 25h22M21 33h15"/></svg><strong>{t('selectConversation')}</strong><span>{t('hintWorkspace')}</span></div></section>
   }
 
-  const autoTranslate = !!uiSettings?.message_ops?.auto_translate
   const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
   const headerTitle = contactProfile?.remark || userName
 
@@ -486,6 +497,13 @@ export default function ChatPane({
           </button>
         </div>
       </div>
+
+      {!autoTranslate && autoTranslateState?.blockedReason === 'ai_not_configured' ? (
+        <button type="button" className="wx-translation-alert" onClick={onOpenSettings}>
+          <span>{t('translationAiNotConfigured')}</span><strong>{t('configureNow')}</strong>
+        </button>
+      ) : null}
+      {translationError ? <button type="button" className="wx-translation-alert error" onClick={onOpenSettings}>{translationError}</button> : null}
 
       <div className="wx-messages" ref={scrollRef} onScroll={onScroll}>
         <div className="wx-messages-inner">
@@ -517,7 +535,7 @@ export default function ChatPane({
             const showTime = shouldShowBubbleTime(item, nextItem)
             const translatedText = String(item.translated || '').trim()
             const contentText = String(item.content || '').trim()
-            const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && item.lang !== 'Unknown' && translatedText && translatedText !== contentText
+            const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
             return (
               <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${idx}`} onClick={() => setActiveMessageId(item.message_id)}>
                 {!isOut ? <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(userName) }}>{initials(userName)}</div> : null}

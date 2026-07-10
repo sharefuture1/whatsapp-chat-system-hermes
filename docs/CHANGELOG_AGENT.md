@@ -1,5 +1,22 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：修复全站滚动/响应式与自动翻译真实 AI 链路
+
+- 关联规格：`SDD-P1-04`、`SDD-P1-05`、`SDD-P1-06`、`SDD-P2-01`、`SDD-P2-06`。
+- 页面根因：应用根节点固定且部分页面缺少自己的 `min-height:0/overflow:auto` 容器；账号页面大量 JSX 类无 CSS；部分设计 token 未定义；登录条件返回位于 Hooks 中间，切换认证状态会触发 React error #300。
+- 自动翻译根因：插件和消息开关虽开启，但 Provider 配置未形成统一有效门禁；AI 设置 DB Session 使用错误对象；消息读取 Worker 没有注入运行时设置，导致保存后的密钥/模型不被翻译路径使用。
+- 后端修复：统一 `_auto_translate_enabled`；AI settings 返回 `ready/blocked_reason`；插件关闭时手动翻译 API 明确拒绝；Legacy 数字 ID/V2 UUID 缓存键统一；RuntimeAISettingsManager 使用真正 session factory；翻译 Worker 注入同一运行时 Provider。
+- 插件真实性优化：无可靠 Worker/Hook 的定时、群发、TTS、媒体、自动标签和跟进插件统一返回 `available=false`；前端禁用开关并显示“执行链未接通”，后端拒绝重新启用。
+- 前端修复：App 计算唯一 `autoTranslateState` 并下传；Provider 未配置和翻译失败显示可操作提示；四语言补齐状态文案；修复 Hooks 条件返回顺序。
+- 样式修复：统一账号中心/详情/QR 和主页面壳、按钮、状态徽标、卡片、表单及移动断点；补齐设计 token；通讯录和发现页使用独立滚动并预留 TabBar/safe area。
+- 工程修复：移除 `web_api` import 时自动 `build_app()` 的数据库副作用，CLI 继续显式创建应用。
+- TDD/验证：Python `129 passed`，Web `15 passed`，Bridge `63 passed` + lint，Vite build 通过；唯一警告为 Starlette TestClient 上游弃用提醒。
+- 真实运行：AI Provider 加密配置并热生效，老挝语→中文探针成功；FastAPI health 200；本机与公网资源均为 `index-CYJQNXms.js` / `index-CBTrxfav.css`。
+- 浏览器验收：生产站点桌面 1440×900、移动 390×844 的聊天/通讯录/发现/我均无横向溢出或 React 控制台错误；通讯录和发现具有可用滚动容器。
+- 剩余：消息读取翻译尚未异步化；定时/群发插件仍缺可靠 Worker；Playwright 审计脚本需正式纳入仓库测试。
+
+---
+
 ## 2026-07-10：修复 V2 消息刷新/发送、AI 翻译并新增“我→全局 AI”
 
 - 根因 1：`ChatPane` 对 V2 会话直接跳过 `refreshTick`，因此独立库有新消息时当前聊天窗口不刷新。

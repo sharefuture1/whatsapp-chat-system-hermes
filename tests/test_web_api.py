@@ -37,6 +37,32 @@ def test_cors_preflight_bypasses_session_auth(tmp_path):
     assert client.get('/api/settings').status_code == 401
 
 
+def test_plugin_catalog_marks_unwired_plugins_unavailable(tmp_path):
+    profile = create_profile(tmp_path / 'p-plugin-availability')
+    client = authed_client(profile)
+
+    response = client.get('/api/plugins')
+
+    assert response.status_code == 200
+    plugins = {item['id']: item for item in response.json()['items']}
+    assert plugins['auto_translate']['available'] is True
+    assert plugins['quick_reply']['available'] is True
+    assert plugins['schedule']['available'] is False
+    assert plugins['broadcast']['available'] is False
+    assert plugins['voice_tts']['available'] is False
+    assert plugins['auto_tag']['available'] is False
+
+
+def test_unavailable_plugin_cannot_be_enabled(tmp_path):
+    profile = create_profile(tmp_path / 'p-plugin-unavailable-toggle')
+    client = authed_client(profile)
+
+    response = client.post('/api/plugins/toggle', json={'plugin_id': 'schedule', 'enabled': True})
+
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'Plugin is not available'
+
+
 def test_schedule_delete_missing_returns_404(tmp_path):
     profile = create_profile(tmp_path / 'p-schedule-delete')
     client = authed_client(profile)
@@ -86,6 +112,31 @@ def test_ai_settings_v1_is_safe_and_reports_effective_account_model(monkeypatch,
     assert 'unit-test-secret' not in response.text
     assert 'api_key_ciphertext' not in body
     assert 'api_key' not in body or body.get('api_key') is None
+
+
+def test_ai_settings_put_persists_and_becomes_effective(monkeypatch, tmp_path):
+    from whatsapp_chat_system.db import Base, create_engine
+
+    db_path = tmp_path / 'ai-settings.db'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite+pysqlite:///{db_path}')
+    Base.metadata.create_all(create_engine())
+    monkeypatch.setenv('WENDING_AI_API_KEY', '')
+    profile = create_profile(tmp_path / 'p-ai-settings-persist')
+    client = authed_client(profile)
+
+    response = client.put('/api/v1/ai/settings', json={
+        'base_url': 'https://example.ai/v1',
+        'default_model': 'model-live',
+        'api_key': 'runtime-secret-key',
+    })
+
+    assert response.status_code == 200
+    current = client.get('/api/v1/ai/settings').json()
+    assert current['api_key_configured'] is True
+    assert current['default_model'] == 'model-live'
+    assert current['base_url'] == 'https://example.ai/v1'
+    assert current['auto_translate']['ready'] is True
+    assert 'runtime-secret-key' not in json.dumps(current)
 
 
 def test_reply_preview_ai_fallback_is_structured_failure(monkeypatch, tmp_path):

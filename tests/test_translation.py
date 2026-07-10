@@ -113,3 +113,98 @@ def test_translate_endpoint_provider_failure_is_structured(monkeypatch, tmp_path
         'used_fallback': True,
         'error': {'code': 'upstream_error', 'retryable': True, 'request_id': 'req_translate'},
     }
+
+
+def test_translate_endpoint_rejects_when_plugin_is_disabled(monkeypatch, tmp_path):
+    from whatsapp_chat_system import web_api
+
+    called = False
+
+    class TranslationWorker:
+        def translate_to_zh_result(self, text, source_lang):
+            nonlocal called
+            called = True
+            raise AssertionError('provider must not run while plugin is disabled')
+
+    monkeypatch.setattr(web_api, '_translation_worker', lambda config: TranslationWorker())
+    profile = create_profile(tmp_path / 'p-disabled-plugin')
+    client = authed_client(profile)
+    settings = client.get('/api/settings').json()
+    settings['web_settings'].setdefault('plugins', {})['auto_translate'] = False
+    client.put('/api/settings', json={
+        'channels': settings['channels'],
+        'web_settings': settings['web_settings'],
+    })
+
+    response = client.post('/api/messages/plugin-off-1/translate', json={
+        'user_id': 'u@lid',
+        'content': 'ສະບາຍດີ',
+    })
+
+    assert response.status_code == 409
+    assert response.json()['detail']['code'] == 'auto_translate_disabled'
+    assert called is False
+
+
+def test_unknown_text_is_sent_to_ai_instead_of_silently_skipped(monkeypatch, tmp_path):
+    from whatsapp_chat_system.rewriter import RewriteResult
+    from whatsapp_chat_system import web_api
+
+    seen = []
+
+    class TranslationWorker:
+        def translate_to_zh_result(self, text, source_lang):
+            seen.append((text, source_lang))
+            return RewriteResult(language='Chinese', message='你好', used_fallback=False, error=None)
+
+    monkeypatch.setattr(web_api, '_translation_worker', lambda config: TranslationWorker())
+    profile = create_profile(tmp_path / 'p-unknown-text')
+    client = authed_client(profile)
+
+    response = client.post('/api/messages/unknown-1/translate', json={
+        'user_id': 'u@lid',
+        'content': '🙂',
+    })
+
+    assert response.status_code == 200
+    assert response.json()['translated'] == '你好'
+    assert seen == [('🙂', 'Unknown')]
+
+
+def test_translation_worker_uses_runtime_ai_settings(monkeypatch, tmp_path):
+    from whatsapp_chat_system import web_api
+    from whatsapp_chat_system.config import AppConfig
+    from whatsapp_chat_system.db import Base, create_engine
+    from whatsapp_chat_system.settings import AISettings
+
+    db_path = tmp_path / 'runtime-worker.db'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite+pysqlite:///{db_path}')
+    Base.metadata.create_all(create_engine())
+    manager = web_api.setup_ai_runtime_settings(AISettings())
+    manager.save_to_db(
+        base_url='https://runtime.example/v1',
+        default_model='runtime-model',
+        api_key='runtime-secret',
+    )
+    config = AppConfig.from_profile(create_profile(tmp_path / 'p-runtime-worker'))
+
+    worker = web_api._translation_worker(config)
+    provider = worker.ai_service.provider
+    effective_api_key = getattr(provider, '_effective_api_key')
+    effective_base_url = getattr(provider, '_effective_base_url')
+
+    assert effective_api_key() == 'runtime-secret'
+    assert effective_base_url() == 'https://runtime.example/v1'
+
+
+def test_ai_settings_reports_auto_translate_readiness(tmp_path):
+    profile = create_profile(tmp_path / 'p-ai-readiness')
+    client = authed_client(profile)
+
+    body = client.get('/api/v1/ai/settings').json()
+
+    assert body['auto_translate']['plugin_enabled'] is True
+    assert body['auto_translate']['setting_enabled'] is True
+    assert body['auto_translate']['ai_configured'] is False
+    assert body['auto_translate']['ready'] is False
+    assert body['auto_translate']['blocked_reason'] == 'ai_not_configured'

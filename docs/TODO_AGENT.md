@@ -38,6 +38,20 @@
 
 ### P0 — 阻断核心聊天体验
 
+- [x] **修复全站页面滚动、响应式与账号页面样式**
+  - 聊天、通讯录、发现、我、账号中心/详情/QR 使用独立滚动页面壳
+  - 桌面 1440×900、移动 390×844 无横向溢出；生产浏览器控制台无 React 错误
+  - 修复 Hooks 条件返回导致的生产 React error #300
+
+- [x] **修复自动翻译插件开启但不调用 AI**
+  - 插件、消息开关、Provider 配置统一为一个有效门禁
+  - 运行时加密设置热生效，翻译 Worker 使用同一 Provider
+  - Legacy 数字 ID/V2 UUID 均支持；失败显示配置或 Provider 错误
+  - 真实老挝语→中文 AI 探针通过
+
+- [ ] **自动翻译异步化**
+  - 当前读取消息仍可能同步等待模型；迁移为任务队列、缓存回填、失败重试和实时更新
+
 - [x] **修复会话列表左滑与 SVG 图标**
   - 操作层默认完全隐藏，仅左滑后显示
   - X/Y 方向锁、`touch-action: pan-y`、单行展开、滑动后防误触
@@ -115,17 +129,19 @@
 
 ### 当前验证结果（2026-07-10）
 
-- `npm run build`：✅ 通过
-- `pytest -q`：✅ 120 passed
-- `node --test web/tests/*.test.js`：✅ 9 passed
+- `npm run build`：✅ 通过，资源 `index-CYJQNXms.js` / `index-CBTrxfav.css`
+- `pytest -q`：✅ 129 passed
+- `node --test web/tests/*.test.js`：✅ 15 passed
 - `cd bridge && npm test`：✅ 63 passed
 - Bridge lint：✅ 通过
 - Bridge production audit：✅ 0 vulnerabilities
 - Alembic upgrade → downgrade → upgrade：✅ 通过
 - `/api/health`：✅ 200
+- 真实 AI 翻译探针：✅ 老挝语→中文，运行时 Provider 生效
+- 生产页面审计：✅ 桌面/移动四主页面无横向溢出、无 React 控制台错误，通讯录/发现滚动容器可用
+- 本机与公网静态资源哈希：✅ 一致
 - Legacy 网页直发同步探针：✅ 真实 WhatsApp ID + local ID + 增量 API 可读
 - V2 `3100` 影子 live/ready：✅ 200；未认证 API：401；create/status/stop：200
-- 线上资源：`index-zmRcX5WP.js` / `index-CpWFmy3-.css`，本机 FastAPI 资源 200
 - 统一收件箱：✅ Legacy 3 条 + V2 2 条会话聚合；平台/账号二级筛选已部署
 - 多账号通讯录：✅ V2 2 个联系人可读并与 Legacy 联系人聚合展示
 - 第二个 V2 业务账号同时在线：⏳ 尚未创建/登记，需继续扫码验收

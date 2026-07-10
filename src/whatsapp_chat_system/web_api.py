@@ -203,7 +203,8 @@ class RuntimeAISettingsManager:
     def load_from_db(self) -> None:
         """从业务数据库加载 AIRuntimeSetting 行，填充运行时缓存。"""
         engine = create_engine()
-        with session_scope(engine) as db:
+        session_factory = create_session_factory(engine)
+        with session_scope(session_factory) as db:
             row = db.get(AIRuntimeSetting, 'global')
             if row:
                 with self._lock:
@@ -234,7 +235,8 @@ class RuntimeAISettingsManager:
         from .settings import _normalize_base_url as norm_url
 
         engine = create_engine()
-        with session_scope(engine) as db:
+        session_factory = create_session_factory(engine)
+        with session_scope(session_factory) as db:
             row = db.get(AIRuntimeSetting, 'global')
             if row is None:
                 row = AIRuntimeSetting(id='global', provider='wendingai')
@@ -448,7 +450,14 @@ def _language_hint_for(text: str) -> str:
 
 
 def _translation_worker(config: AppConfig) -> _Rewriter:
-    return _Rewriter(config, lambda *args, **kwargs: None)
+    worker = _Rewriter(config, lambda *args, **kwargs: None)
+    provider = worker.ai_service.provider
+    if isinstance(provider, WendingAIProvider):
+        try:
+            provider.set_runtime_manager(get_runtime_ai_settings())
+        except RuntimeError:
+            pass
+    return worker
 
 
 def _ensure_message_translations(config: AppConfig, user_id: str, items: list[dict[str, Any]]) -> None:
@@ -460,10 +469,10 @@ def _ensure_message_translations(config: AppConfig, user_id: str, items: list[di
     """
     if not items:
         return
-    auto = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+    auto = _auto_translate_enabled(config)
     if not auto:
         return
-    cached = load_many(config.paths.memory_dir, user_id, [int(m['message_id']) for m in items if m.get('message_id') is not None])
+    cached = load_many(config.paths.memory_dir, user_id, [m['message_id'] for m in items if m.get('message_id') is not None])
     pending: dict[str, dict[str, Any]] = {}
     worker = _translation_worker(config)
     for m in items:
@@ -526,7 +535,7 @@ def _attach_translations(config: AppConfig, user_id: str, messages: list[dict[st
     cached = load_many(
         config.paths.memory_dir,
         user_id,
-        [int(m['message_id']) for m in messages if m.get('message_id') is not None],
+        [m['message_id'] for m in messages if m.get('message_id') is not None],
     )
     out: list[dict[str, Any]] = []
     for m in messages:
@@ -817,6 +826,12 @@ def build_app(
             'status_when_on': '长时间无回复时给出跟进建议',
         },
     ]
+
+    # 只有已经存在真实后端/工作链路的插件才允许标记为可用。
+    # schedule/broadcast 当前仅保存或同步执行，尚无可靠 Worker，不能冒充完整插件。
+    AVAILABLE_PLUGIN_IDS = {'auto_translate', 'quick_reply', 'memory', 'analytics'}
+    for plugin in PLUGIN_CATALOG:
+        plugin['available'] = plugin['id'] in AVAILABLE_PLUGIN_IDS
 
     def _plugin_state() -> dict[str, bool]:
         state = config.web_settings.get('plugins')
@@ -1205,16 +1220,35 @@ def build_app(
 
     @app.get('/api/v1/ai/settings')
     def ai_settings() -> dict[str, Any]:
-        """返回当前有效 AI 配置（不含密钥明文）。"""
+        """返回当前有效 AI 配置（不含密钥明文）及自动翻译可用状态。"""
         try:
             mgr = get_runtime_ai_settings()
-            return mgr.to_safe_dict()
+            safe = mgr.to_safe_dict()
         except RuntimeError:
-            # 降级：使用原始 env 配置
-            return {
+            safe = {
                 **config.ai_settings.safe_dict(),
                 'api_key_hint': None,
             }
+        plugin_enabled = _plugin_flag('auto_translate')
+        setting_enabled = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+        ai_configured = bool(safe.get('api_key_configured'))
+        blocked_reason = None
+        if not plugin_enabled:
+            blocked_reason = 'plugin_disabled'
+        elif not setting_enabled:
+            blocked_reason = 'setting_disabled'
+        elif not ai_configured:
+            blocked_reason = 'ai_not_configured'
+        return {
+            **safe,
+            'auto_translate': {
+                'plugin_enabled': plugin_enabled,
+                'setting_enabled': setting_enabled,
+                'ai_configured': ai_configured,
+                'ready': plugin_enabled and setting_enabled and ai_configured,
+                'blocked_reason': blocked_reason,
+            },
+        }
 
     @app.put('/api/v1/ai/settings')
     def update_ai_settings(request: AISettingsUpdateRequest) -> dict[str, Any]:
@@ -1262,9 +1296,14 @@ def build_app(
         text = str(body.get('content') or '')
         if not user_id or not text:
             raise HTTPException(status_code=400, detail='user_id and content required')
+        if not _auto_translate_enabled(config):
+            raise HTTPException(
+                status_code=409,
+                detail={'code': 'auto_translate_disabled', 'message': 'Auto translate plugin or message setting is disabled'},
+            )
         public_message_id: int | str = int(message_id) if message_id.isdigit() else message_id
         lang = _language_hint_for(text)
-        if lang in ('Chinese', 'Unknown'):
+        if lang == 'Chinese':
             return {'message_id': public_message_id, 'lang': lang, 'translated': None}
         worker = _translation_worker(config)
         translated = worker.translate_to_zh_result(text, lang)
@@ -1460,15 +1499,21 @@ def build_app(
     def list_plugins() -> dict[str, Any]:
         state = _plugin_state()
         items = [
-            {**p, 'enabled': bool(state.get(p['id'], True))}
+            {
+                **p,
+                'enabled': bool(state.get(p['id'], True)) if p.get('available') else False,
+            }
             for p in PLUGIN_CATALOG
         ]
         return {'items': items}
 
     @app.post('/api/plugins/toggle')
     def toggle_plugin(request: PluginToggleRequest) -> dict[str, Any]:
-        if not any(p['id'] == request.plugin_id for p in PLUGIN_CATALOG):
+        plugin = next((p for p in PLUGIN_CATALOG if p['id'] == request.plugin_id), None)
+        if plugin is None:
             raise HTTPException(status_code=404, detail='Unknown plugin')
+        if request.enabled and not plugin.get('available'):
+            raise HTTPException(status_code=409, detail='Plugin is not available')
         state = _plugin_state()
         state[request.plugin_id] = bool(request.enabled)
         save_json(config.paths.web_settings_file, config.web_settings)
@@ -1495,7 +1540,4 @@ def build_app(
     return app
 
 
-try:
-    app = build_app()
-except PermissionError:
-    app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')
+# ASGI deployments should explicitly call build_app(); importing this module is side-effect free.

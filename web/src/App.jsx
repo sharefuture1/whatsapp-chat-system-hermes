@@ -35,6 +35,20 @@ function writeTime(userId, ts) {
   } catch {}
 }
 
+function deriveAutoTranslateState(settings, apiSettings) {
+  const pluginEnabled = settings.plugins ? settings.plugins.auto_translate !== false : true
+  const settingEnabled = !!settings.web_settings?.message_ops?.auto_translate
+  const aiConfigured = !!apiSettings?.api_key_configured
+  const serverState = apiSettings?.auto_translate
+  return {
+    pluginEnabled: serverState?.plugin_enabled ?? pluginEnabled,
+    settingEnabled: serverState?.setting_enabled ?? settingEnabled,
+    aiConfigured: serverState?.ai_configured ?? aiConfigured,
+    ready: serverState?.ready ?? (pluginEnabled && settingEnabled && aiConfigured),
+    blockedReason: serverState?.blocked_reason || (!pluginEnabled ? 'plugin_disabled' : !settingEnabled ? 'setting_disabled' : !aiConfigured ? 'ai_not_configured' : null),
+  }
+}
+
 function AppInner() {
   const settingsApi = useSettings()
   const { t } = settingsApi
@@ -367,15 +381,8 @@ function AppInner() {
     })
   }, [conversations, query, platformFilter, accountFilter, settings.web_settings?.contact_profiles])
 
-  if (!sessionToken) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
-  }
-
-  const autoTranslate = (() => {
-    const pluginOn = settings.plugins ? (settings.plugins.auto_translate !== false) : true
-    if (!pluginOn) return false
-    return !!settings.web_settings?.message_ops?.auto_translate
-  })()
+  const autoTranslateState = deriveAutoTranslateState(settings, apiSettings)
+  const autoTranslate = autoTranslateState.ready
   const selectedConversation = useMemo(() => conversations.find(c => c.conversation_key === selectedId) || null, [conversations, selectedId])
   const selectedAccount = useMemo(
     () => inboxAccounts.find(item => item.id === accountFilter) || null,
@@ -432,6 +439,10 @@ function AppInner() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (!sessionToken) {
+    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
   }
 
   return (
@@ -491,6 +502,8 @@ function AppInner() {
               onHideMessage={hideMessage}
               sending={sending}
               sendingMeta={sendingMeta}
+              autoTranslate={autoTranslate}
+              autoTranslateState={autoTranslateState}
               uiSettings={settings.web_settings}
               onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
               onOpenContactConfig={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}

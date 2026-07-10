@@ -141,8 +141,8 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
                 <div className="wx-plugin-body">
                   <div className="wx-plugin-row1">
                     <div className="wx-plugin-name">{plugin.name}</div>
-                    <label className="wx-switch">
-                      <input type="checkbox" checked={plugin.enabled} onChange={() => toggle(plugin)} />
+                    <label className={`wx-switch ${plugin.available === false ? 'is-disabled' : ''}`}>
+                      <input type="checkbox" checked={plugin.enabled} disabled={plugin.available === false} onChange={() => toggle(plugin)} />
                       <span className="wx-switch-slider" />
                     </label>
                   </div>
@@ -150,9 +150,17 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
                   <div className="wx-plugin-meta">
                     <span className="wx-pill-mini brand">{meta.label}</span>
                     {plugin.builtin ? <span className="wx-pill-mini">{t('builtin') || 'Built-in'}</span> : null}
-                    <span className={`wx-pill-mini ${plugin.enabled ? 'ok' : 'danger'}`}>{plugin.enabled ? t('enabled') || 'On' : t('disabled') || 'Off'}</span>
+                    <span className={`wx-pill-mini ${plugin.available === false ? 'danger' : plugin.enabled ? 'ok' : 'danger'}`}>
+                      {plugin.available === false ? (t('unavailable') || 'Unavailable') : plugin.enabled ? t('enabled') || 'On' : t('disabled') || 'Off'}
+                    </span>
                   </div>
-                  <div className="wx-plugin-status subtle">{plugin.enabled ? (plugin.status_when_on || (t('statusOn') || '已开启')) : (t('statusOff') || '已关闭')}</div>
+                  <div className="wx-plugin-status subtle">
+                    {plugin.available === false
+                      ? (t('pluginUnavailableHint') || 'The real execution worker is not connected yet')
+                      : plugin.enabled
+                        ? (plugin.status_when_on || (t('statusOn') || '已开启'))
+                        : (t('statusOff') || '已关闭')}
+                  </div>
                   {plugin.hooks && plugin.hooks.length ? (
                     <ul className="wx-plugin-hooks">
                       {plugin.hooks.map(h => <li key={h}><code>{h}</code></li>)}

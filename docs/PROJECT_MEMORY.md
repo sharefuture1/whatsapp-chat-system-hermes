@@ -1,6 +1,6 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 12:45 UTC
+> 最后更新：2026-07-10 14:10 UTC
 
 ## 当前结论
 
@@ -18,11 +18,14 @@
 - V2 当前聊天已按轮询刷新独立消息 API；V2 发送改用当前会话所属账号 Bridge，成功后写独立消息表，不再误走 Legacy `/api/reply`。
 - 翻译 API/缓存支持 Legacy 整数和 V2 UUID message ID；“我 → 全局 AI”可配置模型、密钥、提示词、回复风格和自动翻译。
 - 当前 V2 业务账号真实状态为 `offline`，所以代码链与运行健康已验证，但新的真实入站/出站/翻译端到端验收仍需账号重新上线。
+- 自动翻译有效状态已统一为“插件开关 + 消息设置 + AI Provider 可用”；AI 运行时设置已加密持久化并热生效，翻译 Worker 使用同一运行时 Provider。
+- 真实 AI 探针已完成老挝语→中文翻译；失败状态会向前端显示配置或 Provider 错误，不再静默或伪装成功。
+- 全站页面壳与滚动已完成一轮生产审计：桌面 1440×900 和移动 390×844 无横向溢出，通讯录/发现具有独立滚动容器，React Hooks 顺序崩溃已修复。
 
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-DZE5MIrh.js` / `index-elpJaKRv.css`，本机 FastAPI 资源 200；聊天同步修复与全局 AI 设置已部署。
+- 前端：`index-CYJQNXms.js` / `index-CBTrxfav.css`，本机 FastAPI 与公网 `https://whats.future1.us` 资源哈希一致。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2：`127.0.0.1:3100` 当前运行，live/ready 200，内部 token 与 FastAPI 配置一致；当前登记业务账号状态为 offline。
 - 独立会话 API：`/api/v1/conversations` 返回当前 V2 独立库数据，实测全部账号视图 2 条会话。
@@ -55,11 +58,11 @@
 ## 验证状态
 
 ```text
-pytest -q                          122 passed, 1 warning
+pytest -q                          129 passed, 1 warning
 bridge npm test                   63 passed
 bridge npm run lint               PASS
 bridge npm audit --omit=dev       0 vulnerabilities
-web node --test tests/*.test.js   12 passed
+web node --test tests/*.test.js   15 passed
 web npm run build                 PASS
 Alembic upgrade→downgrade→upgrade PASS
 git diff --check                  PASS
