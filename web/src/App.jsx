@@ -211,6 +211,12 @@ function AppInner() {
     setSending(true)
     try {
       const data = await api.post('/reply', { target, message, mode, preview_only: false })
+      if (data?.success !== true) {
+        const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
+        error.code = data?.code || 'delivery_failed'
+        error.retryable = data?.retryable !== false
+        throw error
+      }
       setSendingMeta({ mode: data.mode, language: data.rewrite?.language || 'direct' })
       refreshWorkspace({ silent: true })
       return data
@@ -244,6 +250,8 @@ function AppInner() {
   }, [pinned, refreshWorkspace])
 
   const deleteChat = useCallback(async (userId) => {
+    if (!window.confirm(t('deleteConversationConfirm') || '删除此会话？之后可由新消息重新出现。')) return
+    const wasPinned = pinned.includes(userId)
     setPinned(prev => {
       const updated = prev.filter(p => p !== userId)
       localStorage.setItem(PIN_KEY, JSON.stringify(updated))
@@ -251,9 +259,16 @@ function AppInner() {
     })
     try {
       await api.post('/chat/delete', { user_id: userId })
-    } catch {}
-    refreshWorkspace()
-  }, [refreshWorkspace])
+      if (selectedId === userId) {
+        setSelectedId('')
+        setSelectedName('')
+      }
+      await refreshWorkspace({ silent: true })
+    } catch (e) {
+      if (wasPinned) setPinned(prev => prev.includes(userId) ? prev : [userId, ...prev])
+      showError(e)
+    }
+  }, [pinned, refreshWorkspace, selectedId, t])
 
   const markRead = useCallback((userId, ts) => {
     if (!userId) return
@@ -453,7 +468,7 @@ function AppInner() {
         )}
       </div>
 
-      <TabBar activeTab={activeTab} onChange={setActiveTab} unreadChats={unreadChats} />
+      <TabBar activeTab={activeTab} onChange={setActiveTab} unreadChats={unreadChats} hidden={activeTab === 'chats' && Boolean(selectedId)} />
 
       <SettingsPanel
         open={settingsOpen}

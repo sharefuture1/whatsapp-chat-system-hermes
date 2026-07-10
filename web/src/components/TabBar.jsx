@@ -20,10 +20,10 @@ const TABS = [
   { id: 'me', key: 'tabMe', Icon: MeIcon },
 ]
 
-export default function TabBar({ activeTab, onChange, unreadChats }) {
+export default function TabBar({ activeTab, onChange, unreadChats, hidden = false }) {
   const { t } = useSettings()
   return (
-    <nav className="wx-tab-bar" role="tablist">
+    <nav className={`wx-tab-bar${hidden ? ' is-chat-hidden' : ''}`} role="tablist">
       {TABS.map(({ id, key, Icon }) => (
         <button
           key={id}

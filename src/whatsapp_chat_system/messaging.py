@@ -36,7 +36,7 @@ class HermesMessenger:
             payload = json.loads((proc.stdout or "").strip() or "{}")
         except Exception:
             payload = {}
-        success = proc.returncode == 0 and (not json_output or bool(payload.get("success", True)))
+        success = proc.returncode == 0 and (not json_output or payload.get("success") is True)
         chat_id = str(payload.get("chat_id") or "")
         return SendResult(success=success, chat_id=chat_id, stdout=proc.stdout, stderr=proc.stderr, payload=payload)
 

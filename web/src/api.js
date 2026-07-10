@@ -20,9 +20,13 @@ export function setUnauthorizedHandler(handler) {
 }
 
 export class ApiError extends Error {
-  constructor(status, detail) {
+  constructor(status, detail, data = null) {
     super(detail || `Request failed (${status})`)
+    this.name = 'ApiError'
     this.status = status
+    this.data = data
+    this.code = data?.code || null
+    this.retryable = Boolean(data?.retryable)
   }
 }
 
@@ -44,7 +48,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
   }
   if (!res.ok) {
     if (res.status === 401 && onUnauthorized) onUnauthorized()
-    throw new ApiError(res.status, data?.detail)
+    throw new ApiError(res.status, data?.detail, data)
   }
   return data
 }
@@ -53,4 +57,5 @@ export const api = {
   get: (path, opts) => request(path, opts),
   post: (path, body, opts) => request(path, { ...opts, method: 'POST', body }),
   put: (path, body, opts) => request(path, { ...opts, method: 'PUT', body }),
+  delete: (path, opts) => request(path, { ...opts, method: 'DELETE' }),
 }

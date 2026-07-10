@@ -17,6 +17,29 @@ def authed_client(profile):
     return client
 
 
+def test_cors_preflight_bypasses_session_auth(tmp_path):
+    profile = create_profile(tmp_path / 'p-cors')
+    client = TestClient(build_app(str(profile)))
+    resp = client.options(
+        '/api/settings',
+        headers={
+            'Origin': 'https://example.vercel.app',
+            'Access-Control-Request-Method': 'PUT',
+            'Access-Control-Request-Headers': 'content-type,x-session-token',
+        },
+    )
+    assert resp.status_code in {200, 204}
+    assert resp.headers.get('access-control-allow-origin') == '*'
+    assert 'PUT' in resp.headers.get('access-control-allow-methods', '')
+    assert client.get('/api/settings').status_code == 401
+
+
+def test_schedule_delete_missing_returns_404(tmp_path):
+    profile = create_profile(tmp_path / 'p-schedule-delete')
+    client = authed_client(profile)
+    assert client.delete('/api/schedule/not-found').status_code == 404
+
+
 def test_health_with_isolated_profile(tmp_path):
     profile = create_profile(tmp_path / 'p1')
     client = TestClient(build_app(str(profile)))

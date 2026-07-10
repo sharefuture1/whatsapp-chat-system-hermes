@@ -1,5 +1,111 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：聊天主链路可靠性与移动端交互全面修复
+
+### 会话列表与图标
+
+- 左滑操作层改为默认完全隐藏，仅滑动后显示置顶/删除
+- 加入 X/Y 方向锁、`touch-action: pan-y`、单行展开和滑动防误触
+- 搜索、设置、置顶、删除 SVG 显式使用 `currentColor`
+- 删除会话增加确认、失败提示和置顶状态恢复
+
+### 消息发送与 API
+
+- 前端补齐 `api.delete`
+- OPTIONS 预检绕过 auth middleware，普通 API 认证保持不变
+- 普通发送严格检查真实 `success === true`，后端失败返回 502 和 `retryable`
+- 失败消息保留目标、原文和模式；可重试错误支持原地重试
+- 群发按逐项真实结果返回成功、部分成功、失败统计
+- Hermes JSON 发送输出缺失 `success: true` 时不再默认成功
+- 删除不存在的定时任务返回 404
+
+### 消息同步
+
+- SQLite 增量查询改为严格按消息 ID 排序，与 `id > cursor` 一致
+- 增量 API 返回 `next_after_id` 和 `has_more`
+- 前端连续排空最多 10 批增量消息，避免一次超过 100 条时漏消息
+- 请求追踪器阻止旧会话响应覆盖当前会话
+- 修复发送后延迟刷新可能使新会话加载失效的竞态
+
+### 移动端聊天
+
+- 进入具体聊天后隐藏根 TabBar，输入区独占底部安全区
+- textarea 按真实 `scrollHeight` 自动增高，移动端字号 16px
+- 中文输入法组合阶段 Enter 不触发发送
+- 用户查看历史时不强制滚底，显示新消息计数按钮
+- 联系人抽屉 AI 风格入口改为抽屉内切换 Tab
+
+### 工程质量
+
+- 四语言 i18n keys 全量对齐
+- StaticFiles 在最小测试夹具缺少 assets 目录时仍能启动 SPA
+- 新增 ID 游标乱序时间戳与 API 分页测试
+
+### 验证与部署
+
+- `npm run build`：通过
+- `pytest -q`：48 passed
+- `node --test tests/chatSync.test.js`：4 passed
+- `git diff --check`：通过
+- 线上 `/api/health`：200
+- 线上 JS：`index-X_NsIE3q.js`，200，248740 bytes
+- 线上 CSS：`index-BWXtslEL.css`，200，43681 bytes
+- CORS OPTIONS：200；未认证普通 API：401
+
+---
+
+## 2026-07-10：第一步——消息实时刷新与防串线
+
+### 修复
+
+- 初次会话加载成功后正确标记当前会话，恢复 `refreshTick` 增量拉取
+- 新增会话请求追踪器；切换联系人或卸载时使旧请求失效
+- 历史分页、发送后刷新均显式绑定目标联系人，避免依赖变化中的闭包
+
+### 新增测试
+
+- `web/tests/chatSync.test.js`：4 个请求生命周期回归测试全部通过
+
+### 验证
+
+- `node --test tests/chatSync.test.js`：4/4 通过
+- `npm run build`：通过
+- 新资源：`index-BTN4u_Pt.js`
+- 线上 `/assets/index-BTN4u_Pt.js`：200，235898 bytes
+- `/api/health`：200
+- Python 全测仍为历史状态：41 passed / 3 failed（i18n 与 StaticFiles 测试夹具）
+
+---
+
+## 2026-07-10：前后端微信体验与可靠性审计
+
+### 审计范围
+
+- 前端：App、会话列表、聊天页、通讯录、发现、我、设置、工具、CSS、i18n
+- 后端：消息分页/增量、发送、认证、CORS、翻译、群发、定时任务、插件、持久化
+
+### 真实验证
+
+- `npm run build`：通过
+- `pytest -q`：41 passed / 3 failed
+- `/api/health`：200
+- 跨域 OPTIONS 预检：401，被 auth middleware 拦截
+
+### 主要结论
+
+- 当前聊天增量刷新失效，快速切换会话存在消息串线风险
+- 发送失败可能误报成功；增量游标可能造成消息永久遗漏
+- `api.delete` 缺失；定时发送尚无执行 worker
+- 移动端聊天层级、左滑手势、输入区与四 Tab 信息架构仍需重构
+- 会话计算、翻译、SQLite 索引与运行态配置持久化需要性能和可靠性治理
+
+### 文档更新
+
+- `docs/TODO_AGENT.md`：新增 P0/P1/P2 可执行优化清单
+- `docs/PROJECT_MEMORY.md`：更新当前关键风险和验证结果
+
+---
+
 ## 2026-07-09 14:42 UTC
 
 ### 修复：StaticFiles `/assets` 404 bug（部署失败根因）

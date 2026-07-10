@@ -100,9 +100,11 @@ export default function ToolsPanel() {
         mode: broadcastMode,
         use_memory: true,
       })
-      flash(`${t('broadcastDone') || 'Sent'}: ${res.entry?.results?.filter(r => r.success).length || 0}/${targets.length}`)
-      setBroadcastMessage('')
-      loadAll()
+      const succeeded = Number(res.succeeded ?? res.entry?.results?.filter(r => r.success).length ?? 0)
+      const failed = Number(res.failed ?? Math.max(0, targets.length - succeeded))
+      flash(`${t('broadcastDone') || 'Broadcast'}: ${succeeded}/${targets.length}${failed ? ` · ${failed} ${t('sendFailed') || 'failed'}` : ''}`)
+      if (failed === 0) setBroadcastMessage('')
+      await loadAll()
     } catch (e) {
       flash(e.message)
     } finally {

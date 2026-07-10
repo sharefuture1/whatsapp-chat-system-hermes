@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useSettings } from '../settings'
 import { fmtRelative } from '../format'
 
@@ -24,228 +24,147 @@ function avatarColor(name) {
   return colors[h % colors.length]
 }
 
-const SWIPE_THRESHOLD = 80
+const ACTION_WIDTH = 144
+const SWIPE_THRESHOLD = 64
+const DIRECTION_THRESHOLD = 8
 
-function SwipeRow({ children, onPin, onDelete, pinned, t }) {
-  const [dx, setDx] = useState(0)
-  const [startX, setStartX] = useState(null)
-  const [open, setOpen] = useState(false)
+const iconProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.8,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+}
 
-  const onTouchStart = e => {
-    setStartX(e.touches[0].clientX)
-    setOpen(false)
+const PinIcon = () => <svg {...iconProps}><path d="M12 17v5M8 3h8l-2 5 4 2-3 4H9l-3-4 4-2-2-5z" /></svg>
+const TrashIcon = () => <svg {...iconProps}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14" /></svg>
+const SettingsIcon = () => <svg {...iconProps}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.6 7l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.3 1.1z" /></svg>
+const SearchIcon = () => <svg {...iconProps}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+const EmptyChatIcon = () => <svg {...iconProps} className="wx-empty-svg"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-9l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" /><path d="M8 10h8M8 13h5" /></svg>
+
+function SwipeRow({ rowId, children, onPin, onDelete, pinned, t, isOpen, onRequestOpen, onRequestClose }) {
+  const [dragX, setDragX] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const gesture = useRef(null)
+  const suppressClickUntil = useRef(0)
+  const offset = dragX === null ? (isOpen ? -ACTION_WIDTH : 0) : dragX
+  const revealed = offset < -4 || isOpen
+
+  const begin = (x, y, pointerType) => {
+    gesture.current = { startX: x, startY: y, direction: 'undecided', pointerType }
+    setDragging(false)
   }
-  const onTouchMove = e => {
-    if (startX === null) return
-    const delta = e.touches[0].clientX - startX
-    if (delta < 0) {
-      const limited = Math.max(delta, -160)
-      setDx(limited)
-    } else if (open) {
-      const limited = Math.min(delta, 160)
-      setDx(limited - 140)
-    } else {
-      setDx(0)
+
+  const move = (x, y) => {
+    const current = gesture.current
+    if (!current) return
+    const deltaX = x - current.startX
+    const deltaY = y - current.startY
+    if (current.direction === 'undecided') {
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < DIRECTION_THRESHOLD) return
+      current.direction = Math.abs(deltaX) > Math.abs(deltaY) * 1.2 ? 'horizontal' : 'vertical'
+      if (current.direction === 'vertical') return
+      onRequestOpen(rowId)
+      setDragging(true)
     }
+    if (current.direction !== 'horizontal') return
+    const base = isOpen ? -ACTION_WIDTH : 0
+    setDragX(Math.max(-ACTION_WIDTH, Math.min(0, base + deltaX)))
   }
-  const onTouchEnd = () => {
-    if (dx < -SWIPE_THRESHOLD) {
-      setDx(-140)
-      setOpen(true)
-    } else {
-      setDx(0)
-      setOpen(false)
+
+  const finish = () => {
+    const current = gesture.current
+    if (!current) return
+    if (current.direction === 'horizontal') {
+      const shouldOpen = offset <= -SWIPE_THRESHOLD
+      if (shouldOpen) onRequestOpen(rowId)
+      else onRequestClose(rowId)
+      suppressClickUntil.current = Date.now() + 350
     }
-    setStartX(null)
+    gesture.current = null
+    setDragX(null)
+    setDragging(false)
   }
-  const onMouseDown = e => {
-    setStartX(e.clientX)
-    setOpen(false)
+
+  const cancel = () => {
+    gesture.current = null
+    setDragX(null)
+    setDragging(false)
   }
-  const onMouseMove = e => {
-    if (startX === null) return
-    const delta = e.clientX - startX
-    if (delta < 0) {
-      setDx(Math.max(delta, -160))
-    } else if (open) {
-      setDx(Math.min(delta, 160) - 140)
+
+  const guardClick = e => {
+    if (Date.now() < suppressClickUntil.current || isOpen) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (isOpen) onRequestClose(rowId)
     }
-  }
-  const onMouseUp = () => {
-    if (dx < -SWIPE_THRESHOLD) {
-      setDx(-140)
-      setOpen(true)
-    } else {
-      setDx(0)
-      setOpen(false)
-    }
-    setStartX(null)
   }
 
   return (
     <div
-      className="wx-swipe-wrap"
-      style={{ transform: `translateX(${dx}px)` }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp}
-      onMouseLeave={() => { if (startX !== null) onMouseUp() }}
+      className={`wx-swipe-wrap${revealed ? ' is-revealed' : ''}${dragging ? ' is-dragging' : ''}`}
+      onTouchStart={e => begin(e.touches[0].clientX, e.touches[0].clientY, 'touch')}
+      onTouchMove={e => move(e.touches[0].clientX, e.touches[0].clientY)}
+      onTouchEnd={finish}
+      onTouchCancel={cancel}
+      onMouseDown={e => { if (e.button === 0) begin(e.clientX, e.clientY, 'mouse') }}
+      onMouseMove={e => move(e.clientX, e.clientY)}
+      onMouseUp={finish}
+      onMouseLeave={() => { if (gesture.current?.pointerType === 'mouse') finish() }}
     >
-      <div className="wx-swipe-content">{children}</div>
-      <div className="wx-swipe-actions">
-        <button
-          type="button"
-          className={`wx-swipe-action pin ${pinned ? 'is-active' : ''}`}
-          onClick={() => { onPin(); setDx(0); setOpen(false) }}
-        >
-          <svg viewBox="0 0 24 24"><path d="M12 17v5M8 3h8l-2 5 4 2-3 4H9l-3-4 4-2-2-5z"/></svg>
-          <span>{pinned ? t('unpin') : t('pin')}</span>
+      <div className="wx-swipe-actions" aria-hidden={!revealed}>
+        <button type="button" tabIndex={revealed ? 0 : -1} className={`wx-swipe-action pin ${pinned ? 'is-active' : ''}`} onClick={() => { onPin(); onRequestClose(rowId) }}>
+          <PinIcon /><span>{pinned ? t('unpin') : t('pin')}</span>
         </button>
-        <button
-          type="button"
-          className="wx-swipe-action danger"
-          onClick={() => { onDelete(); setDx(0); setOpen(false) }}
-        >
-          <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/></svg>
-          <span>{t('delete')}</span>
+        <button type="button" tabIndex={revealed ? 0 : -1} className="wx-swipe-action danger" onClick={() => { onDelete(); onRequestClose(rowId) }}>
+          <TrashIcon /><span>{t('delete')}</span>
         </button>
       </div>
+      <div className="wx-swipe-content" style={{ transform: `translate3d(${offset}px,0,0)` }} onClickCapture={guardClick}>{children}</div>
     </div>
   )
 }
 
-const PlusIcon = () => (
-  <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-)
-
-export default function ChatList({
-  conversations,
-  selectedId,
-  selectedProfileMap,
-  onSelect,
-  query,
-  onQueryChange,
-  total,
-  hasMore,
-  onLoadMore,
-  loadingMore,
-  pinned,
-  pinnedSet,
-  onTogglePin,
-  onDeleteChat,
-  unread,
-  autoTranslate,
-  platformFilter,
-  platformOptions,
-  onPlatformFilterChange,
-  onOpenSettings,
-}) {
+export default function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, onOpenSettings }) {
   const { t } = useSettings()
+  const [openSwipeId, setOpenSwipeId] = useState(null)
   const showPlatformFilter = platformOptions && platformOptions.length > 1
-  const isPinnedFn = (userId) => {
-    if (pinnedSet instanceof Set) return pinnedSet.has(userId)
-    if (Array.isArray(pinnedSet)) return pinnedSet.includes(userId)
-    if (Array.isArray(pinned)) return pinned.includes(userId)
-    return false
-  }
-  const renderRow = (item) => {
+  const isPinnedFn = userId => pinnedSet instanceof Set ? pinnedSet.has(userId) : Array.isArray(pinnedSet) ? pinnedSet.includes(userId) : Array.isArray(pinned) ? pinned.includes(userId) : false
+
+  const renderRow = item => {
     const count = unread?.[item.user_id] || 0
     const remark = selectedProfileMap?.[item.user_id]?.remark || ''
     const displayName = remark || item.user_name
     const showName = remark ? item.user_name : ''
     const isPinned = item.pinned || isPinnedFn(item.user_id)
     return (
-      <SwipeRow
-        key={item.user_id}
-        pinned={isPinned}
-        t={t}
-        onPin={() => onTogglePin(item.user_id)}
-        onDelete={() => onDeleteChat(item.user_id)}
-      >
-        <button
-          type="button"
-          className={`wx-list-item${selectedId === item.user_id ? ' active' : ''}`}
-          onClick={() => onSelect(item.user_id)}
-        >
+      <SwipeRow key={item.user_id} rowId={item.user_id} pinned={isPinned} t={t} isOpen={openSwipeId === item.user_id} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item.user_id)}>
+        <button type="button" className={`wx-list-item${selectedId === item.user_id ? ' active' : ''}`} onClick={() => onSelect(item.user_id)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(displayName)}</div>
           <div className="wx-list-text">
-            <div className="wx-list-row1">
-              <div className="wx-list-name">
-                <span className="wx-platform-badge">{platformLabel(item.platform)}</span>
-                <span>{displayName}</span>
-              </div>
-              <div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div>
-            </div>
-            <div className="wx-list-row2">
-              <div className="wx-list-preview">{showName ? `${showName} · ${item.last_message || '…'}` : (item.last_message || '…')}</div>
-              <div className="wx-list-row2-right">
-                {isPinned ? <span className="wx-pin-star" aria-label={t('pin')}>★</span> : null}
-                {item.priority === 'high' ? <span className="wx-pill-mini danger">!</span> : null}
-                {item.muted ? <span className="wx-mute-dot" aria-label={t('muted') || 'muted'} /> : null}
-                {count > 0 ? <span className="wx-unread-badge">{count > 99 ? '99+' : count}</span> : null}
-              </div>
-            </div>
+            <div className="wx-list-row1"><div className="wx-list-name"><span className="wx-platform-badge">{platformLabel(item.platform)}</span><span>{displayName}</span></div><div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div></div>
+            <div className="wx-list-row2"><div className="wx-list-preview">{showName ? `${showName} · ${item.last_message || '…'}` : (item.last_message || '…')}</div><div className="wx-list-row2-right">{isPinned ? <span className="wx-pin-star" aria-label={t('pin')}>★</span> : null}{item.priority === 'high' ? <span className="wx-pill-mini danger">!</span> : null}{item.muted ? <span className="wx-mute-dot" aria-label={t('muted') || 'muted'} /> : null}{count > 0 ? <span className="wx-unread-badge">{count > 99 ? '99+' : count}</span> : null}</div></div>
             {autoTranslate && item.last_message_translated ? <div className="wx-list-translation">{item.last_message_translated}</div> : null}
           </div>
         </button>
       </SwipeRow>
     )
   }
-  return (
-    <aside className="wx-sidebar">
-      <div className="wx-sidebar-header">
-        <h1>{t('tabChats')}</h1>
-        <div className="wx-sidebar-actions">
-          <button type="button" className="wx-icon-btn" aria-label={t('settings')} onClick={onOpenSettings}><PlusIcon /></button>
-        </div>
-      </div>
-      <div className="wx-search">
-        <span className="wx-search-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        </span>
-        <input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} />
-      </div>
-      {showPlatformFilter ? (
-        <div className="wx-platform-filter">
-          {platformOptions.map(platform => (
-            <button key={platform} type="button" className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>
-              {platform === 'all' ? 'ALL' : platformLabel(platform)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {(() => {
-        const pinnedItems = conversations.filter(item => isPinnedFn(item.user_id) || item.pinned)
-        const normalItems = conversations.filter(item => !isPinnedFn(item.user_id) && !item.pinned)
-        return (
-          <>
-            {pinnedItems.length > 0 ? (
-              <div className="wx-pinned-section">
-                {pinnedItems.map(renderRow)}
-              </div>
-            ) : null}
-          </>
-        )
-      })()}
-      <div className="wx-list">
-        {conversations.length === 0 ? (
-          <div className="wx-empty">
-            <div className="wx-empty-illustration">💬</div>
-            <div className="wx-empty-state-row">
-              <h3>{t('noConversations')}</h3>
-              <p>{t('noConversationsHint') || '暂无会话记录'}</p>
-            </div>
-          </div>
-        ) : null}
-        {(() => {
-          const normalItems = conversations.filter(item => !isPinnedFn(item.user_id) && !item.pinned)
-          return normalItems.map(renderRow)
-        })()}
-        {hasMore ? <div className="wx-loadmore"><button type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? t('loading') : t('loadMore')}</button></div> : null}
-      </div>
-    </aside>
-  )
+
+  const pinnedItems = conversations.filter(item => isPinnedFn(item.user_id) || item.pinned)
+  const normalItems = conversations.filter(item => !isPinnedFn(item.user_id) && !item.pinned)
+
+  return <aside className="wx-sidebar" onClick={e => { if (e.target.closest('.wx-sidebar-header,.wx-search,.wx-platform-filter')) setOpenSwipeId(null) }}>
+    <div className="wx-sidebar-header"><h1>{t('tabChats')}</h1><div className="wx-sidebar-actions"><button type="button" className="wx-icon-btn" aria-label={t('settings')} onClick={onOpenSettings}><SettingsIcon /></button></div></div>
+    <div className="wx-search"><span className="wx-search-icon" aria-hidden="true"><SearchIcon /></span><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} /></div>
+    {showPlatformFilter ? <div className="wx-platform-filter">{platformOptions.map(platform => <button key={platform} type="button" className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>{platform === 'all' ? 'ALL' : platformLabel(platform)}</button>)}</div> : null}
+    <div className="wx-list" onScroll={() => setOpenSwipeId(null)}>
+      {pinnedItems.length > 0 ? <div className="wx-pinned-section">{pinnedItems.map(renderRow)}</div> : null}
+      {conversations.length === 0 ? <div className="wx-empty"><EmptyChatIcon /><div className="wx-empty-state-row"><h3>{t('noConversations')}</h3><p>{t('noConversationsHint') || '暂无会话记录'}</p></div></div> : null}
+      {normalItems.map(renderRow)}
+      {hasMore ? <div className="wx-loadmore"><button type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? t('loading') : t('loadMore')}</button></div> : null}
+    </div>
+  </aside>
 }

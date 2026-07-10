@@ -351,14 +351,66 @@ a { color: var(--wx-link); text-decoration: none; }
 .platform-empty { padding: 12px; text-align: center; }
 
 /* ================== Swipe-to-action list rows ================== */
-.wx-swipe-wrap { position: relative; transition: transform .18s ease; will-change: transform; }
-.wx-swipe-content { position: relative; z-index: 2; background: transparent; }
-.wx-swipe-actions { position: absolute; inset: 0 0 0 auto; width: 140px; display: flex; z-index: 1; pointer-events: none; }
-.wx-swipe-actions > .wx-swipe-action { pointer-events: auto; flex: 1; border: 0; color: #fff; font-size: 11px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
-.wx-swipe-actions > .wx-swipe-action svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.wx-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--wx-panel);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.wx-pinned-section .wx-swipe-wrap { background: var(--wx-panel-soft); }
+.wx-swipe-content {
+  position: relative;
+  z-index: 2;
+  background: inherit;
+  transition: transform .18s cubic-bezier(.2,.7,.2,1);
+  will-change: transform;
+}
+.wx-swipe-wrap.is-dragging .wx-swipe-content { transition: none; }
+.wx-swipe-actions {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 144px;
+  display: flex;
+  z-index: 1;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .1s linear, visibility 0s linear .1s;
+}
+.wx-swipe-wrap.is-revealed .wx-swipe-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.wx-swipe-action {
+  flex: 1;
+  border: 0;
+  color: #fff;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.wx-swipe-action svg {
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .wx-swipe-action.pin { background: #5b8def; }
 .wx-swipe-action.pin.is-active { background: #4a7ad6; }
 .wx-swipe-action.danger { background: var(--wx-danger); }
+.wx-empty-svg { width: 52px; height: 52px; color: var(--wx-text-faint); }
 
 /* ================== Plugin center ================== */
 .wx-plugin-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
@@ -449,6 +501,10 @@ a { color: var(--wx-link); text-decoration: none; }
   .wx-chat-layout.mobile-list-open .wx-chat { display: none; }
   .wx-chat-layout.mobile-chat-open .wx-sidebar { display: none; }
   .wx-chat-layout.mobile-chat-open .wx-chat { display: flex; height: 100%; min-height: 0; align-self: stretch; }
+  .wx-tab-bar.is-chat-hidden { display: none; }
+  .wx-composer-input textarea { font-size: 16px; }
+  .wx-composer-toolbar { overflow-x: auto; scrollbar-width: none; }
+  .wx-composer-toolbar::-webkit-scrollbar { display: none; }
   .wx-back-btn { display: inline-flex; }
   .wx-chat-header { padding: 8px 8px; gap: 8px; }
   .wx-chat-header .wx-avatar { width: 36px; height: 36px; font-size: 13px; }
@@ -514,10 +570,10 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-send-btn.sending { animation: none; }
 
 /* ================== Composer ================== */
-.wx-composer { background: var(--wx-panel); border-top: 1px solid var(--wx-divider); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.wx-composer { background: var(--wx-panel); border-top: 1px solid var(--wx-divider); padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 6px; }
 :root[data-theme="dark"] .wx-composer { border-color: #2a2a2c; }
 .wx-composer-input { display: flex; gap: 8px; align-items: flex-end; }
-.wx-composer-input textarea { flex: 1; border: 1px solid var(--wx-divider); border-radius: 10px; padding: 9px 12px; font-size: 14px; font-family: inherit; resize: none; outline: none; background: var(--wx-panel-soft); line-height: 1.5; max-height: 120px; overflow-y: auto; transition: border-color .15s; field-sizing: content; }
+.wx-composer-input textarea { flex: 1; min-height: 40px; border: 1px solid var(--wx-divider); border-radius: 10px; padding: 9px 12px; font-size: 14px; font-family: inherit; resize: none; outline: none; background: var(--wx-panel-soft); line-height: 1.5; max-height: 140px; overflow-y: auto; transition: border-color .15s; }
 :root[data-theme="dark"] .wx-composer-input textarea { border-color: #2a2f33; background: #161618; color: var(--wx-text); }
 .wx-composer-input textarea:focus { border-color: var(--wx-brand); }
 .wx-mode-pill { background: var(--wx-panel-soft); border: 1px solid var(--wx-divider); border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wx-text-muted); display: flex; align-items: center; gap: 4px; transition: background .15s, border-color .15s, color .15s; white-space: nowrap; }
@@ -542,6 +598,8 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-tab-btn:active { transform: scale(.9); }
 .wx-tab-btn.active { color: var(--wx-brand); }
 .wx-tab-badge { position: absolute; top: 4px; right: calc(50% - 14px); background: var(--wx-danger); color: #fff; border-radius: 999px; min-width: 16px; height: 16px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 4px; animation: wx-fade-in .2s ease; }
+.wx-retry-btn { border: 0; background: transparent; color: var(--wx-danger); padding: 0 2px; font-size: 11px; font-weight: 600; cursor: pointer; }
+.wx-new-message-btn { position: sticky; bottom: 12px; z-index: 8; display: block; margin: -40px auto 10px; border: 0; border-radius: 999px; padding: 7px 14px; background: var(--wx-panel); color: var(--wx-brand); box-shadow: var(--wx-shadow-elev); font-size: 12px; font-weight: 600; cursor: pointer; }
 
 /* ================== Empty states ================== */
 .wx-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px; color: var(--wx-text-muted); text-align: center; gap: 10px; }

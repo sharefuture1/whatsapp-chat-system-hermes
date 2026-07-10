@@ -4,6 +4,7 @@ import secrets
 import time
 import re
 import os
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,9 @@ from .storage import StateDB
 from .structured_profile import read_sidecar
 from .translations import bulk_put, load_many, load_translations, put_translation
 from .rewriter import Rewriter as _Rewriter  # imported for translation helper below
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelConfig(BaseModel):
@@ -476,6 +480,8 @@ def build_app(
 
     @app.middleware('http')
     async def auth_guard(request: Request, call_next):
+        if request.method == 'OPTIONS':
+            return await call_next(request)
         if not request.url.path.startswith('/api'):
             return await call_next(request)
         if request.url.path in {'/api/health', '/api/login'}:
@@ -579,7 +585,9 @@ def build_app(
         after_id = max(0, int(after_id or 0))
         limit = max(1, min(200, int(limit or 100)))
         hidden = _hidden_message_ids(config)
-        rows = db.fetch_user_messages_after(user_id, after_id, limit)
+        rows = db.fetch_user_messages_after(user_id, after_id, limit + 1)
+        has_more = len(rows) > limit
+        rows = rows[:limit]
         messages = [
             {
                 'message_id': row['message_id'],
@@ -596,7 +604,9 @@ def build_app(
             'user_id': user_id,
             'messages': messages,
             'count': len(messages),
+            'next_after_id': max((int(m['message_id']) for m in messages), default=after_id),
             'max_message_id': max((int(m['message_id']) for m in messages), default=after_id),
+            'has_more': has_more,
         }
 
     @app.get('/api/conversations/{user_id}')
@@ -653,7 +663,7 @@ def build_app(
         }
 
     @app.post('/api/reply')
-    def reply(request: ReplyRequest) -> dict[str, Any]:
+    def reply(request: ReplyRequest) -> Any:
         try:
             prepared = router.prepare_reply(request.target, request.message, request.mode)
         except ValueError as exc:
@@ -676,6 +686,16 @@ def build_app(
         if request.preview_only:
             return {'success': True, **preview_payload, 'preview_only': True}
         result = router.send_prepared_reply(prepared['target'], prepared['rewrite'], request.message, request.mode)
+        if result.get('success') is not True:
+            logger.warning('Message delivery failed for target=%s: %s', prepared['target'], result.get('error') or 'unknown error')
+            return JSONResponse(
+                {
+                    'detail': 'Message delivery failed',
+                    'code': 'delivery_failed',
+                    'retryable': True,
+                },
+                status_code=502,
+            )
         result['memory_markdown'] = prepared['memory_markdown'][:2000]
         result['preview_only'] = False
         return result
@@ -895,7 +915,10 @@ def build_app(
 
     @app.delete('/api/schedule/{schedule_id}')
     def delete_schedule(schedule_id: str) -> dict[str, Any]:
-        items = [i for i in (config.web_settings.get('schedule') or []) if str(i.get('id')) != schedule_id]
+        current = list(config.web_settings.get('schedule') or [])
+        if not any(str(i.get('id')) == schedule_id for i in current if isinstance(i, dict)):
+            raise HTTPException(status_code=404, detail='Scheduled message not found')
+        items = [i for i in current if str(i.get('id')) != schedule_id]
         config.web_settings['schedule'] = items
         save_json(config.paths.web_settings_file, config.web_settings)
         return {'success': True, 'items': items}
@@ -912,7 +935,14 @@ def build_app(
             try:
                 prepared = router.prepare_reply(target, request.message, request.mode)
                 sent = router.send_prepared_reply(prepared['target'], prepared['rewrite'], request.message, request.mode)
-                results.append({'target': target, 'success': True, 'message': sent.get('rewrite', {}).get('message')})
+                ok = sent.get('success') is True
+                results.append({
+                    'target': target,
+                    'success': ok,
+                    'message': sent.get('rewrite', {}).get('message') if ok else None,
+                    'error': None if ok else 'Message delivery failed',
+                    'retryable': not ok,
+                })
             except Exception as exc:  # noqa: BLE001
                 results.append({'target': target, 'success': False, 'error': str(exc)})
         log = list(config.web_settings.get('broadcast_log') or [])
@@ -927,7 +957,16 @@ def build_app(
         log.append(entry)
         config.web_settings['broadcast_log'] = log[-30:]
         save_json(config.paths.web_settings_file, config.web_settings)
-        return {'success': True, 'entry': entry}
+        succeeded = sum(1 for item in results if item.get('success') is True)
+        failed = len(results) - succeeded
+        return {
+            'success': failed == 0,
+            'partial_success': succeeded > 0 and failed > 0,
+            'total': len(results),
+            'succeeded': succeeded,
+            'failed': failed,
+            'entry': entry,
+        }
 
     @app.get('/api/broadcast')
     def list_broadcast() -> dict[str, Any]:
@@ -1047,7 +1086,9 @@ def build_app(
         return {'success': True, 'plugin_id': plugin_id, 'enabled': False}
 
     if frontend_dist:
-        app.mount('/assets', StaticFiles(directory=frontend_dist / 'assets', check_dir=True), name='web-assets')
+        assets_dir = frontend_dist / 'assets'
+        if assets_dir.is_dir():
+            app.mount('/assets', StaticFiles(directory=assets_dir, check_dir=True), name='web-assets')
 
         @app.get('/{full_path:path}', include_in_schema=False)
         def frontend_shell(full_path: str = ''):

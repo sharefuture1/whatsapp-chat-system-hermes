@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
+import { createConversationRequestTracker } from '../chatSync'
 
 const QUICK_EMOJIS = ['😊', '😂', '🥺', '❤️', '👍', '🙏', '😌', '😉']
 
@@ -125,6 +126,10 @@ export default function ChatPane({
   const scrollRef = useRef(null)
   const lastBottomRef = useRef(true)
   const fetchedFor = useRef(null)
+  const requestTracker = useRef(createConversationRequestTracker())
+  const deltaCursorRef = useRef(0)
+  const composerRef = useRef(null)
+  const [newMessageCount, setNewMessageCount] = useState(0)
 
   useEffect(() => {
     if (mode === 'direct') {
@@ -152,8 +157,11 @@ export default function ChatPane({
     setContactSaved(false)
   }, [userId, userOverride, contactProfile])
 
-  const fetchPage = async (p, appendOlder = false) => {
-    const res = await api.get(`/conversations/${encodeURIComponent(userId)}?page=${p}&page_size=${pageSize}`)
+  const fetchPage = async (targetUserId, p, appendOlder = false) => {
+    if (!targetUserId) return null
+    const request = requestTracker.current.begin(targetUserId)
+    const res = await api.get(`/conversations/${encodeURIComponent(targetUserId)}?page=${p}&page_size=${pageSize}`)
+    if (!requestTracker.current.isCurrent(request, targetUserId)) return null
     const items = (res.messages || []).slice().reverse()
     if (appendOlder) {
       setMessages(prev => [...items, ...prev])
@@ -164,17 +172,27 @@ export default function ChatPane({
     setTotal(res.total_messages || 0)
     setHiddenCount(res.hidden_message_count || 0)
     setPage(p)
+    fetchedFor.current = targetUserId
+    deltaCursorRef.current = Math.max(deltaCursorRef.current, maxMessageId(items))
     return res
   }
 
   useEffect(() => {
-    if (!userId) return
+    if (!userId) {
+      requestTracker.current.invalidate()
+      fetchedFor.current = null
+      return
+    }
+    const targetUserId = userId
+    requestTracker.current.activate(targetUserId)
     setMessages([])
     setHasMore(false)
     setTotal(0)
     setHiddenCount(0)
     setPage(1)
     fetchedFor.current = null
+    deltaCursorRef.current = 0
+    setNewMessageCount(0)
     setMode(uiSettings?.reply?.default_mode || 'smart')
     setComposer('')
     setPreview(null)
@@ -182,31 +200,44 @@ export default function ChatPane({
     setActiveMessageId(null)
     setHiddenTranslations({})
     setInitialLoading(true)
-    fetchPage(1, false)
-      .then(() => { lastBottomRef.current = true })
+    fetchPage(targetUserId, 1, false)
+      .then(res => { if (res) lastBottomRef.current = true })
       .catch(() => {})
-      .finally(() => setInitialLoading(false))
+      .finally(() => {
+        if (requestTracker.current.isActive(targetUserId)) setInitialLoading(false)
+      })
+    return () => {
+      requestTracker.current.invalidate()
+    }
   }, [userId, pageSize, uiSettings])
 
   useEffect(() => {
     if (!userId || !refreshTick || fetchedFor.current !== userId) return
-    const afterId = maxMessageId(messages)
-    if (!afterId) {
-      fetchPage(1, false).catch(() => {})
-      return
-    }
-    let cancelled = false
-    api.get(`/conversations/${encodeURIComponent(userId)}/messages?after_id=${afterId}&limit=100`)
-      .then(res => {
-        if (cancelled) return
+    const targetUserId = userId
+    const wasAtBottom = lastBottomRef.current
+    const drain = async () => {
+      let cursor = deltaCursorRef.current || maxMessageId(messages)
+      let added = 0
+      for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+        const request = requestTracker.current.begin(targetUserId)
+        const res = await api.get(`/conversations/${encodeURIComponent(targetUserId)}/messages?after_id=${cursor}&limit=100`)
+        if (!requestTracker.current.isCurrent(request, targetUserId)) return
         const items = res.messages || []
-        if (!items.length) return
-        lastBottomRef.current = true
-        setMessages(prev => mergeNewMessages(prev, items))
-        setTotal(prev => Math.max(prev, prev + items.length))
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
+        if (items.length) {
+          added += items.length
+          setMessages(prev => mergeNewMessages(prev, items))
+          cursor = Number(res.next_after_id || res.max_message_id || maxMessageId(items) || cursor)
+          deltaCursorRef.current = Math.max(deltaCursorRef.current, cursor)
+        }
+        if (!res.has_more || !items.length) break
+      }
+      if (added) {
+        if (wasAtBottom) lastBottomRef.current = true
+        else setNewMessageCount(prev => prev + added)
+        setTotal(prev => prev + added)
+      }
+    }
+    drain().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshTick, userId])
 
@@ -217,7 +248,7 @@ export default function ChatPane({
       const next = page + 1
       const container = scrollRef.current
       const prevHeight = container ? container.scrollHeight : 0
-      await fetchPage(next, true)
+      await fetchPage(userId, next, true)
       requestAnimationFrame(() => {
         if (container) {
           const newHeight = container.scrollHeight
@@ -243,6 +274,7 @@ export default function ChatPane({
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (distFromTop < 60 && hasMore && !loadingMore && messages.length > 0) loadMore()
     lastBottomRef.current = distFromBottom < 80
+    if (lastBottomRef.current && newMessageCount) setNewMessageCount(0)
   }
 
   const translateOne = async (msg) => {
@@ -267,10 +299,31 @@ export default function ChatPane({
     return () => { cancelled = true }
   }, [messages, uiSettings?.message_ops?.auto_translate, userId])
 
+  const deliverMessage = async (tmpId, target, sourceText, sendMode, optimisticText) => {
+    setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: true, failed: false, error: '' } : m))
+    try {
+      const data = await onReply(target, sourceText, sendMode)
+      if (data?.success !== true) throw new Error(data?.detail || t('sendFailed'))
+      const finalText = data?.rewrite?.message || optimisticText
+      const finalId = data?.message_id || data?.messageId || tmpId
+      const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, message_id: finalId, content: finalText, pending: false, failed: false, sent: true, lang: finalLang, translated: null } : m))
+      setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
+      if (target === userId && requestTracker.current.isActive(target)) {
+        setTimeout(() => {
+          if (requestTracker.current.isActive(target)) fetchPage(target, 1, false).catch(() => {})
+        }, 450)
+      }
+    } catch (error) {
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: false, failed: true, sent: false, error: error?.message || t('sendFailed'), retryable: error?.retryable !== false } : m))
+    }
+  }
+
   const sendMessage = async () => {
     const text = composer.trim()
     if (!text || !userId) return
     const sendMode = mode || 'smart'
+    const target = userId
     const tmpId = `tmp-${Date.now()}`
     const optimisticText = sendMode === 'direct' ? text : (preview?.message || text)
 
@@ -278,39 +331,50 @@ export default function ChatPane({
     setPreview(null)
     setPreviewError(false)
     lastBottomRef.current = true
-    setMessages(prev => [
-      ...prev,
-      {
-        message_id: tmpId,
-        session_id: 'pending',
-        role: 'assistant',
-        content: optimisticText,
-        timestamp: Date.now() / 1000,
-        hidden: false,
-        pending: true,
-        translated: null,
-        lang: 'Chinese',
-      },
-    ])
+    setMessages(prev => [...prev, {
+      message_id: tmpId,
+      session_id: 'pending',
+      role: 'assistant',
+      content: optimisticText,
+      source_text: text,
+      target,
+      send_mode: sendMode,
+      timestamp: Date.now() / 1000,
+      hidden: false,
+      pending: true,
+      failed: false,
+      translated: null,
+      lang: 'Chinese',
+    }])
+    await deliverMessage(tmpId, target, text, sendMode, optimisticText)
+  }
 
-    try {
-      const data = await onReply(userId, text, sendMode)
-      const finalText = data?.rewrite?.message || optimisticText
-      const finalId = data?.message_id || data?.messageId || tmpId
-      const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
-      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, message_id: finalId, content: finalText, pending: false, sent: true, lang: finalLang, translated: null } : m))
-      setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
-      setTimeout(() => fetchPage(1, false).catch(() => {}), 450)
-    } catch {
-      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: false, failed: true } : m))
-    }
+  const retryMessage = item => {
+    if (!item?.failed || item.pending) return
+    deliverMessage(item.message_id, item.target || userId, item.source_text || item.content, item.send_mode || 'direct', item.content)
   }
 
   const insertEmoji = (emoji) => {
     setComposer(prev => `${prev}${emoji}`)
   }
 
+  useLayoutEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(140, Math.max(40, el.scrollHeight))}px`
+  }, [composer])
+
+  const scrollToLatest = () => {
+    const el = scrollRef.current
+    if (!el) return
+    lastBottomRef.current = true
+    setNewMessageCount(0)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }
+
   const onKey = (e) => {
+    if (e.isComposing || e.nativeEvent?.isComposing || e.keyCode === 229) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
@@ -428,13 +492,14 @@ export default function ChatPane({
                       <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
                     </div>
                   ) : null}
-                  {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}</div> : null}
+                  {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}{failed && item.retryable !== false ? <button type="button" className="wx-retry-btn" onClick={e => { e.stopPropagation(); retryMessage(item) }}>{t('retry') || '重试'}</button> : null}</div> : null}
                 </div>
                 {allowLocalHide && !effectiveHidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={(e) => { e.stopPropagation(); onHideMessage(item.message_id) }}>{t('hide')}</button></div> : null}
               </div>
             )
           })}
         </div>
+        {newMessageCount > 0 ? <button type="button" className="wx-new-message-btn" onClick={scrollToLatest}>{newMessageCount} {t('newMessages') || '条新消息'} ↓</button> : null}
       </div>
 
       {contactDrawerOpen ? (
@@ -454,7 +519,7 @@ export default function ChatPane({
               </div>
               <div className="wx-contact-drawer-hero-actions">
                 <button className="wx-mini-action" onClick={() => { navigator.clipboard?.writeText(userId) }}><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>{t('copyId') || '复制 ID'}</button>
-                <button className="wx-mini-action" onClick={() => { setContactDrawerOpen(false); setContactDrawerTab('ai') }}><svg viewBox="0 0 24 24"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="4"/></svg>{t('perContactReplyConfig') || 'AI 风格'}</button>
+                <button className="wx-mini-action" onClick={() => setContactDrawerTab('ai')}><svg viewBox="0 0 24 24"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="4"/></svg>{t('perContactReplyConfig') || 'AI 风格'}</button>
               </div>
             </div>
             <div className="wx-contact-drawer-tabs">
@@ -540,7 +605,7 @@ export default function ChatPane({
         {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip"><span>{t('preview') || '预览'}:</span><span className="preview-text">{preview.message}</span></div> : null}
         {previewError && mode !== 'direct' ? <div className="wx-preview-strip wx-preview-error">{t('previewFailed') || '预览失败'}</div> : null}
         <div className="wx-composer-input">
-          <textarea value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} style={{ height: Math.min(140, Math.max(40, composer.split('\n').length * 22 + 16)) }} />
+          <textarea ref={composerRef} value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} />
           <button type="button" className={`wx-send-btn${sending ? ' sending' : ''}`} onClick={sendMessage} disabled={!composer.trim() || sending}>
             {sending ? <span className="wx-spinner sm" /> : null}
             {!sending && (composer.trim() ? t('send') : t('send') + ' ↗')}

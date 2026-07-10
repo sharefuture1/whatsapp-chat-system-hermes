@@ -222,7 +222,7 @@ class StateDB:
         WHERE s.user_id = ?
           AND m.id > ?
           {roles_clause}
-        ORDER BY m.timestamp ASC, m.id ASC
+        ORDER BY m.id ASC
         LIMIT ?
         """
         with self._connect() as conn:
