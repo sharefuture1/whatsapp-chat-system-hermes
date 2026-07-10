@@ -1,6 +1,40 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
-## 2026-07-10：聊天主链路可靠性与移动端交互全面修复
+## 2026-07-10：TabBar 图标渲染 + 模型默认值透出 + 插件真正生效
+
+### TabBar 图标
+
+- 根因：`.wx-tab-btn > span[aria-hidden] svg` 在 styles.css 中无尺寸规则，导致 SVG 渲染为 0 宽
+- 修复：补 22×22 尺寸 + currentColor 描边 + active 态品牌色
+
+### 模型选择
+
+- 根因：`config.yaml` 的 `model.default` 透出但前端用硬编码 `gpt-5.3-codex-spark` 当占位，看不到真实默认模型
+- 修复：`/api/settings` 现返回 `model.default` 与 `model.base_url`，前端把 `settings.model.default` 注入联系人默认、设置页占位文本和"我"页
+- 联系人 AI 模型输入留空时，明确提示"留空则继承 `<model.default>`"
+
+### 插件真正生效
+
+- 根因：插件 flag 写入 web_settings 后没有任何后端代码读它
+- 修复：
+  - `_auto_translate_enabled` 同时读 `plugins.auto_translate` 和 `message_ops.auto_translate`
+  - `/api/reply` 检查 `quick_reply` 插件，关闭时 `preview_only` 请求返回 `success: false, plugin: 'quick_reply'`
+  - `/api/settings` 现返回完整 `plugins` 状态字典
+  - 插件目录新增 `hooks` 与 `status_when_on`，前端 DiscoverPage 与 ToolsPanel 显示当前开关对应的后端接口
+  - 前端 `autoTranslate` 同步考虑 `plugins.auto_translate` flag
+
+### 验证
+
+- `npm run build`：通过
+- `pytest -q`：50 passed（含 2 个新测试覆盖 `/api/settings` 元数据 + 插件 gate）
+- `node --test tests/chatSync.test.js`：4 passed
+- live `/api/health`：200
+- live `/api/settings` 返回 `model.default` 与 `plugins` 字典
+- live CSS 命中 `.wx-tab-btn > span[aria-hidden] svg{width:22px;height:22px;stroke:currentColor;...}`
+
+---
+
+
 
 ### 会话列表与图标
 
