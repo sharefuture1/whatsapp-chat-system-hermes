@@ -1,65 +1,70 @@
 import { useMemo, useState } from 'react'
 import { useSettings } from '../settings'
+import { filterInbox } from '../inboxModel'
 
 function initials(name) {
-  if (!name) return '?'
-  const trimmed = name.trim()
-  if (!trimmed) return '?'
-  const parts = trimmed.split(/\s+/).filter(Boolean)
-  if (parts.length === 1) return parts[0].slice(0, 2)
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  const text = String(name || '?').trim()
+  const parts = text.split(/\s+/).filter(Boolean)
+  return parts.length > 1 ? `${parts[0][0]}${parts.at(-1)[0]}`.toUpperCase() : text.slice(0, 2)
 }
 
 function avatarColor(name) {
-  const colors = ['#5b8def', '#07c160', '#fa9d3b', '#f44c4c', '#9b59b6', '#16a085', '#e67e22', '#2ecc71']
-  let h = 0
-  for (const ch of name || '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return colors[h % colors.length]
+  const colors = ['#576b95', '#07c160', '#fa9d3b', '#f44c4c', '#9b59b6', '#16a085']
+  let hash = 0
+  for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return colors[hash % colors.length]
 }
 
-export default function ContactsPage({ conversations, onSelect }) {
+function platformLabel(platform) {
+  if (platform === 'whatsapp') return 'WA'
+  return String(platform || '').slice(0, 3).toUpperCase()
+}
+
+export default function ContactsPage({ contacts = [], accounts = [], onSelect }) {
   const { t } = useSettings()
   const [query, setQuery] = useState('')
-  const sorted = useMemo(() => {
+  const [platform, setPlatform] = useState('all')
+  const [accountId, setAccountId] = useState('all')
+  const platforms = useMemo(() => ['all', ...new Set(contacts.map(item => item.platform).filter(Boolean))], [contacts])
+  const visibleAccounts = useMemo(() => accounts.filter(item => platform === 'all' || item.platform === platform), [accounts, platform])
+  const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = [...conversations].sort((a, b) => (a.user_name || '').localeCompare(b.user_name || ''))
-    if (!q) return list
-    return list.filter(item =>
-      (item.user_name || '').toLowerCase().includes(q) ||
-      (item.user_id || '').toLowerCase().includes(q),
-    )
-  }, [conversations, query])
-  return (
-    <section className="wx-page wx-contacts-page">
-      <div className="wx-page-header" style={{ paddingTop: 18, padding: '18px 14px 4px', display: 'grid', gap: 8 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, letterSpacing: -.3, margin: 0 }}>{t('tabContacts') || '通讯录'}</h2>
-        <div className="wx-search" style={{ padding: 0 }}>
-          <span className="wx-search-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-          </span>
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder={t('searchContactsPlaceholder') || '搜索联系人姓名或 ID'}
-            style={{ width: '100%', background: 'var(--wx-panel-soft)', border: '1px solid transparent', borderRadius: 8, padding: '8px 10px 8px 32px', fontSize: 13, outline: 'none' }}
-          />
-        </div>
+    return filterInbox(contacts, { platform, accountId })
+      .filter(item => !q || [item.user_name, item.remote_jid, item.account_name, item.account_label, item.remark].some(value => String(value || '').toLowerCase().includes(q)))
+      .sort((a, b) => String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-CN'))
+  }, [contacts, query, platform, accountId])
+  const grouped = useMemo(() => {
+    const map = new Map()
+    for (const item of visible) {
+      const key = item.account_id
+      if (!map.has(key)) map.set(key, { account: accounts.find(account => account.id === key), items: [] })
+      map.get(key).items.push(item)
+    }
+    return [...map.values()]
+  }, [visible, accounts])
+
+  return <section className="wx-page wx-contacts-page">
+    <header className="wx-contacts-header">
+      <div><h2>{t('tabContacts') || '通讯录'}</h2><p>{t('multiAccountContactsHint') || '跨平台、多账号联系人'}</p></div>
+      <span>{visible.length}</span>
+    </header>
+    <div className="wx-contact-controls">
+      <div className="wx-platform-filter">{platforms.map(item => <button type="button" key={item} className={`wx-filter-chip ${platform === item ? 'active' : ''}`} onClick={() => { setPlatform(item); setAccountId('all') }}>{item === 'all' ? 'ALL' : platformLabel(item)}</button>)}</div>
+      <div className="wx-account-tabs">
+        <button type="button" className={`wx-account-tab ${accountId === 'all' ? 'active' : ''}`} onClick={() => setAccountId('all')}>{t('accountAll') || '全部账号'}</button>
+        {visibleAccounts.map(account => <button type="button" className={`wx-account-tab ${accountId === account.id ? 'active' : ''}`} key={account.id} onClick={() => setAccountId(account.id)}><span>{account.label || account.name}</span><i className={account.status === 'online' ? 'online' : ''} /></button>)}
       </div>
-      <div className="wx-cell-group">
-        <div className="wx-cell-group-title">{t('tabContacts') || '通讯录'} · {sorted.length}</div>
-        <div className="wx-section-list wx-card-list">
-          {sorted.length === 0 ? <div className="wx-empty-pill">—</div> : null}
-          {sorted.map(item => (
-            <button key={item.user_id} type="button" className="wx-contact-row" onClick={() => onSelect(item.user_id)}>
-              <div className="wx-avatar lg" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
-              <div className="wx-contact-meta">
-                <div className="wx-contact-name">{item.user_name}</div>
-                <div className="wx-contact-subid">{item.user_id}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </section>
-  )
+      <div className="wx-search wx-contact-search"><span className="wx-search-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchContactsPlaceholder') || '搜索联系人、账号或 ID'} /></div>
+    </div>
+    <div className="wx-contacts-scroll">
+      {grouped.length === 0 ? <div className="wx-empty-pill">{t('noContacts') || '暂无联系人'}</div> : grouped.map(group => <section className="wx-contact-account-group" key={group.account?.id || group.items[0]?.account_id}>
+        <div className="wx-contact-group-title"><span>{group.account?.label || group.items[0]?.account_label || 'WA'}</span><strong>{group.account?.name || group.items[0]?.account_name}</strong><em>{group.items.length}</em></div>
+        <div className="wx-contact-list">{group.items.map(item => <button key={item.contact_key} type="button" className="wx-contact-row" disabled={!item.conversation_key} onClick={() => onSelect(item)}>
+          <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
+          <div className="wx-contact-meta"><div className="wx-contact-name">{item.user_name}</div><div className="wx-contact-subid"><span>{item.account_label}</span>{item.remote_jid || item.user_id}</div></div>
+          <svg className="wx-cell-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>)}</div>
+      </section>)}
+    </div>
+  </section>
 }

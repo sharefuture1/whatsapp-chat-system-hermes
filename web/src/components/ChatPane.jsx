@@ -89,6 +89,9 @@ export default function ChatPane({
   userId,
   conversationId,
   standalone = false,
+  accountLabel = '',
+  accountName = '',
+  platform = '',
   userName,
   contactProfile,
   userOverride,
@@ -450,7 +453,7 @@ export default function ChatPane({
   }, [messages])
 
   if (!userId) {
-    return <section className={`wx-chat empty is-active${active ? '' : ''}`}><div className="wx-empty"><div style={{ fontSize: 48, marginBottom: 8 }}>💬</div><div>{t('selectConversation')}</div><div style={{ marginTop: 4, fontSize: 12 }}>{t('hintWorkspace')}</div></div></section>
+    return <section className={`wx-chat empty is-active${active ? '' : ''}`}><div className="wx-empty wx-chat-empty"><svg viewBox="0 0 64 64"><path d="M11 14h42v30H29l-12 8v-8h-6z"/><path d="M21 25h22M21 33h15"/></svg><strong>{t('selectConversation')}</strong><span>{t('hintWorkspace')}</span></div></section>
   }
 
   const autoTranslate = !!uiSettings?.message_ops?.auto_translate
@@ -466,7 +469,7 @@ export default function ChatPane({
         <div className="wx-avatar" style={{ background: avatarColor(headerTitle) }}>{initials(headerTitle)}</div>
         <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
           <div className="wx-chat-title">{headerTitle}</div>
-          <div className="wx-chat-sub"><span className={`wx-online-dot ${health ? '' : 'offline'}`} />{health ? t('online') : t('offline')} · {total} {t('totalMessages') || 'msgs'}{allowLocalHide && hiddenCount ? ` · ${hiddenCount} ${t('hiddenMessages')}` : ''}</div>
+          <div className="wx-chat-sub"><span className="wx-chat-account-badge">{accountLabel || String(platform || 'WA').toUpperCase()}</span><span>{accountName}</span><span>·</span><span>{total} {t('totalMessages') || 'msgs'}</span>{allowLocalHide && hiddenCount ? <span>· {hiddenCount} {t('hiddenMessages')}</span> : null}</div>
         </div>
         <div className="wx-chat-header-right">
           <button className="wx-icon-btn" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} title={t('contactProfile') || '联系人资料'} aria-label={t('contactProfile') || '联系人资料'}>

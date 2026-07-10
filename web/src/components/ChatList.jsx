@@ -134,18 +134,18 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
   const isPinnedFn = userId => pinnedSet instanceof Set ? pinnedSet.has(userId) : Array.isArray(pinnedSet) ? pinnedSet.includes(userId) : Array.isArray(pinned) ? pinned.includes(userId) : false
 
   const renderRow = item => {
-    const count = unread?.[item.user_id] || 0
+    const count = unread?.[item.conversation_key] || 0
     const remark = selectedProfileMap?.[item.user_id]?.remark || ''
     const displayName = remark || item.user_name
     const showName = remark ? item.user_name : ''
     const isPinned = item.pinned || isPinnedFn(item.user_id)
     return (
-      <SwipeRow key={item.user_id} rowId={item.user_id} pinned={isPinned} t={t} isOpen={openSwipeId === item.user_id} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item.user_id)}>
-        <button type="button" className={`wx-list-item${selectedId === item.user_id ? ' active' : ''}`} onClick={() => onSelect(item.user_id)}>
+      <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item.user_id)}>
+        <button type="button" className={`wx-list-item${selectedId === item.conversation_key ? ' active' : ''}`} onClick={() => onSelect(item.conversation_key)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(displayName)}</div>
           <div className="wx-list-text">
-            <div className="wx-list-row1"><div className="wx-list-name"><span className="wx-platform-badge">{platformLabel(item.platform)}</span><span>{displayName}</span></div><div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div></div>
-            <div className="wx-list-row2"><div className="wx-list-preview">{showName ? `${showName} · ${item.last_message || '…'}` : (item.last_message || '…')}</div><div className="wx-list-row2-right">{isPinned ? <span className="wx-pin-star" aria-label={t('pin')}>★</span> : null}{item.priority === 'high' ? <span className="wx-pill-mini danger">!</span> : null}{item.muted ? <span className="wx-mute-dot" aria-label={t('muted') || 'muted'} /> : null}{count > 0 ? <span className="wx-unread-badge">{count > 99 ? '99+' : count}</span> : null}</div></div>
+            <div className="wx-list-row1"><div className="wx-list-name"><span>{displayName}</span></div><div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div></div>
+            <div className="wx-list-row2"><div className="wx-list-preview"><span className="wx-account-mini">{item.account_label || platformLabel(item.platform)}</span>{showName ? `${showName} · ${item.last_message || '…'}` : (item.last_message || '…')}</div><div className="wx-list-row2-right">{isPinned ? <span className="wx-pin-star" aria-label={t('pin')}>★</span> : null}{item.priority === 'high' ? <span className="wx-pill-mini danger">!</span> : null}{item.muted ? <span className="wx-mute-dot" aria-label={t('muted') || 'muted'} /> : null}{count > 0 ? <span className="wx-unread-badge">{count > 99 ? '99+' : count}</span> : null}</div></div>
             {autoTranslate && item.last_message_translated ? <div className="wx-list-translation">{item.last_message_translated}</div> : null}
           </div>
         </button>
@@ -158,16 +158,14 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
 
   return <aside className="wx-sidebar" onClick={e => { if (e.target.closest('.wx-sidebar-header,.wx-search,.wx-platform-filter,.wx-account-filter')) setOpenSwipeId(null) }}>
     <div className="wx-sidebar-header"><h1>{t('tabChats')}</h1><div className="wx-sidebar-actions"><button type="button" className="wx-icon-btn" aria-label={t('settings')} onClick={onOpenSettings}><SettingsIcon /></button></div></div>
-    {accounts.length > 0 ? <div className="wx-account-filter">
-      <label htmlFor="wx-account-select">{t('whatsappAccounts')}</label>
-      <select id="wx-account-select" value={selectedAccountId} onChange={e => onAccountChange?.(e.target.value)}>
-        <option value="all">{t('accountAll') || '全部账号'}</option>
-        {accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.status === 'online' ? ' · ●' : ''}</option>)}
-      </select>
-      {selectedAccountId !== 'all' && selectedAccountName ? <span>{selectedAccountName}</span> : null}
-    </div> : null}
+    <div className="wx-inbox-scopes">
+      <div className="wx-platform-filter">{platformOptions.map(platform => <button key={platform} type="button" className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>{platform === 'all' ? 'ALL' : platformLabel(platform)}</button>)}</div>
+      {accounts.length > 0 ? <div className="wx-account-tabs">
+        <button type="button" className={`wx-account-tab ${selectedAccountId === 'all' ? 'active' : ''}`} onClick={() => onAccountChange?.('all')}>{platformFilter === 'all' ? (t('accountAll') || '全部账号') : `${platformLabel(platformFilter)} · ALL`}</button>
+        {accounts.map(account => <button type="button" className={`wx-account-tab ${selectedAccountId === account.id ? 'active' : ''}`} key={account.id} onClick={() => onAccountChange?.(account.id)}><span>{account.label || account.name}</span><i className={account.status === 'online' ? 'online' : ''} /></button>)}
+      </div> : null}
+    </div>
     <div className="wx-search"><span className="wx-search-icon" aria-hidden="true"><SearchIcon /></span><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} /></div>
-    {showPlatformFilter ? <div className="wx-platform-filter">{platformOptions.map(platform => <button key={platform} type="button" className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>{platform === 'all' ? 'ALL' : platformLabel(platform)}</button>)}</div> : null}
     <div className="wx-list" onScroll={() => setOpenSwipeId(null)}>
       {pinnedItems.length > 0 ? <div className="wx-pinned-section">{pinnedItems.map(renderRow)}</div> : null}
       {conversations.length === 0 ? <div className="wx-empty"><EmptyChatIcon /><div className="wx-empty-state-row"><h3>{t('noConversations')}</h3><p>{t('noConversationsHint') || '暂无会话记录'}</p></div></div> : null}

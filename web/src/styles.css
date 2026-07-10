@@ -121,7 +121,19 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-account-filter select:focus { border-color: var(--wx-brand); box-shadow: 0 0 0 2px rgba(7,193,96,.12); }
 .wx-account-filter > span { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--wx-brand); }
 
-.wx-search { position: relative; padding: 4px 12px 10px; }
+.wx-inbox-scopes { border-bottom: 1px solid var(--wx-divider); padding-bottom: 8px; }
+.wx-platform-filter { display: flex; gap: 6px; padding: 2px 12px 8px; overflow-x: auto; scrollbar-width: none; }
+.wx-platform-filter::-webkit-scrollbar, .wx-account-tabs::-webkit-scrollbar { display: none; }
+.wx-filter-chip { flex: 0 0 auto; min-width: 44px; height: 30px; padding: 0 13px; border-radius: 7px; font-size: 12px; color: var(--wx-text-muted); background: transparent; border: 0; }
+.wx-filter-chip.active { color: var(--wx-text); background: var(--wx-list-active); font-weight: 600; }
+.wx-account-tabs { display: flex; gap: 6px; padding: 0 12px; overflow-x: auto; scrollbar-width: none; }
+.wx-account-tab { flex: 0 0 auto; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; color: var(--wx-text-muted); background: var(--wx-panel-soft); font-size: 11px; display: inline-flex; align-items: center; gap: 6px; }
+.wx-account-tab.active { color: var(--wx-brand); background: var(--wx-brand-soft); font-weight: 600; }
+.wx-account-tab i { width: 6px; height: 6px; border-radius: 50%; background: var(--wx-text-faint); }
+.wx-account-tab i.online { background: var(--wx-brand); box-shadow: 0 0 0 2px rgba(7,193,96,.12); }
+.wx-account-mini { display: inline-flex; align-items: center; margin-right: 6px; color: var(--wx-brand); font-size: 10px; font-weight: 600; }
+
+.wx-search { position: relative; padding: 8px 12px 10px; }
 .wx-search input { width: 100%; background: var(--wx-panel-soft); border: 1px solid transparent; border-radius: 8px; padding: 7px 10px 7px 32px; font-size: 13px; outline: none; transition: border-color .15s; }
 .wx-search input:focus { border-color: var(--wx-brand); background: var(--wx-panel); }
 .wx-search-icon { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--wx-text-muted); width: 16px; height: 16px; }
@@ -173,7 +185,11 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-chat-header .wx-chat-sub { font-size: 11px; color: var(--wx-text-muted); display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; }
 .wx-chat-header-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .wx-chat-header-right { margin-left: auto; display: flex; gap: 6px; }
-.wx-chat-header-right .wx-icon-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--wx-panel-soft); }
+.wx-chat-header-right .wx-icon-btn { width: 34px; height: 34px; border-radius: 6px; background: transparent; }
+.wx-chat-account-badge { height: 18px; padding: 0 6px; border-radius: 4px; background: var(--wx-brand-soft); color: var(--wx-brand); display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; }
+.wx-chat-empty svg { width: 70px; height: 70px; stroke: var(--wx-text-faint); fill: none; stroke-width: 1.4; margin-bottom: 12px; }
+.wx-chat-empty strong { font-size: 16px; color: var(--wx-text); font-weight: 500; }
+.wx-chat-empty span { font-size: 12px; }
 :root[data-theme="dark"] .wx-chat-header-right .wx-icon-btn { background: #262629; }
 .wx-chat-header-right .wx-icon-btn:hover { background: var(--wx-list-hover); }
 :root[data-theme="dark"] .wx-chat-header-right .wx-icon-btn:hover { background: #2f2f33; }
@@ -442,6 +458,27 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-switch input:checked + .wx-switch-slider::before { transform: translateX(16px); }
 
 /* ================== Cells (Me / Contacts / Discover) ================== */
+.wx-contacts-page { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--wx-bg); }
+.wx-contacts-header { display: flex; align-items: flex-end; justify-content: space-between; padding: 20px 18px 12px; background: var(--wx-panel); }
+.wx-contacts-header h2 { margin: 0; font-size: 22px; font-weight: 650; }
+.wx-contacts-header p { margin: 4px 0 0; font-size: 12px; color: var(--wx-text-muted); }
+.wx-contacts-header > span { min-width: 30px; height: 24px; padding: 0 8px; border-radius: 999px; background: var(--wx-panel-soft); color: var(--wx-text-muted); font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+.wx-contact-controls { background: var(--wx-panel); border-bottom: 1px solid var(--wx-divider); padding-bottom: 8px; }
+.wx-contact-controls .wx-account-tabs { padding-bottom: 3px; }
+.wx-contact-search { padding-bottom: 4px; }
+.wx-contacts-scroll { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 80px; }
+.wx-contact-account-group { margin-bottom: 14px; }
+.wx-contact-group-title { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 4px; color: var(--wx-text-muted); }
+.wx-contact-group-title span { color: var(--wx-brand); font-size: 11px; font-weight: 700; }
+.wx-contact-group-title strong { font-size: 12px; font-weight: 500; flex: 1; }
+.wx-contact-group-title em { font-style: normal; font-size: 11px; }
+.wx-contact-list { border-radius: 10px; background: var(--wx-panel); overflow: hidden; box-shadow: 0 1px 1px rgba(0,0,0,.03); }
+.wx-contact-row { min-height: 66px; }
+.wx-contact-row:disabled { opacity: .55; }
+.wx-contact-subid { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--wx-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wx-contact-subid span { flex: 0 0 auto; color: var(--wx-brand); font-weight: 600; }
+.wx-cell-arrow { width: 18px; height: 18px; stroke: var(--wx-text-faint); fill: none; stroke-width: 1.7; margin-left: auto; }
+
 .wx-cell-group { padding: 14px 14px 0; }
 .wx-cell-group-title { padding: 0 4px 8px; font-size: 11px; color: var(--wx-text-muted); text-transform: uppercase; letter-spacing: .06em; }
 .wx-card-list { border-radius: var(--wx-radius-card); overflow: hidden; box-shadow: var(--wx-shadow-card); background: var(--wx-panel); }
@@ -453,7 +490,6 @@ a { color: var(--wx-link); text-decoration: none; }
 :root[data-theme="dark"] .wx-contact-row, :root[data-theme="dark"] .wx-setting-row { border-color: #262629; }
 .wx-contact-name { font-size: 15px; font-weight: 500; }
 .wx-contact-meta { min-width: 0; display: grid; gap: 3px; }
-.wx-contact-subid { font-size: 12px; color: var(--wx-text-muted); word-break: break-all; }
 .wx-setting-row { justify-content: space-between; }
 .wx-setting-row.multi { align-items: flex-start; }
 .wx-setting-row-form select { min-width: 140px; text-align: right; background: transparent; border: 0; padding: 4px 8px; }

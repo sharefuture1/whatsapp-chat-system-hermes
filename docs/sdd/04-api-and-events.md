@@ -125,6 +125,7 @@ Bridge 仅绑定 `127.0.0.1` 或 Unix socket。
 参数：
 
 ```text
+platform=all|whatsapp|telegram|...
 account_id=all|uuid
 cursor=<opaque>
 limit=50
@@ -133,7 +134,17 @@ pinned=
 unread=
 ```
 
-返回 opaque cursor，不允许前端构造数据库 offset 依赖。
+规则：
+
+- `platform=all&account_id=all` 返回所有已接入平台、所有账号的统一时间线；
+- 选择平台后返回该平台全部账号；选择账号后再限定到该账号；
+- 每条会话必须返回 `platform`、`account_id`、`account_name`、`conversation_id`；
+- `available_platforms` 与 `available_accounts` 用于构建 `ALL → WA → WA1/WA2/WA3` 两级筛选；
+- 返回 opaque cursor，不允许前端构造数据库 offset 依赖。
+
+### `GET /api/v1/contacts`
+
+参数：`platform=all|...`、`account_id=all|uuid`、`query`、`limit`。每条联系人必须携带平台、账号、远端 ID、展示名/备注及可进入的会话 ID；同一远端 ID 在不同账号下不得合并为一条。
 
 ### `GET /api/v1/conversations/{conversation_id}/messages`
 

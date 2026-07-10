@@ -5,10 +5,13 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.db.models import Contact, Conversation, Message, WhatsAppAccount
+
+
+PLATFORM = 'whatsapp'
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -19,8 +22,20 @@ def _timestamp(value: datetime | None) -> float:
     return value.timestamp() if value else 0.0
 
 
+def _account_payload(account: WhatsAppAccount) -> dict[str, Any]:
+    return {
+        'id': account.id,
+        'name': account.name,
+        'platform': PLATFORM,
+        'status': account.status,
+        'enabled': account.enabled,
+        'is_primary': account.is_primary,
+        'phone_number': account.phone_number,
+    }
+
+
 def create_conversations_router(session_factory: Callable[[], Session]) -> APIRouter:
-    router = APIRouter(prefix='/api/v1/conversations', tags=['conversations'])
+    router = APIRouter(prefix='/api/v1', tags=['conversations'])
 
     def get_session() -> Generator[Session, None, None]:
         session = session_factory()
@@ -29,30 +44,53 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
         finally:
             session.close()
 
-    @router.get('')
+    def available_accounts(session: Session, platform: str, account_id: str) -> list[dict[str, Any]]:
+        if platform not in {'all', PLATFORM}:
+            return []
+        statement = select(WhatsAppAccount).order_by(
+            WhatsAppAccount.is_primary.desc(), WhatsAppAccount.created_at.asc()
+        )
+        if account_id != 'all':
+            statement = statement.where(WhatsAppAccount.id == account_id)
+        return [_account_payload(account) for account in session.scalars(statement).all()]
+
+    @router.get('/conversations')
     def list_conversations(
+        platform: str = Query(default='all'),
         account_id: str = Query(default='all'),
         limit: int = Query(default=50, ge=1, le=200),
         query: str = Query(default=''),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
+        if platform not in {'all', PLATFORM}:
+            return {
+                'items': [], 'total': 0, 'has_more': False,
+                'platform': platform, 'account_id': account_id,
+                'available_platforms': [PLATFORM], 'available_accounts': [],
+            }
         statement = (
             select(Conversation, Contact, WhatsAppAccount)
             .join(WhatsAppAccount, WhatsAppAccount.id == Conversation.account_id)
             .outerjoin(Contact, Contact.id == Conversation.contact_id)
             .where(Conversation.deleted_at.is_(None), Conversation.archived.is_(False))
         )
+        count_statement = select(func.count(Conversation.id)).where(
+            Conversation.deleted_at.is_(None), Conversation.archived.is_(False)
+        )
         if account_id != 'all':
             statement = statement.where(Conversation.account_id == account_id)
+            count_statement = count_statement.where(Conversation.account_id == account_id)
         cleaned_query = query.strip()
         if cleaned_query:
             pattern = f'%{cleaned_query}%'
-            statement = statement.where(
-                Conversation.remote_jid.ilike(pattern)
-                | Conversation.title.ilike(pattern)
-                | Contact.display_name.ilike(pattern)
-                | Contact.remark.ilike(pattern)
+            search_clause = or_(
+                Conversation.remote_jid.ilike(pattern),
+                Conversation.title.ilike(pattern),
+                Contact.display_name.ilike(pattern),
+                Contact.remark.ilike(pattern),
+                WhatsAppAccount.name.ilike(pattern),
             )
+            statement = statement.where(search_clause)
         rows = session.execute(
             statement.order_by(
                 Conversation.pinned.desc(),
@@ -65,6 +103,7 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
                 'conversation_id': conversation.id,
                 'account_id': conversation.account_id,
                 'account_name': account.name,
+                'account_label': account.name,
                 'user_id': conversation.remote_jid,
                 'user_name': (
                     (contact.remark if contact else None)
@@ -72,7 +111,7 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
                     or (contact.display_name if contact else None)
                     or conversation.remote_jid
                 ),
-                'platform': 'whatsapp',
+                'platform': PLATFORM,
                 'last_message': conversation.last_message_preview or '',
                 'last_timestamp': _timestamp(conversation.last_message_at),
                 'last_message_at': _iso(conversation.last_message_at),
@@ -82,20 +121,88 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
             }
             for conversation, contact, account in rows
         ]
-        count_statement = select(func.count(Conversation.id)).where(
-            Conversation.deleted_at.is_(None), Conversation.archived.is_(False)
-        )
-        if account_id != 'all':
-            count_statement = count_statement.where(Conversation.account_id == account_id)
         total = session.scalar(count_statement) or 0
         return {
             'items': items,
             'total': total,
             'has_more': total > len(items),
+            'platform': platform,
             'account_id': account_id,
+            'available_platforms': [PLATFORM],
+            'available_accounts': available_accounts(session, platform, account_id),
         }
 
-    @router.get('/{conversation_id}/messages')
+    @router.get('/contacts')
+    def list_contacts(
+        platform: str = Query(default='all'),
+        account_id: str = Query(default='all'),
+        limit: int = Query(default=200, ge=1, le=500),
+        query: str = Query(default=''),
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        if platform not in {'all', PLATFORM}:
+            return {
+                'items': [], 'total': 0, 'platform': platform, 'account_id': account_id,
+                'available_platforms': [PLATFORM], 'available_accounts': [],
+            }
+        statement = (
+            select(Contact, WhatsAppAccount, Conversation)
+            .join(WhatsAppAccount, WhatsAppAccount.id == Contact.account_id)
+            .outerjoin(
+                Conversation,
+                (Conversation.account_id == Contact.account_id)
+                & (Conversation.remote_jid == Contact.remote_jid)
+                & Conversation.deleted_at.is_(None),
+            )
+        )
+        if account_id != 'all':
+            statement = statement.where(Contact.account_id == account_id)
+        cleaned_query = query.strip()
+        if cleaned_query:
+            pattern = f'%{cleaned_query}%'
+            statement = statement.where(or_(
+                Contact.remote_jid.ilike(pattern),
+                Contact.display_name.ilike(pattern),
+                Contact.remark.ilike(pattern),
+                Contact.phone_number.ilike(pattern),
+                WhatsAppAccount.name.ilike(pattern),
+            ))
+        rows = session.execute(
+            statement.order_by(
+                func.coalesce(Contact.remark, Contact.display_name, Contact.remote_jid).asc(),
+                Contact.id.asc(),
+            ).limit(limit)
+        ).all()
+        items = [
+            {
+                'contact_id': contact.id,
+                'conversation_id': conversation.id if conversation else None,
+                'account_id': contact.account_id,
+                'account_name': account.name,
+                'platform': PLATFORM,
+                'remote_jid': contact.remote_jid,
+                'user_id': contact.remote_jid,
+                'display_name': contact.display_name,
+                'remark': contact.remark,
+                'user_name': contact.remark or contact.display_name or contact.remote_jid,
+                'phone_number': contact.phone_number,
+                'avatar_url': contact.avatar_url,
+                'tags': contact.tags or [],
+                'language': contact.language,
+                'notes': contact.notes,
+            }
+            for contact, account, conversation in rows
+        ]
+        return {
+            'items': items,
+            'total': len(items),
+            'platform': platform,
+            'account_id': account_id,
+            'available_platforms': [PLATFORM],
+            'available_accounts': available_accounts(session, platform, account_id),
+        }
+
+    @router.get('/conversations/{conversation_id}/messages')
     def conversation_messages(
         conversation_id: str,
         limit: int = Query(default=80, ge=1, le=200),

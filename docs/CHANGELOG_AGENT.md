@@ -1,5 +1,18 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：多平台多账号聚合收件箱、通讯录和微信式布局
+
+- 修正产品模型：聊天 `ALL` 现在聚合 Legacy 和 V2 的全部会话，平台层使用 `ALL/WA/...`，平台下使用 `全部账号/WA1/WA2/WA3` 二级筛选。
+- 新增前端 `inboxModel`，为每条会话生成账号隔离的 `conversation_key`；相同 JID 在不同账号不会选中错会话、覆盖未读或 React key 冲突。
+- `/api/v1/conversations` 新增平台范围、可用平台和账号元数据；新增 `/api/v1/contacts` 独立联系人接口，按平台/账号隔离。
+- 通讯录不再只从当前会话临时展示：支持跨平台、账号标签、账号分组、搜索和进入所属会话。
+- 重构聊天列表筛选、账号胶囊、会话账号标识、聊天标题账号上下文、空状态 SVG、通讯录 cell list 与滚动容器，降低后台管理感。
+- TDD：新增聚合、筛选、相同 ID 跨账号联系人测试；Python `120 passed`、Web `12 passed`、Bridge `63 passed`，Vite build 通过。
+- 真实部署验证：Legacy `3` 条 + V2 `2` 条会话可聚合；V2 联系人 `2` 条；FastAPI health 200。
+- 当前网页资源：`index-zmRcX5WP.js` / `index-CpWFmy3-.css`。
+
+---
+
 ## 2026-07-10：修复第二账号已登录但页面无数据
 
 - 根因：Bridge V2 的事件已成功写入独立业务数据库，但聊天首页仍固定调用 Legacy `/api/conversations` 和 Hermes `state.db`，账号中心也没有把所选账号接入聊天查询。

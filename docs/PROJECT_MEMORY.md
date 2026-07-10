@@ -1,6 +1,6 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 11:28 UTC
+> 最后更新：2026-07-10 12:11 UTC
 
 ## 当前结论
 
@@ -11,15 +11,16 @@
 - 独立 Node/Baileys Bridge V2 已实现账号级 session/socket、QR、状态、重连、发送和回执事件。
 - 持久化 FileSpool/EventSink 与 FastAPI `/internal/events/whatsapp` 幂等事务接收已实现。
 - 生产仍保留 Legacy `127.0.0.1:3000` 和 Hermes profile/state 兼容链；Bridge V2 `127.0.0.1:3100` 当前真实在线，并已有一个扫码账号将事件写入独立数据库。
-- 聊天首页已接入独立 `/api/v1/conversations`：支持全部账号/单账号筛选和独立消息详情，不再出现 V2 数据已落库但页面完全不可见。
-- 独立库当前实测：`1` 个 V2 业务账号、`2` 个联系人、`2` 个会话、`8` 条消息；尚未完成两个 V2 账号同时在线验收。
+- 聊天首页已形成迁移期统一收件箱：`ALL` 聚合 Legacy 与 V2；平台层为 `ALL/WA/...`，平台下为 `WA1/WA2/...`，每条会话使用账号隔离的 `conversation_key`。
+- 通讯录已接入独立 `/api/v1/contacts` 并与 Legacy 会话联系人聚合，支持平台/账号筛选、账号分组、搜索和会话跳转。
+- 独立库当前实测：`1` 个 V2 业务账号、`2` 个联系人、`2` 个会话、`8` 条消息；Legacy 当前 API 返回 `3` 条会话，统一 ALL 预期显示 `5` 条。
 - 真实扫码、第二个 V2 账号隔离、历史迁移、Outbox Worker 与 Hermes shutdown 尚未全部验收。
 - Legacy 网页直发同步缺口已修复：只有 Bridge 明确成功后才将 outbound assistant 消息和 WhatsApp ID 写回 `state.db`；页面刷新/增量不会再丢失成功气泡。
 
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-CRFRy-mv.js` / `index-Dewmrv3Z.css`，本机 FastAPI 资源 200；聊天列表已支持 V2 独立账号筛选。
+- 前端：`index-zmRcX5WP.js` / `index-CpWFmy3-.css`，本机 FastAPI 资源 200；统一收件箱和多账号通讯录已部署。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2：`127.0.0.1:3100` 当前运行，内部 token 与 FastAPI 配置一致；真实账号状态为 online。
 - 独立会话 API：`/api/v1/conversations` 返回当前 V2 独立库数据，实测全部账号视图 2 条会话。

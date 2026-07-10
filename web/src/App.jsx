@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from './api'
 import { useAccountsController } from './accounts/useAccountsController'
 import { SettingsProvider, useSettings } from './settings'
+import { buildContacts, buildInbox, filterInbox } from './inboxModel'
 import AccountCenterPage from './components/AccountCenterPage'
 import ChatList from './components/ChatList'
 import ChatPane from './components/ChatPane'
@@ -48,6 +49,8 @@ function AppInner() {
   const [health, setHealth] = useState(null)
   const [dashboard, setDashboard] = useState(null)
   const [conversations, setConversations] = useState([])
+  const [contacts, setContacts] = useState([])
+  const [inboxAccounts, setInboxAccounts] = useState([])
   const [conversationsTotal, setConversationsTotal] = useState(0)
   const [conversationsHasMore, setConversationsHasMore] = useState(false)
   const [conversationsPage, setConversationsPage] = useState(1)
@@ -61,6 +64,7 @@ function AppInner() {
   const [refreshTick, setRefreshTick] = useState(0)
   const [query, setQuery] = useState('')
   const [platformFilter, setPlatformFilter] = useState('all')
+  const [accountFilter, setAccountFilter] = useState('all')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState('reply')
   const [activeTab, setActiveTab] = useState('chats')
@@ -114,19 +118,30 @@ function AppInner() {
   }
 
   const fetchConversationsPage = useCallback(async (page, append = false) => {
-    const accountId = accountsController.selectedAccountId || 'all'
-    const res = await api.get(`/v1/conversations?account_id=${encodeURIComponent(accountId)}&limit=${PAGE_SIZE}`)
-    const nextItems = res.items || []
-    if (append) {
-      setConversations(prev => [...prev, ...nextItems.filter(item => !prev.some(old => old.conversation_id === item.conversation_id))])
-    } else {
-      setConversations(nextItems)
-    }
-    setConversationsTotal(res.total || 0)
-    setConversationsHasMore(Boolean(res.has_more))
+    const [legacyRes, standaloneRes, contactsRes] = await Promise.all([
+      api.get(`/conversations?page=${page}&page_size=${PAGE_SIZE}`),
+      api.get(`/v1/conversations?platform=all&account_id=all&limit=200`),
+      api.get('/v1/contacts?platform=all&account_id=all&limit=500'),
+    ])
+    const inbox = buildInbox({
+      legacy: legacyRes.items || [],
+      standalone: standaloneRes.items || [],
+      standaloneAccounts: standaloneRes.available_accounts || accountsController.accounts || [],
+    })
+    const nextItems = inbox.conversations
+    const nextContacts = buildContacts({
+      legacy: legacyRes.items || [],
+      standalone: contactsRes.items || [],
+      accounts: inbox.accounts,
+    })
+    setInboxAccounts(inbox.accounts)
+    setContacts(nextContacts)
+    setConversations(nextItems)
+    setConversationsTotal(nextItems.length)
+    setConversationsHasMore(Boolean(legacyRes.has_more))
     setConversationsPage(page)
-    return { ...res, page, items: nextItems }
-  }, [accountsController.selectedAccountId])
+    return { items: nextItems, total: nextItems.length, has_more: Boolean(legacyRes.has_more), page }
+  }, [accountsController.accounts])
 
   const refreshWorkspace = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -152,7 +167,7 @@ function AppInner() {
           setSelectedName('')
           return ''
         }
-        const current = items.find(c => c.user_id === prev)
+        const current = items.find(c => c.conversation_key === prev)
         if (current) {
           setSelectedName(current.user_name)
           return prev
@@ -298,14 +313,14 @@ function AppInner() {
     }
   }, [])
 
-  const selectConversation = useCallback((userId) => {
-    setSelectedId(userId)
-    const found = conversations.find(c => c.user_id === userId)
+  const selectConversation = useCallback((conversationKey) => {
+    setSelectedId(conversationKey)
+    const found = conversations.find(c => c.conversation_key === conversationKey)
     if (found) {
       setSelectedName(found.user_name)
-      markRead(userId, found.last_timestamp)
+      markRead(conversationKey, found.last_timestamp)
     } else {
-      setSelectedName(userId)
+      setSelectedName(conversationKey)
     }
   }, [conversations, markRead])
 
@@ -314,8 +329,9 @@ function AppInner() {
     const readMap = readMapRef.current || {}
     for (const c of conversations) {
       const ts = Number(c.last_timestamp || 0)
-      const lastRead = readMap[c.user_id] || readTime(c.user_id)
-      if (ts > lastRead) out[c.user_id] = 1
+      const key = c.conversation_key || c.user_id
+      const lastRead = readMap[key] || readTime(key)
+      if (ts > lastRead) out[key] = Number(c.unread_count || 1)
     }
     return out
   }, [conversations, readTick])
@@ -325,8 +341,8 @@ function AppInner() {
 
   useEffect(() => {
     if (!selectedId) return
-    const found = conversations.find(c => c.user_id === selectedId)
-    if (found) markRead(found.user_id, found.last_timestamp)
+    const found = conversations.find(c => c.conversation_key === selectedId)
+    if (found) markRead(found.conversation_key, found.last_timestamp)
   }, [conversations, selectedId, markRead])
 
   const platformOptions = useMemo(() => {
@@ -337,16 +353,17 @@ function AppInner() {
   const filteredConversations = useMemo(() => {
     const q = query.trim().toLowerCase()
     const contactProfiles = settings.web_settings?.contact_profiles || {}
-    return conversations.filter(item => {
-      if (platformFilter !== 'all' && item.platform !== platformFilter) return false
+    return filterInbox(conversations, { platform: platformFilter, accountId: accountFilter }).filter(item => {
       const remark = String(contactProfiles[item.user_id]?.remark || '').toLowerCase()
       if (!q) return true
       return item.user_name?.toLowerCase().includes(q) ||
         item.user_id?.toLowerCase().includes(q) ||
         item.last_message?.toLowerCase().includes(q) ||
+        item.account_name?.toLowerCase().includes(q) ||
+        item.account_label?.toLowerCase().includes(q) ||
         remark.includes(q)
     })
-  }, [conversations, query, platformFilter, settings.web_settings?.contact_profiles])
+  }, [conversations, query, platformFilter, accountFilter, settings.web_settings?.contact_profiles])
 
   if (!sessionToken) {
     return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
@@ -357,10 +374,10 @@ function AppInner() {
     if (!pluginOn) return false
     return !!settings.web_settings?.message_ops?.auto_translate
   })()
-  const selectedConversation = useMemo(() => conversations.find(c => c.user_id === selectedId) || null, [conversations, selectedId])
+  const selectedConversation = useMemo(() => conversations.find(c => c.conversation_key === selectedId) || null, [conversations, selectedId])
   const selectedAccount = useMemo(
-    () => accountsController.accounts.find(item => item.id === accountsController.selectedAccountId) || null,
-    [accountsController.accounts, accountsController.selectedAccountId],
+    () => inboxAccounts.find(item => item.id === accountFilter) || null,
+    [inboxAccounts, accountFilter],
   )
   const selectedContactProfile = useMemo(() => {
     if (!selectedConversation?.user_id) return null
@@ -438,21 +455,29 @@ function AppInner() {
               autoTranslate={autoTranslate}
               platformFilter={platformFilter}
               platformOptions={platformOptions}
-              onPlatformFilterChange={setPlatformFilter}
-              accounts={accountsController.accounts}
-              selectedAccountId={accountsController.selectedAccountId}
+              onPlatformFilterChange={platform => {
+                setPlatformFilter(platform)
+                setAccountFilter('all')
+                setSelectedId('')
+                setSelectedName('')
+              }}
+              accounts={inboxAccounts.filter(account => platformFilter === 'all' || account.platform === platformFilter)}
+              selectedAccountId={accountFilter}
               selectedAccountName={selectedAccount?.name || ''}
               onAccountChange={accountId => {
-                accountsController.setSelectedAccountId(accountId)
+                setAccountFilter(accountId)
                 setSelectedId('')
                 setSelectedName('')
               }}
               onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
             />
             <ChatPane
-              userId={selectedId}
+              userId={selectedConversation?.user_id || ''}
               conversationId={selectedConversation?.conversation_id || ''}
-              standalone={Boolean(selectedConversation?.conversation_id)}
+              standalone={selectedConversation?.source === 'standalone'}
+              accountLabel={selectedConversation?.account_label || ''}
+              accountName={selectedConversation?.account_name || ''}
+              platform={selectedConversation?.platform || ''}
               userName={selectedName}
               contactProfile={selectedContactProfile}
               userOverride={selectedUserOverride}
@@ -475,7 +500,15 @@ function AppInner() {
         )}
 
         {activeTab === 'contacts' && (
-          <ContactsPage conversations={conversations} onSelect={(id) => { selectConversation(id); setActiveTab('chats') }} />
+          <ContactsPage
+            contacts={contacts}
+            accounts={inboxAccounts}
+            onSelect={(item) => {
+              const conversation = conversations.find(c => c.conversation_key === item.conversation_key)
+              if (conversation) selectConversation(conversation.conversation_key)
+              setActiveTab('chats')
+            }}
+          />
         )}
 
         {activeTab === 'discover' && (

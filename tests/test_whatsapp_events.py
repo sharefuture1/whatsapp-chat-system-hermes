@@ -197,6 +197,8 @@ def test_v1_conversations_are_visible_and_scoped_by_account(events_api):
     account_b = client.get('/api/v1/conversations?account_id=account-b&limit=50')
     assert account_b.status_code == 200
     assert account_b.json()['total'] == 1
+    assert account_b.json()['available_platforms'] == ['whatsapp']
+    assert [account['name'] for account in account_b.json()['available_accounts']] == ['B']
     item = account_b.json()['items'][0]
     assert item['account_id'] == 'account-b'
     assert item['user_name'] == 'Second account customer'
@@ -211,9 +213,24 @@ def test_v1_conversations_are_visible_and_scoped_by_account(events_api):
         'second account message'
     ]
 
-    all_accounts = client.get('/api/v1/conversations?account_id=all&limit=50')
+    all_accounts = client.get('/api/v1/conversations?platform=whatsapp&account_id=all&limit=50')
     assert all_accounts.status_code == 200
     assert all_accounts.json()['total'] == 2
+    assert {account['id'] for account in all_accounts.json()['available_accounts']} == {
+        'account-a', 'account-b'
+    }
+
+    contacts = client.get('/api/v1/contacts?platform=whatsapp&account_id=all&limit=50')
+    assert contacts.status_code == 200
+    assert contacts.json()['total'] == 2
+    assert {(item['account_id'], item['remote_jid']) for item in contacts.json()['items']} == {
+        ('account-a', '85620@s.whatsapp.net'),
+        ('account-b', '85621@s.whatsapp.net'),
+    }
+    second = next(item for item in contacts.json()['items'] if item['account_id'] == 'account-b')
+    assert second['account_name'] == 'B'
+    assert second['platform'] == 'whatsapp'
+    assert second['conversation_id'] == item['conversation_id']
 
 
 def test_preview_does_not_go_backwards_and_outbound_does_not_add_unread(events_api):

@@ -19,8 +19,10 @@
   - [x] Task 6 内部事件接收与持久化 spool：幂等/hash、sequence、事务落库、回执、重启 replay、dead-letter
   - [ ] 使用真实测试账号验收扫码、session 恢复、入站、出站 message ID 和回执
 - [>] **Phase 4：Bridge V2 多账号隔离**
-  - [x] 独立库会话 API 按 `account_id` 查询；前端支持“全部账号/单账号”筛选和独立消息详情
-  - [x] 当前真实扫码账号的 2 个会话、8 条消息已在页面 API 可见
+  - [x] 迁移期统一收件箱：ALL 聚合 Legacy + V2；平台 `ALL/WA`，账号 `WA1/WA2/...`
+  - [x] 会话使用账号隔离 `conversation_key`，避免相同 JID 跨账号冲突
+  - [x] 独立联系人 API 与多平台/多账号通讯录筛选、分组和搜索
+  - [x] 当前真实数据验证：Legacy 3 条会话 + V2 2 条会话、2 个联系人
   - [ ] 再创建并扫码第二个 V2 业务账号，验证两个账号同时在线
   - [ ] 验证 A 断线、登出、发送不影响 B；相同 JID 数据和 socket 严格隔离
 - [ ] **Phase 5：Outbox、定时与群发 Worker**
@@ -112,8 +114,9 @@
 - `/api/health`：✅ 200
 - Legacy 网页直发同步探针：✅ 真实 WhatsApp ID + local ID + 增量 API 可读
 - V2 `3100` 影子 live/ready：✅ 200；未认证 API：401；create/status/stop：200
-- 线上资源：`index-CRFRy-mv.js` / `index-Dewmrv3Z.css`，本机 FastAPI 资源 200
-- V2 独立会话 API：✅ 当前 1 个在线业务账号、2 个会话、8 条消息可读；账号筛选已部署
+- 线上资源：`index-zmRcX5WP.js` / `index-CpWFmy3-.css`，本机 FastAPI 资源 200
+- 统一收件箱：✅ Legacy 3 条 + V2 2 条会话聚合；平台/账号二级筛选已部署
+- 多账号通讯录：✅ V2 2 个联系人可读并与 Legacy 联系人聚合展示
 - 第二个 V2 业务账号同时在线：⏳ 尚未创建/登记，需继续扫码验收
 
 ### P2 — 工程与视觉精修
