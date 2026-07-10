@@ -139,8 +139,12 @@ export default function ChatPane({
   const fetchedFor = useRef(null)
   const requestTracker = useRef(createConversationRequestTracker())
   const deltaCursorRef = useRef(0)
+  const translatingIdsRef = useRef(new Set())
   const composerRef = useRef(null)
   const [newMessageCount, setNewMessageCount] = useState(0)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const defaultMode = uiSettings?.reply?.default_mode || 'smart'
+  const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
 
   useEffect(() => {
     if (mode === 'direct') {
@@ -207,7 +211,8 @@ export default function ChatPane({
     fetchedFor.current = null
     deltaCursorRef.current = 0
     setNewMessageCount(0)
-    setMode(uiSettings?.reply?.default_mode || 'smart')
+    setMode(defaultMode)
+    setToolsOpen(false)
     setComposer('')
     setPreview(null)
     setPreviewError(false)
@@ -224,7 +229,7 @@ export default function ChatPane({
     return () => {
       requestTracker.current.invalidate()
     }
-  }, [userId, conversationId, standalone, pageSize, uiSettings])
+  }, [conversationKey, defaultMode, pageSize])
 
   useEffect(() => {
     if (!userId || !refreshTick || fetchedFor.current !== userId) return
@@ -300,7 +305,9 @@ export default function ChatPane({
   }
 
   const translateOne = async (msg) => {
-    if (!msg?.message_id || msg.translated || msg.lang === 'Chinese') return
+    const translationId = String(msg?.message_id || '')
+    if (!translationId || msg.translated || msg.lang === 'Chinese' || translatingIdsRef.current.has(translationId)) return
+    translatingIdsRef.current.add(translationId)
     try {
       const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
       if (res?.success === false || !res?.translated) {
@@ -313,6 +320,8 @@ export default function ChatPane({
     } catch (error) {
       const code = error?.data?.detail?.code || error?.data?.code || error?.code
       setTranslationError(code === 'auto_translate_disabled' ? t('translationDisabled') : t('translationFailed'))
+    } finally {
+      translatingIdsRef.current.delete(translationId)
     }
   }
 
@@ -486,16 +495,11 @@ export default function ChatPane({
         <div className="wx-avatar" style={{ background: avatarColor(headerTitle) }}>{initials(headerTitle)}</div>
         <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
           <div className="wx-chat-title">{headerTitle}</div>
-          <div className="wx-chat-sub"><span className="wx-chat-account-badge">{accountLabel || String(platform || 'WA').toUpperCase()}</span><span>{accountName}</span><span>·</span><span>{total} {t('totalMessages') || 'msgs'}</span>{allowLocalHide && hiddenCount ? <span>· {hiddenCount} {t('hiddenMessages')}</span> : null}</div>
+          <div className="wx-chat-sub"><span className="wx-online-dot"/><span>{accountLabel || String(platform || 'WA').toUpperCase()} · {accountName}</span></div>
         </div>
-        <div className="wx-chat-header-right">
-          <button className="wx-icon-btn" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} title={t('contactProfile') || '联系人资料'} aria-label={t('contactProfile') || '联系人资料'}>
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.5 4-6 8-6s8 2.5 8 6"/></svg>
-          </button>
-          <button className="wx-icon-btn" onClick={() => { openContactDrawer(); setContactDrawerTab('history') }} title={t('chatHistory') || '聊天记录'} aria-label={t('chatHistory') || '聊天记录'}>
-            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-          </button>
-        </div>
+        <button className="wx-icon-btn wx-chat-more-btn" onClick={openContactDrawer} title={t('contactDetails') || '聊天详情'} aria-label={t('contactDetails') || '聊天详情'}>
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
+        </button>
       </div>
 
       {!autoTranslate && autoTranslateState?.blockedReason === 'ai_not_configured' ? (
@@ -538,16 +542,17 @@ export default function ChatPane({
             const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
             return (
               <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${idx}`} onClick={() => setActiveMessageId(item.message_id)}>
-                {!isOut ? <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(userName) }}>{initials(userName)}</div> : null}
+                <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? (t('me') || '我') : userName)}</div>
                 <div>
-                  <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>{effectiveHidden ? t('hiddenPlaceholder') : item.content}</div>
-                  {showTranslation ? (
-                    <div className="wx-translation-line">
-                      <span className="wx-translation-label">{t('translation')}:</span>
-                      <span className="wx-translation-text">{translatedText}</span>
-                      <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
-                    </div>
-                  ) : null}
+                  <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
+                    <div className="wx-bubble-content">{effectiveHidden ? t('hiddenPlaceholder') : item.content}</div>
+                    {showTranslation ? (
+                      <div className="wx-bubble-translation">
+                        <span>{translatedText}</span>
+                        <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
+                      </div>
+                    ) : null}
+                  </div>
                   {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}{failed && item.retryable !== false ? <button type="button" className="wx-retry-btn" onClick={e => { e.stopPropagation(); retryMessage(item) }}>{t('retry') || '重试'}</button> : null}</div> : null}
                 </div>
                 {allowLocalHide && !effectiveHidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={(e) => { e.stopPropagation(); onHideMessage(item.message_id) }}>{t('hide')}</button></div> : null}
@@ -646,27 +651,33 @@ export default function ChatPane({
       ) : null}
 
       <div className="wx-composer">
-        <div className="wx-composer-toolbar">
-          <button type="button" className={`wx-mode-pill ${mode !== 'direct' ? 'active' : ''}`} onClick={() => setMode(mode === 'direct' ? 'smart' : mode === 'smart' ? 'translate' : 'direct')} title={t('mode')}>
-            <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2 }}><path d="M4 12h11M11 8l4 4-4 4M20 6v12"/></svg>
-            {mode === 'direct' ? t('modeDirect') : mode === 'smart' ? t('modeSmart') : t('modeTranslate')}
-            {mode !== 'direct' && <span className="wx-mode-badge">AI</span>}
-          </button>
-          <div className="wx-emoji-strip" aria-label={t('quickEmoji')}>
-            {QUICK_EMOJIS.map(emoji => <button key={emoji} type="button" className="wx-emoji-btn" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}
-          </div>
-          <div style={{ flex: 1 }} />
-          {sendingMeta ? <span style={{ fontSize: 11, color: 'var(--wx-text-muted)' }}>{t('lastSend') || '上次'}: {sendingMeta.mode}</span> : null}
-        </div>
         {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip"><span>{t('preview') || '预览'}:</span><span className="preview-text">{preview.message}</span></div> : null}
         {previewError && mode !== 'direct' ? <div className="wx-preview-strip wx-preview-error">{t('previewFailed') || '预览失败'}</div> : null}
-        <div className="wx-composer-input">
-          <textarea ref={composerRef} value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} />
-          <button type="button" className={`wx-send-btn${sending ? ' sending' : ''}`} onClick={sendMessage} disabled={!composer.trim() || sending}>
-            {sending ? <span className="wx-spinner sm" /> : null}
-            {!sending && (composer.trim() ? t('send') : t('send') + ' ↗')}
+        <div className="wx-composer-input wx-wechat-composer-row">
+          <button type="button" className="wx-composer-icon-btn" aria-label={t('quickEmoji')} onClick={() => setToolsOpen(prev => !prev)}>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8 14c1.1 1.3 2.4 2 4 2s2.9-.7 4-2"/></svg>
           </button>
+          <textarea ref={composerRef} value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} />
+          {composer.trim() ? (
+            <button type="button" className={`wx-send-btn${sending ? ' sending' : ''}`} onClick={sendMessage} disabled={sending}>
+              {sending ? <span className="wx-spinner sm" /> : t('send')}
+            </button>
+          ) : (
+            <button type="button" className={`wx-composer-icon-btn wx-composer-plus${toolsOpen ? ' active' : ''}`} aria-label={t('more') || '更多'} onClick={() => setToolsOpen(prev => !prev)}>
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+            </button>
+          )}
         </div>
+        {toolsOpen ? (
+          <div className="wx-composer-tools-panel">
+            <button type="button" className={`wx-composer-tool ${mode === 'direct' ? 'active' : ''}`} onClick={() => setMode('direct')}><span><svg viewBox="0 0 24 24"><path d="M4 12h16M14 6l6 6-6 6"/></svg></span>{t('modeDirect')}</button>
+            <button type="button" className={`wx-composer-tool ${mode === 'smart' ? 'active' : ''}`} onClick={() => setMode('smart')}><span><svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4 12h4M16 12h4"/><circle cx="12" cy="12" r="4"/></svg></span>{t('modeSmart')}</button>
+            <button type="button" className={`wx-composer-tool ${mode === 'translate' ? 'active' : ''}`} onClick={() => setMode('translate')}><span><svg viewBox="0 0 24 24"><path d="M4 5h10M9 3v2M6 9c2 3 5 5 8 6M12 5c-1 5-4 8-8 10M15 19l3-8 3 8M16 16h4"/></svg></span>{t('modeTranslate')}</button>
+            <div className="wx-composer-emoji-grid" aria-label={t('quickEmoji')}>
+              {QUICK_EMOJIS.map(emoji => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   )

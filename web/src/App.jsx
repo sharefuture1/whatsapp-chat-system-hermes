@@ -84,6 +84,8 @@ function AppInner() {
   const [activeTab, setActiveTab] = useState('chats')
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
+  const accountsRef = useRef([])
+  accountsRef.current = accountsController.accounts
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
   })
@@ -140,7 +142,7 @@ function AppInner() {
     const inbox = buildInbox({
       legacy: legacyRes.items || [],
       standalone: standaloneRes.items || [],
-      standaloneAccounts: standaloneRes.available_accounts || accountsController.accounts || [],
+      standaloneAccounts: standaloneRes.available_accounts || accountsRef.current || [],
     })
     const nextItems = inbox.conversations
     const nextContacts = buildContacts({
@@ -155,7 +157,7 @@ function AppInner() {
     setConversationsHasMore(Boolean(legacyRes.has_more))
     setConversationsPage(page)
     return { items: nextItems, total: nextItems.length, has_more: Boolean(legacyRes.has_more), page }
-  }, [accountsController.accounts])
+  }, [])
 
   const refreshWorkspace = useCallback(async ({ silent = false } = {}) => {
     try {

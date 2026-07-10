@@ -25,6 +25,21 @@
 
 ---
 
+## 2026-07-10: 高频轮询只能在业务数据变化时替换 React 状态引用
+
+**决策**：账号和会话轮询必须保持稳定引用；服务器返回值语义未变化时不得无条件 `setState(newArray)`。聊天初始加载 effect 只能依赖稳定的会话 identity 和明确配置标量，不能依赖整个 settings/account 对象。
+
+**原因**：账号 3 秒轮询每次创建新数组，令 Workspace fetch callback 重建并重新执行初始化 effect；同时 SettingsProvider 刷新生成新 `uiSettings` 对象，导致 ChatPane 清空消息、显示骨架、重载并滚底，形成周期性闪烁。
+
+**约束**：
+- 轮询数组在深度等价时保留旧引用；
+- 当前值通过 ref 提供给稳定 callback；
+- 初始加载以 `standalone:conversationId` 或 `legacy:userId` 为 identity；
+- 自动翻译必须按 message ID 记录 in-flight，禁止同一条消息并发重复翻译；
+- 验收必须采集连续 DOM 样本，确认首次加载后消息数、容器高度和 scrollTop 稳定。
+
+**关联规格**：`FR-MSG-002`、`FR-MSG-007`、`SDD-P1-05`、`SDD-P2-06`。
+
 ## 2026-07-10: 当前聊天的刷新、发送和翻译必须使用同一数据面
 
 **决策**：Legacy 与 V2 可在列表聚合，但进入具体会话后，刷新、发送、落库、消息 ID 与翻译必须锁定该会话的数据面和账号。

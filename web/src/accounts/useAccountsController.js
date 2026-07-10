@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { normalizeAccount, summarizeAccounts } from './accountState'
 
+function sameAccounts(previous, next) {
+  if (previous === next) return true
+  if (previous.length !== next.length) return false
+  return previous.every((item, index) => JSON.stringify(item) === JSON.stringify(next[index]))
+}
+
 export function useAccountsController(active) {
   const [accounts, setAccounts] = useState([])
   const [selectedAccountId, setSelectedAccountIdState] = useState(() => localStorage.getItem('wa-selected-account') || 'all')
@@ -15,7 +21,8 @@ export function useAccountsController(active) {
     try {
       const data = await api.get('/v1/accounts')
       if (requestId !== requestRef.current) return
-      setAccounts((data?.items || []).map(normalizeAccount))
+      const next = (data?.items || []).map(normalizeAccount)
+      setAccounts(prev => sameAccounts(prev, next) ? prev : next)
       setError('')
     } catch (err) {
       if (requestId === requestRef.current) setError(err?.message || 'accounts_load_failed')

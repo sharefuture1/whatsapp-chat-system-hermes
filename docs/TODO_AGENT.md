@@ -38,6 +38,14 @@
 
 ### P0 — 阻断核心聊天体验
 
+- [x] **修复消息页周期性闪烁并收敛为微信聊天布局**
+  - 账号轮询在无变化时保留 React 数组引用，Workspace callback 不再随每轮账号刷新重建
+  - ChatPane 初始加载仅依赖稳定会话 identity，不再因完整 `uiSettings` 对象变化清空消息
+  - 自动翻译按 message ID 去重 in-flight 请求
+  - 顶部仅保留返回、联系人、状态和“…”；双方方形头像与左右气泡镜像；译文内嵌原气泡
+  - 输入区改为微信式表情/输入/加号，AI/直发/翻译与快捷表情收纳进折叠工具面板
+  - Playwright 15 秒连续采样中，首次加载后 80 条消息、容器高度与滚动位置保持稳定；390×844 无横向溢出
+
 - [x] **修复全站页面滚动、响应式与账号页面样式**
   - 聊天、通讯录、发现、我、账号中心/详情/QR 使用独立滚动页面壳
   - 桌面 1440×900、移动 390×844 无横向溢出；生产浏览器控制台无 React 错误
@@ -129,9 +137,9 @@
 
 ### 当前验证结果（2026-07-10）
 
-- `npm run build`：✅ 通过，资源 `index-CYJQNXms.js` / `index-CBTrxfav.css`
+- `npm run build`：✅ 通过，资源 `index-PRO4Ip4M.js` / `index-BuimO47C.css`
 - `pytest -q`：✅ 129 passed
-- `node --test web/tests/*.test.js`：✅ 15 passed
+- `node --test web/tests/*.test.js`：✅ 22 passed
 - `cd bridge && npm test`：✅ 63 passed
 - Bridge lint：✅ 通过
 - Bridge production audit：✅ 0 vulnerabilities

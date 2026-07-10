@@ -1,5 +1,19 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：修复聊天页闪烁并重构微信式消息布局
+
+- 关联规格：`FR-MSG-002`、`FR-MSG-007`、`UX-001`、`UX-005`、`UX-008`、`SDD-P1-05`、`SDD-P2-01`、`SDD-P2-06`。
+- 真实复现：移动端 390×844 连续采样时，修复前消息数在 `0/80`、骨架在 `true/false`、内容高度在 `432/13322` 间周期切换；15 秒产生 52 个 API 响应、6 次 settings 请求和 7 次消息详情请求。
+- 根因一：账号 3 秒轮询无条件创建新数组，导致 `fetchConversationsPage`/`refreshWorkspace` callback 重建及初始化 effect 重跑。
+- 根因二：ChatPane 初始加载依赖整个 `uiSettings` 对象，设置刷新即清空消息、显示骨架、重载和强制滚底。
+- 根因三：自动翻译 effect 在消息更新期间可能对同一条未完成消息重复发起请求。
+- 稳定性修复：账号列表语义未变化时保留旧引用；账号当前值改由 ref 提供给稳定 callback；ChatPane 以稳定 `conversationKey` 与 `defaultMode` 标量控制初始化；翻译增加 message-id in-flight Set。
+- 微信式布局：头部收敛为返回、居中联系人/状态和单一“…”；移除头部头像与双工具按钮；双方均显示 40px 方形头像和镜像气泡；译文放入所属气泡并使用弱分隔线；输入区采用表情/输入/加号结构，AI 模式和快捷表情进入折叠面板；去除点阵聊天背景。
+- TDD：新增 `web/tests/chatStabilityLayout.test.js`，覆盖稳定轮询引用、稳定 callback、稳定会话 identity、单一头部入口、翻译 in-flight 去重、译文归属和双方头像。
+- 浏览器验收：修复后首次加载完成的后续 23 个样本均保持 80 条消息、固定容器高度和 scrollTop；settings 请求从 6 降至 1；无控制台错误；390×844 `scrollWidth=390`。
+- 验证：Python `129 passed`，Web `22 passed`，Bridge `63 passed` + lint，Vite build 通过，FastAPI health 200。
+- 生产资源：`index-PRO4Ip4M.js` / `index-BuimO47C.css`，本机与公网一致。
+
 ## 2026-07-10：修复全站滚动/响应式与自动翻译真实 AI 链路
 
 - 关联规格：`SDD-P1-04`、`SDD-P1-05`、`SDD-P1-06`、`SDD-P2-01`、`SDD-P2-06`。
