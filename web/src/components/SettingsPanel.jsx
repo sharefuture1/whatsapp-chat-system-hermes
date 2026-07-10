@@ -23,7 +23,7 @@ function commandFor(workspace) {
   return option.command.replace('<profile>', workspace.profile || workspace.id || workspace.platform)
 }
 
-export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving }) {
+export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving, modelDefault = '' }) {
   const { t } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
@@ -163,7 +163,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
               <div className="settings-grid">
                 <label><span>{t('settingSmartMax')}</span><input type="number" value={reply.smart_max_length || 40} onChange={e => setReply(prev => ({ ...prev, smart_max_length: Number(e.target.value) || 40 }))} /></label>
                 <label><span>{t('settingTranslateMax')}</span><input type="number" value={reply.translate_max_length || 60} onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))} /></label>
-                <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={reply.ai_model || ''} onChange={e => setReply(prev => ({ ...prev, ai_model: e.target.value }))} placeholder="gpt-5.3-codex-spark" /></label>
+                <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={reply.ai_model || ''} onChange={e => setReply(prev => ({ ...prev, ai_model: e.target.value }))} placeholder={modelDefault || t('settingAiModelPlaceholder') || '服务端默认模型'} />{modelDefault ? <span className="wx-contact-card-hint">{t('settingAiModelInherit') || '留空则继承服务端默认'}：<code>{modelDefault}</code></span> : null}</label>
                 <label><span>{t('settingPreviewDebounce')}</span><input type="number" value={reply.preview_debounce_ms || 320} onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))} /></label>
                 <label className="full-span"><span>{t('settingCustomSystemPrompt') || '默认系统提示词'}</span><textarea rows="4" value={reply.custom_system_prompt || ''} onChange={e => setReply(prev => ({ ...prev, custom_system_prompt: e.target.value }))} placeholder={t('settingCustomSystemPromptHelp') || '全局 AI 提示词，会追加到系统指令中'} /></label>
                 <label className="full-span"><span>{t('settingDefaultReplyStyle') || '默认回复风格'}</span><textarea rows="3" value={reply.default_reply_style || ''} onChange={e => setReply(prev => ({ ...prev, default_reply_style: e.target.value }))} placeholder={t('settingDefaultReplyStyleHelp') || '例如：像熟人聊天、短句、温柔一点、少模板感'} /></label>
@@ -183,7 +183,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
                   <div className="platform-card" key={`${item.user_id || 'new'}-${idx}`}>
                     <div className="settings-grid">
                       <label><span>{t('contactId') || '联系人ID'}</span><input value={item.user_id || ''} onChange={e => updateUserOverride(idx, 'user_id', e.target.value)} placeholder="如 123456@lid" /></label>
-                      <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={item.ai_model || ''} onChange={e => updateUserOverride(idx, 'ai_model', e.target.value)} placeholder="留空则继承全局" /></label>
+                      <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={item.ai_model || ''} onChange={e => updateUserOverride(idx, 'ai_model', e.target.value)} placeholder={modelDefault || t('settingAiModelInherit') || '留空则继承全局'} />{modelDefault ? <span className="wx-contact-card-hint">{t('settingAiModelInherit') || '留空则继承全局'}：<code>{modelDefault}</code></span> : null}</label>
                       <label className="full-span"><span>{t('settingCustomSystemPrompt') || '系统提示词'}</span><textarea rows="3" value={item.custom_system_prompt || ''} onChange={e => updateUserOverride(idx, 'custom_system_prompt', e.target.value)} placeholder={t('contactPromptHelp') || '例如：这个用户比较敏感，回复时要更温柔、更口语化'} /></label>
                       <label className="full-span"><span>{t('settingDefaultReplyStyle') || '回复风格'}</span><textarea rows="2" value={item.reply_style || ''} onChange={e => updateUserOverride(idx, 'reply_style', e.target.value)} placeholder={t('contactStyleHelp') || '例如：像熟悉朋友聊天，短句，先共情再回答'} /></label>
                     </div>

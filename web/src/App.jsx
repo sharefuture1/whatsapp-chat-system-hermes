@@ -337,7 +337,11 @@ function AppInner() {
     return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
   }
 
-  const autoTranslate = !!settings.web_settings?.message_ops?.auto_translate
+  const autoTranslate = (() => {
+    const pluginOn = settings.plugins ? (settings.plugins.auto_translate !== false) : true
+    if (!pluginOn) return false
+    return !!settings.web_settings?.message_ops?.auto_translate
+  })()
   const selectedConversation = useMemo(() => conversations.find(c => c.user_id === selectedId) || null, [conversations, selectedId])
   const selectedContactProfile = useMemo(() => {
     if (!selectedConversation?.user_id) return null
@@ -424,7 +428,7 @@ function AppInner() {
               contactProfile={selectedContactProfile}
               userOverride={selectedUserOverride}
               defaultReplyStyle={settings.web_settings?.reply?.default_reply_style || ''}
-              defaultAiModel={settings.web_settings?.reply?.ai_model || 'gpt-5.3-codex-spark'}
+              defaultAiModel={settings.web_settings?.reply?.ai_model || settings.model?.default || ''}
               onSaveContactConfig={quickSaveContactConfig}
               onBack={() => { setSelectedId(''); setSelectedName('') }}
               onReply={sendReply}
@@ -459,10 +463,11 @@ function AppInner() {
             profileSummary={{
               userId: selectedConversation?.user_id || '',
               userName: selectedContactProfile?.remark || selectedConversation?.user_name || '',
-              aiModel: selectedUserOverride?.ai_model || settings.web_settings?.reply?.ai_model || 'gpt-5.3-codex-spark',
+              aiModel: selectedUserOverride?.ai_model || settings.web_settings?.reply?.ai_model || settings.model?.default || '',
               replyStyle: selectedUserOverride?.reply_style || settings.web_settings?.reply?.default_reply_style || '',
               prompt: selectedUserOverride?.custom_system_prompt || '',
               notes: selectedContactProfile?.notes || '',
+              modelDefault: settings.model?.default || '',
             }}
           />
         )}
@@ -479,6 +484,7 @@ function AppInner() {
         channels={settings.channels || []}
         onSave={saveSettings}
         saving={saving}
+        modelDefault={settings.model?.default || ''}
       />
 
       {banner ? <div className="wx-toast">{banner}</div> : null}

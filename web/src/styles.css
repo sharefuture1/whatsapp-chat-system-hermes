@@ -418,6 +418,9 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-plugin-card { display: flex; gap: 12px; background: var(--wx-panel); border-radius: var(--wx-radius-card); padding: 14px; box-shadow: var(--wx-shadow-card); align-items: center; border-left: 4px solid var(--wx-brand); transition: opacity .15s; }
 :root[data-theme="dark"] .wx-plugin-card { background: #1d1d1f; }
 .wx-plugin-card.is-off { opacity: .6; border-left-color: var(--wx-text-faint); }
+.wx-plugin-status { font-size: 12px; line-height: 1.4; }
+.wx-plugin-hooks { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.wx-plugin-hooks li code { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--wx-panel-soft); color: var(--wx-text-muted); }
 .wx-plugin-icon { width: 44px; height: 44px; border-radius: 10px; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .wx-plugin-icon svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.6; }
 .wx-plugin-body { flex: 1; min-width: 0; display: grid; gap: 6px; }
@@ -597,6 +600,9 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 8px 4px 6px; border: 0; background: transparent; color: var(--wx-text-muted); font-size: 10px; cursor: pointer; transition: color .2s, transform .15s; position: relative; }
 .wx-tab-btn:active { transform: scale(.9); }
 .wx-tab-btn.active { color: var(--wx-brand); }
+.wx-tab-btn > span[aria-hidden] { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
+.wx-tab-btn > span[aria-hidden] svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.wx-tab-btn.active > span[aria-hidden] svg { stroke: var(--wx-brand); }
 .wx-tab-badge { position: absolute; top: 4px; right: calc(50% - 14px); background: var(--wx-danger); color: #fff; border-radius: 999px; min-width: 16px; height: 16px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 4px; animation: wx-fade-in .2s ease; }
 .wx-retry-btn { border: 0; background: transparent; color: var(--wx-danger); padding: 0 2px; font-size: 11px; font-weight: 600; cursor: pointer; }
 .wx-new-message-btn { position: sticky; bottom: 12px; z-index: 8; display: block; margin: -40px auto 10px; border: 0; border-radius: 999px; padding: 7px 14px; background: var(--wx-panel); color: var(--wx-brand); box-shadow: var(--wx-shadow-elev); font-size: 12px; font-weight: 600; cursor: pointer; }

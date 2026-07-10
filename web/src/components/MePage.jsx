@@ -35,6 +35,8 @@ export default function MePage({ health, onOpenSettings, onLogout, profilePath, 
         <div className="wx-section-list wx-card-list">
           <div className="wx-setting-row"><span>{t('activeConversation') || '当前会话'}</span><span className="wx-setting-value">{profileSummary?.userName || '—'}</span></div>
           <div className="wx-setting-row"><span>{t('contactId') || '联系人ID'}</span><span className="wx-setting-value wx-mono">{profileSummary?.userId || '—'}</span></div>
+          <div className="wx-setting-row"><span>{t('settingAiModel') || 'AI 模型'}</span><span className="wx-setting-value wx-mono">{profileSummary?.aiModel || profileSummary?.modelDefault || '—'}</span></div>
+          <div className="wx-setting-row"><span>{t('modelDefault') || '服务端默认'}</span><span className="wx-setting-value wx-mono">{profileSummary?.modelDefault || '—'}</span></div>
           <div className="wx-setting-row multi"><span>{t('contactNotes') || '联系人说明'}</span><span className="wx-setting-value wx-multiline">{profileSummary?.notes || '—'}</span></div>
         </div>
       </div>

@@ -152,6 +152,12 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
                     {plugin.builtin ? <span className="wx-pill-mini">{t('builtin') || 'Built-in'}</span> : null}
                     <span className={`wx-pill-mini ${plugin.enabled ? 'ok' : 'danger'}`}>{plugin.enabled ? t('enabled') || 'On' : t('disabled') || 'Off'}</span>
                   </div>
+                  <div className="wx-plugin-status subtle">{plugin.enabled ? (plugin.status_when_on || (t('statusOn') || '已开启')) : (t('statusOff') || '已关闭')}</div>
+                  {plugin.hooks && plugin.hooks.length ? (
+                    <ul className="wx-plugin-hooks">
+                      {plugin.hooks.map(h => <li key={h}><code>{h}</code></li>)}
+                    </ul>
+                  ) : null}
                 </div>
                 <button type="button" className="wx-icon-btn" aria-label={t('remove') || 'Remove'} onClick={() => remove(plugin)} title={t('remove') || 'Remove'}>
                   <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"/></svg>

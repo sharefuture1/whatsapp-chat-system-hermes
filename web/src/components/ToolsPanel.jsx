@@ -243,6 +243,12 @@ export default function ToolsPanel() {
                   <span className={`wx-pill-mini ${plugin.enabled ? 'ok' : 'danger'}`}>{plugin.enabled ? t('enabled') || 'On' : t('disabled') || 'Off'}</span>
                   <button type="button" className="wx-inline-btn" style={{ marginLeft: 'auto' }} onClick={() => removePlugin(plugin)}>{t('remove') || 'Remove'}</button>
                 </div>
+                <div className="wx-plugin-status subtle">{plugin.enabled ? (plugin.status_when_on || (t('statusOn') || '已开启')) : (t('statusOff') || '已关闭')}</div>
+                {plugin.hooks && plugin.hooks.length ? (
+                  <ul className="wx-plugin-hooks">
+                    {plugin.hooks.map(h => <li key={h}><code>{h}</code></li>)}
+                  </ul>
+                ) : null}
               </div>
             </div>
           ))}

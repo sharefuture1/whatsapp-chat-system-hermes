@@ -280,6 +280,14 @@ def _ensure_message_translations(config: AppConfig, user_id: str, items: list[di
         bulk_put(config.paths.memory_dir, user_id, pending)
 
 
+def _auto_translate_enabled(config: AppConfig) -> bool:
+    """Plugin + user setting: both must be on for in-app translation."""
+    plugin_state = config.web_settings.get('plugins') or {}
+    if not bool(plugin_state.get('auto_translate', True)):
+        return False
+    return bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+
+
 def _maybe_translate_for_user(config: AppConfig, user_id: str, text: str) -> str | None:
     """Quick translation lookup for short previews (no model call).
 
@@ -292,7 +300,7 @@ def _maybe_translate_for_user(config: AppConfig, user_id: str, text: str) -> str
     source_lang = _language_hint_for(text)
     if source_lang in ('Chinese', 'Unknown'):
         return None
-    if not bool(config.web_settings.get('message_ops', {}).get('auto_translate', True)):
+    if not _auto_translate_enabled(config):
         return None
     data = load_translations(config.paths.memory_dir, user_id)
     items = data.get('items', {})
@@ -303,7 +311,7 @@ def _maybe_translate_for_user(config: AppConfig, user_id: str, text: str) -> str
 
 
 def _attach_translations(config: AppConfig, user_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    auto = bool(config.web_settings.get('message_ops', {}).get('auto_translate', True))
+    auto = _auto_translate_enabled(config)
     if not auto or not messages:
         return [{**m, 'translated': None, 'lang': _language_hint_for(m.get('content') or '')} for m in messages]
     _ensure_message_translations(config, user_id, messages)
@@ -468,6 +476,112 @@ def build_app(
     forwarder = AdminForwarder(config)
     refresher = MemoryRefresher(config)
     frontend_dist = _resolve_frontend_dist(web_dist)
+
+    # ---------------- Plugin center (declared up-front so other endpoints can read flags) ----------------
+    PLUGIN_CATALOG = [
+        {
+            'id': 'auto_translate',
+            'name': 'Auto translate',
+            'description': 'Translate non-Chinese inbound messages in real time.',
+            'category': 'messaging',
+            'builtin': True,
+            'hooks': ['/api/conversations/{user_id}/messages', '/api/dashboard'],
+            'status_when_on': '实时翻译开启',
+        },
+        {
+            'id': 'quick_reply',
+            'name': 'Quick reply',
+            'description': 'AI-drafted reply suggestions for the active conversation.',
+            'category': 'messaging',
+            'builtin': True,
+            'hooks': ['/api/reply?preview_only=true'],
+            'status_when_on': '预览生成已启用',
+        },
+        {
+            'id': 'broadcast',
+            'name': 'Mass broadcast',
+            'description': 'Send the same message to many contacts at once.',
+            'category': 'productivity',
+            'builtin': True,
+            'hooks': ['POST /api/broadcast'],
+            'status_when_on': '群发接口可用',
+        },
+        {
+            'id': 'schedule',
+            'name': 'Scheduled send',
+            'description': 'Schedule a message to be sent at a specific time.',
+            'category': 'productivity',
+            'builtin': True,
+            'hooks': ['GET/POST/DELETE /api/schedule'],
+            'status_when_on': '可创建/查看/删除定时任务',
+        },
+        {
+            'id': 'memory',
+            'name': 'Conversation memory',
+            'description': 'Persist per-contact summaries and language hints.',
+            'category': 'memory',
+            'builtin': True,
+            'hooks': ['GET /api/memory', 'POST /api/memory/refresh'],
+            'status_when_on': '画像会随对话自动更新',
+        },
+        {
+            'id': 'voice_tts',
+            'name': 'Voice playback (TTS)',
+            'description': 'Speak messages aloud for hands-free review.',
+            'category': 'productivity',
+            'builtin': True,
+            'hooks': [],
+            'status_when_on': '需要本地 TTS 客户端配合',
+        },
+        {
+            'id': 'media_pack',
+            'name': 'Media pack',
+            'description': 'Image, voice, and document handling for richer replies.',
+            'category': 'media',
+            'builtin': True,
+            'hooks': [],
+            'status_when_on': '媒体类型回复需配置 Hermes 端',
+        },
+        {
+            'id': 'analytics',
+            'name': 'Analytics dashboard',
+            'description': 'Per-conversation reply and response-time stats.',
+            'category': 'analytics',
+            'builtin': True,
+            'hooks': ['GET /api/dashboard'],
+            'status_when_on': '总览卡片展示插件开关数',
+        },
+        {
+            'id': 'auto_tag',
+            'name': 'Auto tag',
+            'description': 'Tag conversations by topic, urgency, or language.',
+            'category': 'messaging',
+            'builtin': True,
+            'hooks': [],
+            'status_when_on': '基于对话主题自动加标签',
+        },
+        {
+            'id': 'followup',
+            'name': 'Follow-up reminders',
+            'description': 'Auto-suggest a follow-up message when a chat goes quiet.',
+            'category': 'productivity',
+            'builtin': True,
+            'hooks': [],
+            'status_when_on': '长时间无回复时给出跟进建议',
+        },
+    ]
+
+    def _plugin_state() -> dict[str, bool]:
+        state = config.web_settings.get('plugins')
+        if not isinstance(state, dict):
+            state = {p['id']: True for p in PLUGIN_CATALOG}
+            config.web_settings['plugins'] = state
+        for p in PLUGIN_CATALOG:
+            state.setdefault(p['id'], True)
+        return state
+
+    def _plugin_flag(plugin_id: str) -> bool:
+        return bool(_plugin_state().get(plugin_id, True))
 
     app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')
     app.add_middleware(
@@ -664,6 +778,16 @@ def build_app(
 
     @app.post('/api/reply')
     def reply(request: ReplyRequest) -> Any:
+        # quick_reply plugin: when off, refuse to generate AI previews
+        if request.preview_only and not _plugin_state().get('quick_reply', True):
+            return {
+                'success': False,
+                'code': 'plugin_disabled',
+                'detail': 'Quick reply plugin is disabled in Plugin Center',
+                'plugin': 'quick_reply',
+                'preview_only': True,
+                'rewrite': None,
+            }
         try:
             prepared = router.prepare_reply(request.target, request.message, request.mode)
         except ValueError as exc:
@@ -766,6 +890,11 @@ def build_app(
             'platform_catalog': _platform_catalog(),
             'workspaces': _workspace_status(config),
             'web_settings': safe_web_settings,
+            'model': {
+                'default': str(config.model.get('model') or ''),
+                'base_url': str(config.model.get('base_url') or ''),
+            },
+            'plugins': _plugin_state(),
         }
 
     @app.put('/api/settings')
@@ -974,90 +1103,7 @@ def build_app(
         items = sorted([i for i in items if isinstance(i, dict)], key=lambda i: float(i.get('created_at') or 0), reverse=True)
         return {'items': items[:30]}
 
-    # ---------------- Plugin center ----------------
-    PLUGIN_CATALOG = [
-        {
-            'id': 'auto_translate',
-            'name': 'Auto translate',
-            'description': 'Translate non-Chinese inbound messages in real time.',
-            'category': 'messaging',
-            'builtin': True,
-        },
-        {
-            'id': 'quick_reply',
-            'name': 'Quick reply',
-            'description': 'AI-drafted reply suggestions for the active conversation.',
-            'category': 'messaging',
-            'builtin': True,
-        },
-        {
-            'id': 'broadcast',
-            'name': 'Mass broadcast',
-            'description': 'Send the same message to many contacts at once.',
-            'category': 'productivity',
-            'builtin': True,
-        },
-        {
-            'id': 'schedule',
-            'name': 'Scheduled send',
-            'description': 'Schedule a message to be sent at a specific time.',
-            'category': 'productivity',
-            'builtin': True,
-        },
-        {
-            'id': 'memory',
-            'name': 'Conversation memory',
-            'description': 'Persist per-contact summaries and language hints.',
-            'category': 'memory',
-            'builtin': True,
-        },
-        {
-            'id': 'voice_tts',
-            'name': 'Voice playback (TTS)',
-            'description': 'Speak messages aloud for hands-free review.',
-            'category': 'productivity',
-            'builtin': True,
-        },
-        {
-            'id': 'media_pack',
-            'name': 'Media pack',
-            'description': 'Image, voice, and document handling for richer replies.',
-            'category': 'media',
-            'builtin': True,
-        },
-        {
-            'id': 'analytics',
-            'name': 'Analytics dashboard',
-            'description': 'Per-conversation reply and response-time stats.',
-            'category': 'analytics',
-            'builtin': True,
-        },
-        {
-            'id': 'auto_tag',
-            'name': 'Auto tag',
-            'description': 'Tag conversations by topic, urgency, or language.',
-            'category': 'messaging',
-            'builtin': True,
-        },
-        {
-            'id': 'followup',
-            'name': 'Follow-up reminders',
-            'description': 'Auto-suggest a follow-up message when a chat goes quiet.',
-            'category': 'productivity',
-            'builtin': True,
-        },
-    ]
-
-    def _plugin_state() -> dict[str, bool]:
-        state = config.web_settings.get('plugins')
-        if not isinstance(state, dict):
-            state = {p['id']: True for p in PLUGIN_CATALOG}
-            config.web_settings['plugins'] = state
-        # backfill any missing plugins
-        for p in PLUGIN_CATALOG:
-            state.setdefault(p['id'], True)
-        return state
-
+    # ---------------- Plugin center (PLUGIN_CATALOG / _plugin_state / _plugin_flag are defined near the top of build_app) ----------------
     @app.get('/api/plugins')
     def list_plugins() -> dict[str, Any]:
         state = _plugin_state()

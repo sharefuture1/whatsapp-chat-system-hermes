@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -38,6 +41,43 @@ def test_schedule_delete_missing_returns_404(tmp_path):
     profile = create_profile(tmp_path / 'p-schedule-delete')
     client = authed_client(profile)
     assert client.delete('/api/schedule/not-found').status_code == 404
+
+
+def test_settings_exposes_model_default_and_plugins(tmp_path):
+    profile = create_profile(tmp_path / 'p-settings-meta')
+    client = authed_client(profile)
+    resp = client.get('/api/settings')
+    assert resp.status_code == 200
+    body = resp.json()
+    assert 'model' in body
+    assert isinstance(body['model'].get('default'), str)
+    assert 'plugins' in body
+    assert isinstance(body['plugins'], dict)
+    assert 'auto_translate' in body['plugins']
+
+
+def test_reply_preview_refused_when_quick_reply_plugin_off(tmp_path):
+    from fastapi.testclient import TestClient
+    from whatsapp_chat_system.web_api import build_app
+
+    profile = create_profile(tmp_path / 'p-plugin-qr')
+    settings = profile / 'web-settings.json'
+    data = json.loads(settings.read_text())
+    data.setdefault('plugins', {})['quick_reply'] = False
+    settings.write_text(json.dumps(data))
+    client = TestClient(build_app(str(profile)))
+    token = client.post('/api/login', json={'password': 'test-pass'}).json()['session_token']
+    client.headers.update({'x-session-token': token})
+    resp = client.post('/api/reply', json={
+        'target': 'demo@lid',
+        'message': 'hi',
+        'mode': 'smart',
+        'preview_only': True,
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get('success') is False
+    assert body.get('plugin') == 'quick_reply'
 
 
 def test_health_with_isolated_profile(tmp_path):
