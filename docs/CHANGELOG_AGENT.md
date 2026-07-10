@@ -1,5 +1,23 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：推进 SDD-P0-03 / SDD-P1-01 多账户控制面与账号中心
+
+- 明确当前仍未彻底脱离 Hermes：Legacy 消息读取/启动 profile 与现有 Bridge 生命周期仍待迁移。
+- 新增账号级 repository/service 和 `/api/v1/accounts` CRUD、connect、qr、logout API；响应不暴露 session path/ref。
+- 新增独立 Bridge HTTP Client 契约、loopback 限制、超时和结构化错误。
+- Bridge token 未配置时 fail-closed；不再使用固定开发 token。
+- Bridge 注册失败补偿删除数据库账号，停用先停止 Bridge 后提交业务状态。
+- 新增 Alembic `0002`，补齐 AI runtime timeout/retry 字段；真实完成 upgrade→downgrade→upgrade 往返。
+- 前端新增微信式 WhatsApp 账号中心：列表、状态、详情、主账号、启停、登出、高危删除、QR 页面。
+- 账号状态只信服务端；新账号默认自动回复关闭；Bridge 未配置时明确失败，不展示假二维码。
+- 移除用户可见 Settings 中的 Hermes profile/path/CLI 账号入口。
+- 四语言新增账号中心文案；修复统一错误 envelope 解析和写操作成功后刷新失败误报。
+- 双阶段审查发现并修复孤儿账号、停用顺序、弱默认 token、旧 Hermes UI、错误解析等阻断问题。
+- 验证：Python `106 passed`；Node `9 passed`；Vite build 通过；Alembic 往返通过；线上 health/新 JS 200；未认证账号 API 401。
+- 尚未完成：Node/Baileys Bridge V2、内部状态事件、真实扫码/收发、多账号隔离和最终 Hermes shutdown。
+
+---
+
 ## 2026-07-10：完成 SDD-P0-01 独立 Settings 与问鼎 AI Provider
 
 - 新增独立 `AISettings`，只从 `WENDING_AI_*` 环境变量读取 AI 配置；默认 URL、模型、超时、重试分别为 `https://wendingai.future1.us/v1`、`gpt-5.3-codex-spark`、90、2。

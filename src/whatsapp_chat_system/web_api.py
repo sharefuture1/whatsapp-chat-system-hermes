@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import Session, sessionmaker
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -16,8 +18,10 @@ from pydantic import BaseModel, Field
 
 from .ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
 from .ai.provider import WendingAIProvider
+from .api.v1.accounts import BridgeProtocol, create_accounts_router
+from .bridge.client import BridgeClient, BridgeError
 from .config import AppConfig, build_password_record, load_json, save_json, verify_password
-from .db import create_engine, session_scope
+from .db import create_engine, create_session_factory, session_scope
 from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
 from .settings import AISettings
@@ -664,9 +668,32 @@ def _workspace_status(config: AppConfig) -> list[dict[str, Any]]:
         })
     return out
 
+
+class DisabledBridgeClient:
+    """Bridge V2 未安全配置时的 fail-closed 实现。列表仍可读取，写操作明确失败。"""
+
+    @staticmethod
+    def _disabled(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise BridgeError(
+            'bridge_not_configured',
+            'WhatsApp Bridge V2 is not configured',
+            retryable=False,
+            status_code=503,
+        )
+
+    create_account = _disabled
+    connect = _disabled
+    qr = _disabled
+    logout = _disabled
+    stop = _disabled
+    delete = _disabled
+
+
 def build_app(
     profile: str | Path | None = None,
     web_dist: str | Path | None = None,
+    account_session_factory: sessionmaker[Session] | None = None,
+    account_bridge: BridgeProtocol | None = None,
 ) -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
@@ -804,6 +831,20 @@ def build_app(
         allow_methods=['*'],
         allow_headers=['*'],
     )
+
+    resolved_account_factory = account_session_factory or create_session_factory(create_engine())
+    if account_bridge is not None:
+        resolved_account_bridge = account_bridge
+    else:
+        bridge_token = (os.getenv('WHATSAPP_BRIDGE_INTERNAL_TOKEN') or '').strip()
+        if bridge_token:
+            resolved_account_bridge = BridgeClient(
+                base_url=os.getenv('WHATSAPP_BRIDGE_V2_URL', 'http://127.0.0.1:3100'),
+                internal_token=bridge_token,
+            )
+        else:
+            resolved_account_bridge = DisabledBridgeClient()
+    app.include_router(create_accounts_router(resolved_account_factory, resolved_account_bridge))
 
     @app.middleware('http')
     async def auth_guard(request: Request, call_next):

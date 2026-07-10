@@ -52,7 +52,7 @@ EXPECTED_COLUMNS = {
     },
     'ai_runtime_settings': {
         'id', 'provider', 'base_url', 'default_model', 'api_key_ciphertext', 'api_key_hint',
-        'updated_by', 'created_at', 'updated_at',
+        'timeout_seconds', 'max_retries', 'updated_by', 'created_at', 'updated_at',
     },
     'contact_ai_overrides': {
         'account_id', 'contact_id', 'model', 'system_prompt', 'reply_style', 'language',

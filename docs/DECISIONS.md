@@ -1,5 +1,19 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-10: Bridge V2 未配置时 fail-closed，账号 UI 不伪造登录
+
+**决策**：账号控制面可以先于独立 Node/Baileys Bridge V2 上线，但不得用假 QR、静态状态或数据库预写 `online` 冒充已登录。
+
+- `WHATSAPP_BRIDGE_INTERNAL_TOKEN` 未配置时，Bridge 写操作返回结构化 `bridge_not_configured`。
+- 创建账号只有在 Bridge 注册成功后才对用户视为成功；注册失败补偿删除业务记录。
+- `connect` 只返回已受理，不提前改为在线；账号状态最终由后续 Bridge 事件更新。
+- 新账号默认 `auto_reply_mode=off`，真实连接和事件链验收前不默认开启自动回复。
+- 用户可见设置不再暴露 Hermes profile/path/CLI，Legacy 兼容仅保留在服务器迁移层。
+
+详细计划：`docs/plans/2026-07-10-bridge-v2-account-center.md`。
+
+---
+
 ## 2026-07-10: SDD 成为强制开发规格
 
 **决策**：`docs/sdd/` 成为本项目需求、架构、数据模型、API、优化清单、开发流程和迁移策略的唯一权威规格源。

@@ -41,7 +41,9 @@
 
 ### SDD-P0-03 独立 Bridge V2 单账号
 
-- 状态：`Approved`
+- 状态：`In Progress`
+- 当前进度：账号控制面 API、Bridge HTTP Client 契约与 fail-closed 配置已实现；Node/Baileys Bridge、内部事件接收、真实扫码验收尚未完成。
+- 实施计划：`docs/plans/2026-07-10-bridge-v2-account-center.md`
 - 验收：
   - 不运行 Hermes gateway 仍可扫码、连接、收发和恢复 session；
   - Bridge 有 live/ready health；
@@ -91,8 +93,10 @@
 
 ### SDD-P1-01 前端 WhatsApp 账号中心
 
-- 状态：`Approved`
-- 当前缺陷：页面保存 Hermes profile/path/命令，不是真登录管理。
+- 状态：`In Progress`
+- 当前进度：微信式列表/详情/状态/高危删除 UI 已接真实账号 API，旧 Hermes profile/path/CLI 入口已从用户可见设置移除；真实二维码和实时状态依赖 Bridge V2 后续闭环。
+- 实施计划：`docs/plans/2026-07-10-bridge-v2-account-center.md`
+- 当前缺陷：账号中心控制面已实现，但真实登录仍等待独立 Bridge V2 与事件链。
 - 验收：UI 内创建、QR、实时状态、重连、登出、停用、删除；不出现 Hermes profile 概念。
 
 ### SDD-P1-02 真实未读计数

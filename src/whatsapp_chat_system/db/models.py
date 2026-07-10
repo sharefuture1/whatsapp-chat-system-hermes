@@ -243,6 +243,10 @@ class Message(Base):
 
 class AIRuntimeSetting(TimestampMixin, Base):
     __tablename__ = 'ai_runtime_settings'
+    __table_args__ = (
+        CheckConstraint('timeout_seconds > 0', name='timeout_seconds_positive'),
+        CheckConstraint('max_retries >= 0', name='max_retries_non_negative'),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default='global')
     provider: Mapped[str] = mapped_column(String(64), nullable=False, default='wendingai')
@@ -254,6 +258,8 @@ class AIRuntimeSetting(TimestampMixin, Base):
     )
     api_key_ciphertext: Mapped[str | None] = mapped_column(Text)
     api_key_hint: Mapped[str | None] = mapped_column(String(64))
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     updated_by: Mapped[str | None] = mapped_column(String(255))
 
 

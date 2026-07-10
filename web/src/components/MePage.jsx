@@ -1,18 +1,32 @@
 import { useSettings } from '../settings'
 
-export default function MePage({ health, onOpenSettings, onLogout, profilePath, autoTranslate, profileSummary }) {
+const AccountsIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M10 18h4"/></svg>
+
+export default function MePage({ health, onOpenSettings, onOpenAccounts, onLogout, autoTranslate, accountSummary }) {
   const { t, language, setLanguage, languages, theme, toggleTheme } = useSettings()
   return (
     <section className="wx-page wx-me-page">
       <div className="wx-me-hero">
-        <div className="wx-avatar lg" style={{ background: '#07c160' }}>我</div>
+        <div className="wx-avatar lg" style={{ background: '#07c160' }}>{t('operatorInitial')}</div>
         <div className="wx-me-hero-meta">
           <div className="wx-me-name">{t('operator')}</div>
-          <div className="wx-me-sub">{profilePath || (health?.profile ?? '-')}</div>
+          <div className="wx-me-sub">{t('operatorRole')}</div>
           <div className="wx-me-status-row">
-            <span className={`pill ${health ? 'ok' : 'muted'}`}>{health ? t('online') : t('offline')}</span>
+            <span className={`pill ${health ? 'ok' : 'muted'}`}>{health ? t('serviceOnline') : t('serviceOffline')}</span>
             <span className="pill muted">{autoTranslate ? t('autoTranslate') : `${t('autoTranslate')} · ${t('statusOff')}`}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="wx-cell-group">
+        <div className="wx-cell-group-title">{t('accountAndConnection')}</div>
+        <div className="wx-section-list wx-card-list">
+          <button className="wx-setting-row link wx-account-entry" onClick={onOpenAccounts}>
+            <span className="wx-setting-row-icon"><AccountsIcon /></span>
+            <span>{t('whatsappAccounts')}</span>
+            <span className="wx-setting-value">{accountSummary?.online || 0}/{accountSummary?.total || 0} {t('online')}</span>
+            <span>›</span>
+          </button>
         </div>
       </div>
 
@@ -27,17 +41,6 @@ export default function MePage({ health, onOpenSettings, onLogout, profilePath, 
             </select>
           </label>
           <button className="wx-setting-row link" onClick={toggleTheme}><span>{t('theme')}</span><span className="wx-setting-value">{theme === 'light' ? t('themeLight') : t('themeDark')}</span></button>
-        </div>
-      </div>
-
-      <div className="wx-cell-group">
-        <div className="wx-cell-group-title">{t('activeConversation') || '当前聊天对象'}</div>
-        <div className="wx-section-list wx-card-list">
-          <div className="wx-setting-row"><span>{t('activeConversation') || '当前会话'}</span><span className="wx-setting-value">{profileSummary?.userName || '—'}</span></div>
-          <div className="wx-setting-row"><span>{t('contactId') || '联系人ID'}</span><span className="wx-setting-value wx-mono">{profileSummary?.userId || '—'}</span></div>
-          <div className="wx-setting-row"><span>{t('settingAiModel') || 'AI 模型'}</span><span className="wx-setting-value wx-mono">{profileSummary?.aiModel || profileSummary?.modelDefault || '—'}</span></div>
-          <div className="wx-setting-row"><span>{t('modelDefault') || '服务端默认'}</span><span className="wx-setting-value wx-mono">{profileSummary?.modelDefault || '—'}</span></div>
-          <div className="wx-setting-row multi"><span>{t('contactNotes') || '联系人说明'}</span><span className="wx-setting-value wx-multiline">{profileSummary?.notes || '—'}</span></div>
         </div>
       </div>
 

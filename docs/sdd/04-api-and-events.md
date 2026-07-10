@@ -58,6 +58,30 @@ Bridge 仅绑定 `127.0.0.1` 或 Unix socket。
 
 返回 `201` 和账号对象。
 
+### `PATCH /api/v1/accounts/{account_id}`
+
+用于更新账号业务配置：
+
+```json
+{
+  "name": "老挝销售号",
+  "is_primary": true,
+  "enabled": true,
+  "ai_profile_id": null,
+  "auto_reply_mode": "suggest"
+}
+```
+
+规则：
+
+- 所有字段可选，未提交字段保持原值；
+- `name` trim 后不能为空；
+- `is_primary=true` 必须在同一事务中取消旧主账号；
+- `enabled=false` 只停用业务账号，默认保留 WhatsApp session 和历史数据；
+- 停用在线账号时控制面请求 Bridge 停止该账号 socket，但不得登出 WhatsApp；
+- `enabled=true` 不等于 `online`，恢复连接必须显式调用 `connect`；
+- 更新必须写审计日志。
+
 ### `POST /api/v1/accounts/{account_id}/connect`
 
 触发 Bridge 创建/恢复连接。返回 `202`。

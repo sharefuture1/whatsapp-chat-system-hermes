@@ -13,16 +13,18 @@
 - [ ] **Phase 2：建立带 `account_id` 的业务数据库**
   - accounts / contacts / conversations / messages / AI profiles / outbox
   - `(account_id, remote_jid)` 隔离，同账号 WhatsApp message ID 幂等
-- [ ] **Phase 3：抽出独立 Bridge V2，先跑通单账号**
-  - 复制并重构 Baileys Bridge 到本项目，不再由 Hermes gateway 启动
-  - 二维码、状态、收发、媒体、回执、持久化事件重试
+- [>] **Phase 3：抽出独立 Bridge V2，先跑通单账号**
+  - [x] 账号控制面 API、Bridge Client 契约、fail-closed 安全配置
+  - [ ] Node/Baileys Bridge V2、二维码、状态事件、收发、媒体、回执、持久化事件重试
 - [ ] **Phase 4：Bridge V2 多账号隔离**
   - 每账号独立 socket/session/status/限速/重连
   - A 账号断线、登出、发送不得影响 B 账号
 - [ ] **Phase 5：Outbox、定时与群发 Worker**
   - 定时任务真实执行，群发支持进度/取消/幂等/逐项结果
-- [ ] **Phase 6：前端 WhatsApp 账号中心**
-  - UI 内扫码登录、账号切换、在线状态、AI Profile、发送账号锁定
+- [>] **Phase 6：前端 WhatsApp 账号中心**
+  - [x] 真实账号 API 驱动的列表、详情、状态、高危删除 UI
+  - [x] 用户可见设置移除 Hermes profile/path/CLI 入口
+  - [ ] Bridge V2 接通后完成真实 QR、实时状态和账号切换验收
 - [ ] **Phase 7：只读迁移旧 Hermes 数据并切换**
   - 导入报告、双写观察、可回滚；切换后停止 Hermes gateway
 
@@ -92,31 +94,15 @@
 ### 当前验证结果（2026-07-10）
 
 - `npm run build`：✅ 通过
-- `pytest -q`：✅ 48 passed
-- `node --test tests/chatSync.test.js`：✅ 4 passed
+- `pytest -q`：✅ 106 passed
+- `node --test tests/*.test.js`：✅ 9 passed
+- Alembic upgrade → downgrade → upgrade：✅ 通过
 - `/api/health`：✅ 200
-- 线上资源：`index-X_NsIE3q.js` / `index-BWXtslEL.css`，均为 200
-- Vercel 跨域 OPTIONS 预检：✅ 200；未认证普通 API 仍为 401
+- 线上资源：`index-BN8XBbSa.js` / `index-CdAyXNbe.css`，均为 200
+- 未认证 `/api/v1/accounts`：✅ 401
+- 真实 QR/连接：⏳ 等待独立 Node/Baileys Bridge V2
 
-### P3 — 未来优化
-
-- [ ] **验证 ContactsPage 搜索功能**
-  - 搜索框已加，需要在浏览器验证过滤逻辑是否正确
-  - 文件：`web/src/components/ContactsPage.jsx`
-
-- [ ] **Settings platforms tab CSS 完善**
-  - `.platform-toolbar` / `.platform-card` / `.platform-group` 已加基础样式
-  - 但 platforms 列表渲染逻辑和保存逻辑需人工测试验证
-  - 文件：`web/src/components/SettingsPanel.jsx`
-
-- [ ] **消息同步 gap 调查**
-  - 部分聊天记录未同步（原因不明）
-  - 需在真实 WhatsApp 对话中观察 message fetch 行为
-
-- [x] **i18n 缺失 keys 补全**
-  - 四语言键集合已对齐，`test_all_t_keys_exist_in_dict` 通过
-
-### P3 — 未来优化
+### P2 — 工程与视觉精修
 
 - [ ] 左滑置顶/删除的移动端 touch 体验优化
 - [ ] 深色模式完善（目前仅基础 token）

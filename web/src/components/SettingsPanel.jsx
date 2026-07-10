@@ -2,26 +2,10 @@ import { useEffect, useState } from 'react'
 import { useSettings } from '../settings'
 import ToolsPanel from './ToolsPanel'
 
-const PLATFORM_OPTIONS = [
-  { platform: 'whatsapp', label: 'WhatsApp', categoryKey: 'platformChat', methodKey: 'platformQr', command: 'hermes -p <profile> whatsapp' },
-  { platform: 'telegram', label: 'Telegram', categoryKey: 'platformChat', methodKey: 'platformManual', command: 'hermes -p <profile> telegram' },
-  { platform: 'slack', label: 'Slack', categoryKey: 'platformTeam', methodKey: 'platformManual', command: 'hermes -p <profile> slack' },
-  { platform: 'discord', label: 'Discord', categoryKey: 'platformCommunity', methodKey: 'platformManual', command: 'hermes -p <profile> discord' },
-]
-
-function makeWorkspace(platform = 'whatsapp') {
-  const id = `${platform}-${Date.now()}`
-  return { id, label: `${platform} account`, platform, profile: id, profile_path: `/root/.hermes/profiles/${id}`, enabled: true, primary: false }
-}
-
 function makeUserOverrideEntry() {
   return { user_id: '', ai_model: '', custom_system_prompt: '', reply_style: '' }
 }
 
-function commandFor(workspace) {
-  const option = PLATFORM_OPTIONS.find(item => item.platform === workspace.platform) || PLATFORM_OPTIONS[0]
-  return option.command.replace('<profile>', workspace.profile || workspace.id || workspace.platform)
-}
 
 export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving, modelDefault = '', apiSettings = {}, onSaveAiSettings }) {
   const { t } = useSettings()
@@ -29,7 +13,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
   const [reply, setReply] = useState(settings?.reply || {})
   const [ui, setUi] = useState(settings?.ui || {})
   const [messageOps, setMessageOps] = useState(settings?.message_ops || { auto_translate: true })
-  const [workspaces, setWorkspaces] = useState(settings?.workspaces || [])
+
   const [userOverrides, setUserOverrides] = useState(Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({ user_id, ...(value || {}) })))
   const [password, setPassword] = useState('')
   const [tab, setTab] = useState('reply')
@@ -46,7 +30,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setReply(settings?.reply || {})
     setUi(settings?.ui || {})
     setMessageOps(settings?.message_ops || { auto_translate: true })
-    setWorkspaces(settings?.workspaces || [])
+
     setUserOverrides(Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({ user_id, ...(value || {}) })))
     setPassword('')
     setTab(initialTab || 'reply')
@@ -84,9 +68,6 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setDraftChannels(prev => prev.map((item, i) => i === index ? { ...item, kinds: value.split(',').map(s => s.trim()).filter(Boolean) } : item))
   }
 
-  const updateWorkspace = (index, key, value) => {
-    setWorkspaces(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
-  }
 
   const updateUserOverride = (index, key, value) => {
     setUserOverrides(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
@@ -100,13 +81,6 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setUserOverrides(prev => prev.filter((_, i) => i !== index))
   }
 
-  const addWorkspace = (platform = 'whatsapp') => {
-    setWorkspaces(prev => [...prev, makeWorkspace(platform)])
-  }
-
-  const removeWorkspace = (index) => {
-    setWorkspaces(prev => prev.filter((_, i) => i !== index))
-  }
 
   const saveAiSettings = async () => {
     if (!onSaveAiSettings) return
@@ -142,7 +116,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
       },
       ui,
       message_ops: messageOps,
-      workspaces,
+
     },
     password: password || null,
   }, () => setPassword(''))
@@ -179,10 +153,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
               <span>{t('channels')}</span>
               <small>投递目标</small>
             </button>
-            <button role="tab" aria-selected={tab==='platforms'} className={`tab ${tab==='platforms' ? 'active' : ''}`} onClick={() => setTab('platforms')}>
-              <span>{t('platformAccounts')}</span>
-              <small>账号 / Profile</small>
-            </button>
+
             <button role="tab" aria-selected={tab==='tools'} className={`tab ${tab==='tools' ? 'active' : ''}`} onClick={() => setTab('tools')}>
               <span>{t('tools') || '工具'}</span>
               <small>定时 / 群发 / 插件</small>
@@ -313,56 +284,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
               </div>
             </div>
           )}
-          {tab === 'platforms' && (
-            <div className="settings-section">
-              <div className="platform-toolbar">
-                <div>
-                  <h3>{t('platformAccounts')}</h3>
-                  <p className="subtle">{t('platformAccountsHelp')}</p>
-                </div>
-                <div className="platform-add-row">
-                  {PLATFORM_OPTIONS.map(option => (
-                    <button key={option.platform} className="ghost-btn" onClick={() => addWorkspace(option.platform)}>+ {option.label}</button>
-                  ))}
-                </div>
-              </div>
-              {PLATFORM_OPTIONS.map(option => {
-                const group = workspaces.filter(item => item.platform === option.platform)
-                return (
-                  <div className="platform-group" key={option.platform}>
-                    <div className="platform-group-title"><span>{option.label}</span><small>{t(option.categoryKey)} · {t(option.methodKey)}</small></div>
-                    {group.length === 0 ? <div className="subtle platform-empty">{t('noPlatformAccounts')}</div> : null}
-                    {group.map((workspace) => {
-                      const idx = workspaces.indexOf(workspace)
-                      return (
-                        <div className="platform-card" key={workspace.id || idx}>
-                          <div className="platform-card-header">
-                            <strong>{workspace.label || workspace.id}</strong>
-                            <span className={`pill ${workspace.enabled ? 'ok' : 'muted'}`}>{workspace.enabled ? t('enabled') : t('disabled')}</span>
-                          </div>
-                          <div className="settings-grid">
-                            <label><span>{t('displayName')}</span><input value={workspace.label || ''} onChange={e => updateWorkspace(idx, 'label', e.target.value)} /></label>
-                            <label><span>{t('settingPlatform')}</span><select value={workspace.platform || 'whatsapp'} onChange={e => updateWorkspace(idx, 'platform', e.target.value)}>{PLATFORM_OPTIONS.map(item => <option key={item.platform} value={item.platform}>{item.label}</option>)}</select></label>
-                            <label><span>{t('hermesProfile')}</span><input value={workspace.profile || ''} onChange={e => updateWorkspace(idx, 'profile', e.target.value)} /></label>
-                            <label><span>{t('profilePath')}</span><input value={workspace.profile_path || ''} onChange={e => updateWorkspace(idx, 'profile_path', e.target.value)} /></label>
-                          </div>
-                          <div className="platform-command">
-                            <span>{t('connectCommand')}</span>
-                            <code>{commandFor(workspace)}</code>
-                          </div>
-                          <div className="platform-actions">
-                            <label className="checkbox"><input type="checkbox" checked={!!workspace.enabled} onChange={e => updateWorkspace(idx, 'enabled', e.target.checked)} />{t('enable')}</label>
-                            <label className="checkbox"><input type="checkbox" checked={!!workspace.primary} onChange={e => updateWorkspace(idx, 'primary', e.target.checked)} />{t('primaryAccount')}</label>
-                            <button className="ghost-btn danger" onClick={() => removeWorkspace(idx)}>{t('delete')}</button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+
           {tab === 'channels' && (
             <div className="settings-section">
               <h3>{t('channels')}</h3>

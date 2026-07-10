@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from './api'
+import { useAccountsController } from './accounts/useAccountsController'
 import { SettingsProvider, useSettings } from './settings'
+import AccountCenterPage from './components/AccountCenterPage'
 import ChatList from './components/ChatList'
 import ChatPane from './components/ChatPane'
 import ContactsPage from './components/ContactsPage'
@@ -62,6 +64,8 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState('reply')
   const [activeTab, setActiveTab] = useState('chats')
+  const [accountCenterOpen, setAccountCenterOpen] = useState(false)
+  const accountsController = useAccountsController(Boolean(sessionToken))
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
   })
@@ -327,11 +331,8 @@ function AppInner() {
 
   const platformOptions = useMemo(() => {
     const set = new Set((conversations || []).map(item => item.platform).filter(Boolean))
-    for (const workspace of settings.web_settings?.workspaces || []) {
-      if (workspace?.platform) set.add(workspace.platform)
-    }
     return ['all', ...Array.from(set)]
-  }, [conversations, settings.web_settings?.workspaces])
+  }, [conversations])
 
   const filteredConversations = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -467,27 +468,23 @@ function AppInner() {
           <DiscoverPage dashboard={dashboard} channels={settings.channels || []} conversations={conversations} />
         )}
 
-        {activeTab === 'me' && (
+        {activeTab === 'me' && !accountCenterOpen && (
           <MePage
             health={health}
             onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
+            onOpenAccounts={() => setAccountCenterOpen(true)}
             onLogout={logout}
-            profilePath={settings.profile}
             autoTranslate={autoTranslate}
-            profileSummary={{
-              userId: selectedConversation?.user_id || '',
-              userName: selectedContactProfile?.remark || selectedConversation?.user_name || '',
-              aiModel: selectedUserOverride?.ai_model || settings.web_settings?.reply?.ai_model || settings.model?.default || '',
-              replyStyle: selectedUserOverride?.reply_style || settings.web_settings?.reply?.default_reply_style || '',
-              prompt: selectedUserOverride?.custom_system_prompt || '',
-              notes: selectedContactProfile?.notes || '',
-              modelDefault: settings.model?.default || '',
-            }}
+            accountSummary={accountsController.summary}
           />
+        )}
+
+        {activeTab === 'me' && accountCenterOpen && (
+          <AccountCenterPage controller={accountsController} onBack={() => setAccountCenterOpen(false)} />
         )}
       </div>
 
-      <TabBar activeTab={activeTab} onChange={setActiveTab} unreadChats={unreadChats} hidden={activeTab === 'chats' && Boolean(selectedId)} />
+      <TabBar activeTab={activeTab} onChange={tab => { setActiveTab(tab); if (tab !== 'me') setAccountCenterOpen(false) }} unreadChats={unreadChats} hidden={(activeTab === 'chats' && Boolean(selectedId)) || accountCenterOpen} />
 
       <SettingsPanel
         open={settingsOpen}

@@ -21,12 +21,14 @@ export function setUnauthorizedHandler(handler) {
 
 export class ApiError extends Error {
   constructor(status, detail, data = null) {
-    super(detail || `Request failed (${status})`)
+    const envelope = data?.error && typeof data.error === 'object' ? data.error : data
+    super(detail || envelope?.message || `Request failed (${status})`)
     this.name = 'ApiError'
     this.status = status
     this.data = data
-    this.code = data?.code || null
-    this.retryable = Boolean(data?.retryable)
+    this.code = envelope?.code || null
+    this.retryable = Boolean(envelope?.retryable)
+    this.requestId = envelope?.request_id || null
   }
 }
 
@@ -57,5 +59,13 @@ export const api = {
   get: (path, opts) => request(path, opts),
   post: (path, body, opts) => request(path, { ...opts, method: 'POST', body }),
   put: (path, body, opts) => request(path, { ...opts, method: 'PUT', body }),
-  delete: (path, opts) => request(path, { ...opts, method: 'DELETE' }),
+  patch: (path, body, opts) => request(path, { ...opts, method: 'PATCH', body }),
+  delete: (path, bodyOrOpts, maybeOpts) => {
+    const hasBody = bodyOrOpts && !('signal' in bodyOrOpts)
+    return request(path, {
+      ...(hasBody ? maybeOpts : bodyOrOpts),
+      method: 'DELETE',
+      body: hasBody ? bodyOrOpts : undefined,
+    })
+  },
 }

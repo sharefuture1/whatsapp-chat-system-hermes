@@ -39,3 +39,4 @@ audit-artifacts/
 .vscode/
 .idea/
 .DS_Store
+.ai_encryption_key
