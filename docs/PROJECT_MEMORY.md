@@ -52,11 +52,11 @@ sudo /home/young11/workspace/whatsapp-chat-system-hermes/.venv/bin/python \
 ## 测试状态
 
 ```text
-npm run build                         PASS
-pytest -q                             48 passed, 1 warning
-node --test tests/chatSync.test.js    4 passed
-python -m py_compile ...              PASS
-git diff --check                      PASS
+pytest -q                             72 passed, 1 warning
+npm run build                        PASS
+node --test tests/chatSync.test.js   4 passed
+python -m py_compile ...             PASS
+git diff --check                     PASS
 ```
 
 唯一警告为 FastAPI/Starlette TestClient 的上游弃用提醒，不影响运行。
@@ -76,14 +76,14 @@ git diff --check                      PASS
 - `TODO_AGENT.md` 仅显示当前执行状态，不再作为需求真源。
 - 旧 `docs/SDD.md` 已标为 Deprecated；`docs/ARCHITECTURE.md` 只保留 Legacy 基线和目标架构摘要。
 
-## 架构迁移目标（已定稿，尚未实施）
+## 架构迁移目标（Phase 1 已实现，待生产验收）
 
-- 目标：系统独立于 Hermes 运行，直接接入问鼎 AI OpenAI-compatible API。
-- AI 默认值：`https://wendingai.future1.us/v1` / `gpt-5.3-codex-spark`。
-- 多账号：每个 WhatsApp 账号独立 Baileys socket 与 session，所有业务数据强制带 `account_id`。
-- 业务真源：迁移到独立数据库；发送使用 Outbox，定时/群发使用真实 Worker。
-- 迁移策略：先 AI/config，再新库，再独立 Bridge 单账号/多账号，最后 UI 与旧数据迁移；切换前保持可回滚。
-- 详细方案：`docs/plans/2026-07-10-standalone-wendingai-multi-account.md`。
+- SDD-P0-01 已实现：AI 配置由独立 `AISettings` 从 `WENDING_AI_*` 环境变量加载，不再要求 Hermes `config.yaml`。
+- `WendingAIProvider` 统一调用 `/v1/chat/completions`，仅对 429/5xx/timeout 有限重试，错误结构化且不泄露 API key。
+- `AIService` 已实现联系人 override > 账号 AI Profile > 全局默认模型解析。
+- Rewriter 的智能改写、手动翻译、自动翻译已全部通过 AIService/Provider。
+- 部署前必须在服务端设置 `WENDING_AI_API_KEY`；未配置时 `/api/v1/ai/settings` 返回 `api_key_configured=false`，AI 请求返回结构化 `configuration_error`，不得读取或回退到旧 Hermes `config.yaml` 中的密钥。
+- 后续迁移仍按：新库 → 独立 Bridge 单账号/多账号 → Worker → UI/历史迁移；生产仍保持 Legacy，未切换服务。
 
 ## 仍需关注
 

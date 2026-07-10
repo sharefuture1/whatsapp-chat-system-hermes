@@ -281,7 +281,8 @@ export default function ChatPane({
     if (!msg?.message_id || msg.translated || msg.lang === 'Chinese' || msg.lang === 'Unknown') return
     try {
       const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
-      setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, translated: res.translated || null, lang: res.lang || m.lang } : m))
+      if (res?.success === false || !res?.translated) return
+      setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, translated: res.translated, lang: res.lang || m.lang } : m))
     } catch {}
   }
 

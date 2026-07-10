@@ -1,5 +1,20 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：完成 SDD-P0-01 独立 Settings 与问鼎 AI Provider
+
+- 新增独立 `AISettings`，只从 `WENDING_AI_*` 环境变量读取 AI 配置；默认 URL、模型、超时、重试分别为 `https://wendingai.future1.us/v1`、`gpt-5.3-codex-spark`、90、2。
+- `AppConfig` 保留 Legacy 路径和业务配置兼容，但 AI 设置不再从 Hermes `config.yaml` 读取。
+- 新增 `WendingAIProvider`，统一调用 `/chat/completions`，映射 401/429/5xx/timeout 结构化错误，仅 429/5xx/timeout 有限重试。
+- 新增 `AIService`，实现联系人 override > 账号 AI Profile > 全局默认的模型解析和来源标记。
+- Rewriter 的智能改写、手动翻译、自动翻译移除散落的 `requests.post()`，统一经过 AIService/Provider。
+- 新增 mock HTTP server、错误重试、密钥脱敏、模型优先级、调用审计、结构化失败和 Rewriter 接线测试。
+- 设置接口新增 effective model/source 和安全的 `/api/v1/ai/settings`；翻译失败不会把原文伪装成翻译结果。
+- Provider 默认每次调用使用独立 Session；环境值会做 strip、范围限制和 Base URL 脱敏规范化。
+- 验证：全量 `72 passed, 1 warning`；前端 `npm run build` 通过；ChatSync `4 passed`；`py_compile`、`git diff --check` 通过。
+- 未写入真实 API key，未修改或重启生产服务；状态为 `Implemented`，待部署和真实凭据安全探测后进入 `Verified`。
+
+---
+
 ## 2026-07-10：建立强制 SDD 文档体系
 
 - 新建 `docs/sdd/` 权威规格目录：总纲、产品需求、系统架构、数据模型、API/事件、优化待办、开发流程、迁移上线。

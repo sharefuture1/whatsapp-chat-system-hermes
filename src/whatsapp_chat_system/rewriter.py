@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
-import requests
-
+from .ai.provider import AIProviderError, WendingAIProvider
+from .ai.service import AIService
 from .config import AppConfig
 from .language import collapse_whitespace, dedupe_similar_lines, detect_preferred_language
+from .settings import AISettings
 
 
 @dataclass(slots=True)
@@ -15,12 +16,29 @@ class RewriteResult:
     language: str
     message: str
     used_fallback: bool = False
+    error: dict[str, object] | None = None
 
 
 class Rewriter:
-    def __init__(self, config: AppConfig, logger: Callable[..., None]) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        logger: Callable[..., None],
+        *,
+        ai_service: AIService | None = None,
+    ) -> None:
         self.config = config
         self.logger = logger
+        settings = getattr(config, 'ai_settings', None) or AISettings.from_env()
+        self.ai_service = ai_service or AIService(
+            WendingAIProvider(settings),
+            settings,
+            audit_logger=logger,
+        )
+
+    def _account_model(self) -> str | None:
+        reply_settings = getattr(self.config, 'web_settings', {}).get('reply') or {}
+        return str(reply_settings.get('ai_model') or '').strip() or None
 
     def rewrite(
         self,
@@ -34,8 +52,27 @@ class Rewriter:
         try:
             language, message = self._rewrite_with_model(target, zh_text, memory_md, sidecar=sidecar, reply_overrides=reply_overrides)
             return RewriteResult(language=language, message=message, used_fallback=False)
+        except AIProviderError as exc:
+            self.logger(
+                'model_rewrite_failed',
+                target=target.get('id'),
+                error_code=exc.code,
+                text_length=len(zh_text),
+            )
+            language, message = self._fallback(target, zh_text, memory_md)
+            return RewriteResult(
+                language=language,
+                message=message,
+                used_fallback=True,
+                error=_provider_error_metadata(exc),
+            )
         except Exception as exc:
-            self.logger('model_rewrite_failed', target=target.get('id'), error=str(exc), text=zh_text)
+            self.logger(
+                'model_rewrite_failed',
+                target=target.get('id'),
+                error=str(exc),
+                text_length=len(zh_text),
+            )
             language, message = self._fallback(target, zh_text, memory_md)
             return RewriteResult(language=language, message=message, used_fallback=True)
 
@@ -48,22 +85,38 @@ class Rewriter:
             message = self._translate_with_model(text, target_language)
             self._validate_output(message, target_language, text, allow_same=False)
             return RewriteResult(language=target_language, message=message, used_fallback=False)
+        except AIProviderError as exc:
+            self.logger(
+                'model_translate_failed',
+                target=target.get('id'),
+                error_code=exc.code,
+                text_length=len(text),
+            )
+            return RewriteResult(
+                language=target_language,
+                message=self._simple_translate_fallback(text, target_language),
+                used_fallback=True,
+                error=_provider_error_metadata(exc),
+            )
         except Exception as exc:
-            self.logger('model_translate_failed', target=target.get('id'), error=str(exc), text=text)
+            self.logger(
+                'model_translate_failed',
+                target=target.get('id'),
+                error=str(exc),
+                text_length=len(text),
+            )
             return RewriteResult(language=target_language, message=self._simple_translate_fallback(text, target_language), used_fallback=True)
 
     def translate_to_zh(self, text: str, source_lang: str) -> str:
-        """Translate a single message (Lao/Thai/English) into Chinese.
+        """Translate a single message into Chinese, returning the fallback text on failure."""
+        return self.translate_to_zh_result(text, source_lang).message
 
-        Returns the Chinese translation (best effort). Returns the original
-        text on failure. This is a quiet, side-effect-free path used for
-        in-conversation auto-translation, not the reply pipeline.
-        """
+    def translate_to_zh_result(self, text: str, source_lang: str) -> RewriteResult:
+        """Translate to Chinese while preserving Provider failure metadata for API callers."""
         text = collapse_whitespace(text or '').strip()
         if not text or source_lang == 'Chinese':
-            return text
+            return RewriteResult(language='Chinese', message=text)
 
-        # Deterministic handling for low-information filler pings.
         low_info_map = {
             'ໂດຍ': '嗯',
             'โดย': '嗯',
@@ -80,7 +133,7 @@ class Rewriter:
             '好': '好',
         }
         if text in low_info_map:
-            return low_info_map[text]
+            return RewriteResult(language='Chinese', message=low_info_map[text])
         try:
             prompt = (
                 '你是一个高精度的对话翻译。\n'
@@ -93,30 +146,39 @@ class Rewriter:
                 f'原文语言: {source_lang}\n'
                 f'原文: {text}\n'
             )
-            payload = {
-                'model': self.config.model['model'],
-                'messages': [
+            result = self.ai_service.chat(
+                messages=[
                     {'role': 'system', 'content': '你只返回合法 JSON，准确翻译。'},
                     {'role': 'user', 'content': prompt},
                 ],
-                'temperature': 0.1,
-                'response_format': {'type': 'json_object'},
-            }
-            response = requests.post(
-                f"{self.config.model['base_url'].rstrip('/')}/chat/completions",
-                headers={'Authorization': f"Bearer {self.config.model['api_key']}", 'Content-Type': 'application/json'},
-                json=payload,
-                timeout=60,
+                account_model=self._account_model(),
+                temperature=0.1,
+                response_format={'type': 'json_object'},
             )
-            response.raise_for_status()
-            data = response.json()
-            content = data['choices'][0]['message']['content']
-            parsed = json.loads(content)
+            parsed = json.loads(result.result.content)
             zh = collapse_whitespace(str(parsed.get('zh') or '').strip())
-            return zh or text
+            return RewriteResult(language='Chinese', message=zh or text)
+        except AIProviderError as exc:
+            self.logger(
+                'auto_translate_failed',
+                error_code=exc.code,
+                text_length=len(text),
+                source_lang=source_lang,
+            )
+            return RewriteResult(
+                language='Chinese',
+                message=text,
+                used_fallback=True,
+                error=_provider_error_metadata(exc),
+            )
         except Exception as exc:
-            self.logger('auto_translate_failed', error=str(exc), text=text, source_lang=source_lang)
-            return text
+            self.logger(
+                'auto_translate_failed',
+                error=str(exc),
+                text_length=len(text),
+                source_lang=source_lang,
+            )
+            return RewriteResult(language='Chinese', message=text, used_fallback=True)
 
     def _rewrite_with_model(
         self,
@@ -130,7 +192,7 @@ class Rewriter:
         target_name = str(target.get('name') or '')
         target_language = detect_preferred_language(memory_md, target_name)
         reply_settings = self.config.web_settings.get('reply') or {}
-        effective_model = str((reply_overrides or {}).get('ai_model') or reply_settings.get('ai_model') or self.config.model['model']).strip()
+        contact_model = str((reply_overrides or {}).get('ai_model') or '').strip() or None
         custom_prompt = str((reply_overrides or {}).get('custom_system_prompt') or reply_settings.get('custom_system_prompt') or '').strip()
         default_style = str(reply_settings.get('default_reply_style') or '').strip()
         custom_style = str((reply_overrides or {}).get('reply_style') or '').strip()
@@ -154,29 +216,17 @@ class Rewriter:
             f'自定义回复风格:\n{style_hint or "无"}\n\n'
             f'管理员原文:\n{zh_text}\n'
         )
-        payload = {
-            'model': effective_model,
-            'messages': [
+        result = self.ai_service.chat(
+            messages=[
                 {'role': 'system', 'content': system_content},
                 {'role': 'user', 'content': prompt},
             ],
-            'temperature': 0.2,
-            'response_format': {'type': 'json_object'},
-        }
-        base_url = (self.config.model.get('base_url') or '').rstrip('/')
-        api_key = str(self.config.model.get('api_key') or '')
-        if not base_url or not api_key:
-            raise ValueError('model configuration missing base_url/api_key')
-        response = requests.post(
-            f"{base_url}/chat/completions",
-            headers={'Authorization': f"Bearer {api_key}", 'Content-Type': 'application/json'},
-            json=payload,
-            timeout=90,
+            contact_model=contact_model,
+            account_model=self._account_model(),
+            temperature=0.2,
+            response_format={'type': 'json_object'},
         )
-        response.raise_for_status()
-        data = response.json()
-        content = data['choices'][0]['message']['content']
-        parsed = json.loads(content)
+        parsed = json.loads(result.result.content)
         language = str(parsed.get('language') or '').strip() or target_language
         message = self._postprocess_message(str(parsed.get('message') or '').strip())
         self._validate_output(message, target_language, zh_text)
@@ -190,25 +240,16 @@ class Rewriter:
             f'目标语言: {target_language}\n'
             f'原文:\n{text}\n'
         )
-        payload = {
-            'model': self.config.model['model'],
-            'messages': [
+        result = self.ai_service.chat(
+            messages=[
                 {'role': 'system', 'content': '你只返回合法 JSON。保持短句，不重复。'},
                 {'role': 'user', 'content': prompt},
             ],
-            'temperature': 0.1,
-            'response_format': {'type': 'json_object'},
-        }
-        response = requests.post(
-            f"{self.config.model['base_url'].rstrip('/')}/chat/completions",
-            headers={'Authorization': f"Bearer {self.config.model['api_key']}", 'Content-Type': 'application/json'},
-            json=payload,
-            timeout=90,
+            account_model=self._account_model(),
+            temperature=0.1,
+            response_format={'type': 'json_object'},
         )
-        response.raise_for_status()
-        data = response.json()
-        content = data['choices'][0]['message']['content']
-        parsed = json.loads(content)
+        parsed = json.loads(result.result.content)
         return self._postprocess_message(str(parsed.get('message') or '').strip())
 
     def _postprocess_message(self, text: str) -> str:
@@ -265,3 +306,11 @@ class Rewriter:
         if 'Preferred language: Thai' in memory_md:
             return '泰语', clean
         return '中文', clean
+
+
+def _provider_error_metadata(exc: AIProviderError) -> dict[str, object]:
+    return {
+        'code': exc.code,
+        'retryable': exc.retryable,
+        'request_id': exc.request_id,
+    }

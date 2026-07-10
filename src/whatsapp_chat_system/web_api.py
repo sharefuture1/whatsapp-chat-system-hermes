@@ -800,6 +800,7 @@ def build_app(
                 'language': prepared['rewrite'].language,
                 'message': prepared['rewrite'].message,
                 'used_fallback': prepared['rewrite'].used_fallback,
+                'error': prepared['rewrite'].error,
             },
             'mode': request.mode,
             'source_text': request.message,
@@ -808,6 +809,13 @@ def build_app(
             'reply_overrides': prepared.get('reply_overrides') or {},
         }
         if request.preview_only:
+            if prepared['rewrite'].error:
+                return {
+                    'success': False,
+                    **preview_payload,
+                    'preview_only': True,
+                    'error': prepared['rewrite'].error,
+                }
             return {'success': True, **preview_payload, 'preview_only': True}
         result = router.send_prepared_reply(prepared['target'], prepared['rewrite'], request.message, request.mode)
         if result.get('success') is not True:
@@ -883,6 +891,9 @@ def build_app(
         safe_web_settings.pop('auth', None)
         safe_web_settings.pop('sessions', None)
         safe_web_settings.pop('login_attempts', None)
+        account_model = str((config.web_settings.get('reply') or {}).get('ai_model') or '').strip()
+        effective_model = account_model or config.ai_settings.default_model
+        model_source = 'account_profile' if account_model else 'global_default'
         return {
             'channels': config.forwarding_channels,
             'aliases': load_json(config.paths.alias_file, {}),
@@ -891,10 +902,25 @@ def build_app(
             'workspaces': _workspace_status(config),
             'web_settings': safe_web_settings,
             'model': {
-                'default': str(config.model.get('model') or ''),
-                'base_url': str(config.model.get('base_url') or ''),
+                'provider': 'wendingai',
+                'default': config.ai_settings.default_model,
+                'base_url': config.ai_settings.base_url,
+                'api_key_configured': bool(config.ai_settings.api_key),
+                'effective_model': effective_model,
+                'model_source': model_source,
             },
             'plugins': _plugin_state(),
+        }
+
+    @app.get('/api/v1/ai/settings')
+    def ai_settings() -> dict[str, Any]:
+        account_model = str((config.web_settings.get('reply') or {}).get('ai_model') or '').strip()
+        resolution = router.rewriter.ai_service.resolve_model(account_model=account_model)
+        return {
+            **config.ai_settings.safe_dict(),
+            'account_model': account_model,
+            'effective_model': resolution.model,
+            'model_source': resolution.source,
         }
 
     @app.put('/api/settings')
@@ -929,14 +955,28 @@ def build_app(
         if lang in ('Chinese', 'Unknown'):
             return {'message_id': message_id, 'lang': lang, 'translated': None}
         worker = _translation_worker(config)
-        zh = worker.translate_to_zh(text, lang)
-        if zh and zh != text:
+        translated = worker.translate_to_zh_result(text, lang)
+        if translated.message and translated.message != text:
             put_translation(config.paths.memory_dir, user_id, message_id, {
                 'source_lang': lang,
                 'source_text': text[:200],
-                'zh': zh,
+                'zh': translated.message,
             })
-        return {'message_id': message_id, 'lang': lang, 'translated': zh or None}
+        payload = {
+            'message_id': message_id,
+            'lang': lang,
+            'translated': translated.message or None,
+        }
+        if translated.error:
+            return {
+                'success': False,
+                **payload,
+                'translated': None,
+                'fallback_text': translated.message or text,
+                'used_fallback': translated.used_fallback,
+                'error': translated.error,
+            }
+        return payload
 
     @app.post('/api/messages/hide')
     def hide_messages(payload: dict[str, Any]) -> dict[str, Any]:

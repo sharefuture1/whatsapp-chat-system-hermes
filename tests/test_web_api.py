@@ -49,11 +49,83 @@ def test_settings_exposes_model_default_and_plugins(tmp_path):
     resp = client.get('/api/settings')
     assert resp.status_code == 200
     body = resp.json()
-    assert 'model' in body
-    assert isinstance(body['model'].get('default'), str)
+    assert body['model'] == {
+        'provider': 'wendingai',
+        'default': 'gpt-5.3-codex-spark',
+        'base_url': 'https://wendingai.future1.us/v1',
+        'api_key_configured': False,
+        'effective_model': 'gpt-5.3-codex-spark',
+        'model_source': 'global_default',
+    }
+    assert 'unit-test-secret' not in json.dumps(body)
     assert 'plugins' in body
     assert isinstance(body['plugins'], dict)
     assert 'auto_translate' in body['plugins']
+
+
+def test_ai_settings_v1_is_safe_and_reports_effective_account_model(monkeypatch, tmp_path):
+    monkeypatch.setenv('WENDING_AI_API_KEY', 'unit-test-secret')
+    monkeypatch.setenv('WENDING_AI_DEFAULT_MODEL', 'env-global-model')
+    profile = create_profile(tmp_path / 'p-ai-settings-v1')
+    settings_path = profile / 'web-settings.json'
+    stored = json.loads(settings_path.read_text())
+    stored['reply']['ai_model'] = 'account-model'
+    settings_path.write_text(json.dumps(stored))
+    client = authed_client(profile)
+
+    response = client.get('/api/v1/ai/settings')
+
+    assert response.status_code == 200
+    assert response.json() == {
+        'provider': 'wendingai',
+        'base_url': 'https://wendingai.future1.us/v1',
+        'default_model': 'env-global-model',
+        'timeout_seconds': 90,
+        'max_retries': 2,
+        'api_key_configured': True,
+        'account_model': 'account-model',
+        'effective_model': 'account-model',
+        'model_source': 'account_profile',
+    }
+    assert 'unit-test-secret' not in response.text
+
+
+def test_reply_preview_ai_fallback_is_structured_failure(monkeypatch, tmp_path):
+    from whatsapp_chat_system.rewriter import RewriteResult
+    from whatsapp_chat_system.router import AdminRouter
+
+    profile = create_profile(tmp_path / 'p-ai-preview-failure')
+
+    def failed_preview(self, target_text, message, mode='direct'):
+        return {
+            'target': {'id': target_text, 'name': 'User'},
+            'rewrite': RewriteResult(
+                language='Thai',
+                message=message,
+                used_fallback=True,
+                error={'code': 'timeout', 'retryable': True, 'request_id': 'req_timeout'},
+            ),
+            'memory_markdown': '',
+            'profile_sidecar': {},
+            'reply_overrides': {},
+        }
+
+    monkeypatch.setattr(AdminRouter, 'prepare_reply', failed_preview)
+    client = authed_client(profile)
+    response = client.post('/api/reply', json={
+        'target': 'u@lid',
+        'message': 'fallback text',
+        'mode': 'smart',
+        'preview_only': True,
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['success'] is False
+    assert body['preview_only'] is True
+    assert body['rewrite']['message'] == 'fallback text'
+    assert body['rewrite']['used_fallback'] is True
+    assert body['error'] == {'code': 'timeout', 'retryable': True, 'request_id': 'req_timeout'}
 
 
 def test_reply_preview_refused_when_quick_reply_plugin_off(tmp_path):

@@ -11,6 +11,7 @@ import os
 import yaml
 
 from .constants import DEFAULT_ADMIN_IDS, DEFAULT_ADMIN_TARGET, DEFAULT_PROFILE
+from .settings import AISettings
 
 
 @dataclass(slots=True)
@@ -35,6 +36,7 @@ class AppConfig:
     admin_ids: set[str]
     admin_target: str
     model: dict[str, str]
+    ai_settings: AISettings
     forwarding_channels: list[dict[str, Any]] = field(default_factory=list)
     web_settings: dict[str, Any] = field(default_factory=dict)
 
@@ -62,7 +64,7 @@ class AppConfig:
         admin_ids = set(DEFAULT_ADMIN_IDS)
         admin_ids.update(str(x) for x in whatsapp_cfg.get("allow_admin_from") or [])
         admin_ids.update(str(x) for x in whatsapp_cfg.get("group_allow_admin_from") or [])
-        model_cfg = cfg.get("model") or {}
+        ai_settings = AISettings.from_env()
         channels = load_json(paths.admin_channels_file, None)
         if not isinstance(channels, list):
             channels = [
@@ -90,10 +92,11 @@ class AppConfig:
             admin_ids=admin_ids,
             admin_target=DEFAULT_ADMIN_TARGET,
             model={
-                "model": str(model_cfg.get("default") or ""),
-                "base_url": str(model_cfg.get("base_url") or ""),
-                "api_key": str(model_cfg.get("api_key") or ""),
+                "model": ai_settings.default_model,
+                "base_url": ai_settings.base_url,
+                "api_key": ai_settings.api_key,
             },
+            ai_settings=ai_settings,
             forwarding_channels=channels,
             web_settings=web_settings,
         )
@@ -112,7 +115,7 @@ def default_web_settings() -> dict[str, Any]:
             "allow_fallback": True,
             "preview_debounce_ms": 180,
             "prefer_detected_language": True,
-            "ai_model": "gpt-5.3-codex-spark",
+            "ai_model": "",
             "custom_system_prompt": "",
             "default_reply_style": "",
             "user_overrides": {},

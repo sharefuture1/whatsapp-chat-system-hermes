@@ -6,10 +6,10 @@
 
 ### P0 — 独立化与多账号主线
 
-- [ ] **Phase 1：独立配置与问鼎 AI Provider**
-  - 移除 AI 对 Hermes `config.yaml` 的运行时依赖
+- [ ] **Phase 1：独立配置与问鼎 AI Provider（代码已实现，待生产验收）**
+  - AI 配置已独立从 `WENDING_AI_*` 环境变量加载，不要求 Hermes `config.yaml`
   - 默认 `https://wendingai.future1.us/v1` + `gpt-5.3-codex-spark`
-  - 统一超时、重试、错误映射、模型优先级与调用审计
+  - Provider 已统一超时、有限重试、结构化错误；AIService 已实现联系人 > 账号 > 全局模型优先级
 - [ ] **Phase 2：建立带 `account_id` 的业务数据库**
   - accounts / contacts / conversations / messages / AI profiles / outbox
   - `(account_id, remote_jid)` 隔离，同账号 WhatsApp message ID 幂等

@@ -14,7 +14,7 @@
 
 ### SDD-P0-01 独立配置与问鼎 AI Provider
 
-- 状态：`Approved`
+- 状态：`Implemented`
 - 需求：FR-CORE-001~003、FR-AI-001~007
 - 目标文件：
   - `src/whatsapp_chat_system/settings.py`

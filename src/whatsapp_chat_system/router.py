@@ -111,6 +111,7 @@ class AdminRouter:
                 'language': rewrite.language,
                 'message': rewrite.message,
                 'used_fallback': rewrite.used_fallback,
+                'error': rewrite.error,
             },
             'mode': mode,
             'source_text': source_text,
