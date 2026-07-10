@@ -1,5 +1,18 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：修复网页发送成功后消息不同步与感叹号残留
+
+- 根因：`/api/reply` 通过 Legacy Bridge `3000` 发送成功后，只返回 WhatsApp message ID，没有把 outbound assistant 消息写回页面读取的 Hermes `state.db`。
+- 页面首次显示的是 optimistic bubble；随后刷新从数据库重载时该消息消失，失败请求则保留 `failed` 状态并显示感叹号/重试。
+- 新增 `StateDB.append_assistant_message`：底层明确发送成功后才写入 active session，并保存 `platform_message_id`。
+- `/api/reply` 返回 `local_message_id`；会话详情/增量 API 暴露 `platform_message_id`，前端按本地 ID 和平台 ID 合并，避免成功气泡消失或重复。
+- 回归测试覆盖 `48370592796813@lid` 风格 LID 会话：网页直发成功后刷新仍存在同一条 assistant 消息及 WhatsApp message ID。
+- 验证：Python `119 passed`；Bridge `63 passed` + lint；Web `9 passed` + Vite build；线上 health 200。
+- 真实线上探针通过 Legacy Bridge 发送并立即验证：获得真实 WhatsApp ID、本地消息 ID `271`，增量 API 可读；随后将探针内容编辑为明确测试提示。
+- SDD-P1-10 由 `Blocked` 更新为 `Implemented`；完整断线/乱序/历史同步仍待 Bridge V2 真实账号验收。
+
+---
+
 ## 2026-07-10：完成 Bridge V2 Task 5/6 代码链与安全影子验证
 
 - 新增独立 `bridge/` Node/Baileys 6.7.22 服务：账号级 session/socket、QR、状态、发送、typing、stop/logout/delete、generation 与独立重连。

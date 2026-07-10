@@ -989,6 +989,7 @@ def build_app(
                 'role': row['role'],
                 'content': row['content'] or '',
                 'timestamp': row['timestamp'],
+                'platform_message_id': row['platform_message_id'],
                 'hidden': row['message_id'] in hidden,
             }
             for row in rows
@@ -1022,6 +1023,7 @@ def build_app(
                 'role': row['role'],
                 'content': row['content'] or '',
                 'timestamp': row['timestamp'],
+                'platform_message_id': row['platform_message_id'],
                 'hidden': row['message_id'] in hidden,
             }
             for row in rows
@@ -1108,6 +1110,13 @@ def build_app(
                 },
                 status_code=502,
             )
+        target_id = str((prepared.get('target') or {}).get('id') or request.target)
+        platform_message_id = str(result.get('message_id') or '').strip() or None
+        result['local_message_id'] = db.append_assistant_message(
+            target_id,
+            str((result.get('rewrite') or {}).get('message') or prepared['rewrite'].message),
+            platform_message_id=platform_message_id,
+        )
         result['memory_markdown'] = prepared['memory_markdown'][:2000]
         result['preview_only'] = False
         return result

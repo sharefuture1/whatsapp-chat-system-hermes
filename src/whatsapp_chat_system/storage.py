@@ -5,6 +5,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 import json
 import sqlite3
+import time
 from typing import Any, Iterable
 
 
@@ -179,7 +180,8 @@ class StateDB:
           m.session_id,
           m.role,
           COALESCE(m.content, '') AS content,
-          m.timestamp
+          m.timestamp,
+          m.platform_message_id
         FROM messages m
         JOIN sessions s ON s.id = m.session_id
         WHERE s.user_id = ?
@@ -202,6 +204,61 @@ class StateDB:
         with self._connect() as conn:
             return int(conn.execute(query, (user_id,)).fetchone()[0])
 
+    def append_assistant_message(
+        self,
+        user_id: str,
+        content: str,
+        *,
+        platform_message_id: str | None = None,
+        timestamp: float | None = None,
+    ) -> int:
+        """Persist an operator reply in the active public conversation.
+
+        The web UI reads exclusively from ``state.db``. Direct Bridge sends do
+        not pass through the Hermes conversation loop, so they must be written
+        here after WhatsApp confirms the send; otherwise the optimistic bubble
+        disappears on refresh and the page looks unsynchronised.
+        """
+        clean_content = str(content or '').strip()
+        if not clean_content:
+            raise ValueError('message content is required')
+        with self._connect() as conn:
+            session = conn.execute(
+                """
+                SELECT id
+                FROM sessions
+                WHERE user_id = ? AND COALESCE(archived, 0) = 0
+                ORDER BY COALESCE(ended_at, 0) ASC, started_at DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if session is None:
+                raise ValueError('target_not_found')
+            cursor = conn.execute(
+                """
+                INSERT INTO messages(
+                    session_id, role, content, timestamp, platform_message_id,
+                    observed, active
+                ) VALUES (?, 'assistant', ?, ?, ?, 1, 1)
+                """,
+                (
+                    str(session['id']),
+                    clean_content,
+                    float(timestamp if timestamp is not None else time.time()),
+                    platform_message_id or None,
+                ),
+            )
+            conn.execute(
+                'UPDATE sessions SET message_count = COALESCE(message_count, 0) + 1 WHERE id = ?',
+                (str(session['id']),),
+            )
+            conn.commit()
+            row_id = cursor.lastrowid
+            if row_id is None:
+                raise RuntimeError('message insert did not return an id')
+            return int(row_id)
+
     def fetch_user_messages_after(
         self,
         user_id: str,
@@ -216,7 +273,8 @@ class StateDB:
           m.session_id,
           m.role,
           COALESCE(m.content, '') AS content,
-          m.timestamp
+          m.timestamp,
+          m.platform_message_id
         FROM messages m
         JOIN sessions s ON s.id = m.session_id
         WHERE s.user_id = ?

@@ -48,6 +48,11 @@
   - 增量查询统一按消息 ID 排序
   - API 返回 `next_after_id` 与 `has_more`，前端连续排空积压批次
 
+- [x] **修复网页直发成功后刷新丢消息/感叹号残留**
+  - Bridge 明确成功后将 outbound assistant 消息与 WhatsApp ID 写回 `state.db`
+  - `/api/reply` 返回 local/platform 双 ID，前端稳定去重合并
+  - 真实线上探针验证发送、本地落库和增量 API 同步
+
 - [x] **移动端进入聊天后隐藏根 TabBar**
   - 聊天输入区独占底部安全区
 
@@ -96,15 +101,16 @@
 ### 当前验证结果（2026-07-10）
 
 - `npm run build`：✅ 通过
-- `pytest -q`：✅ 118 passed
+- `pytest -q`：✅ 119 passed
 - `node --test web/tests/*.test.js`：✅ 9 passed
 - `cd bridge && npm test`：✅ 63 passed
 - Bridge lint：✅ 通过
 - Bridge production audit：✅ 0 vulnerabilities
 - Alembic upgrade → downgrade → upgrade：✅ 通过
 - `/api/health`：✅ 200
+- Legacy 网页直发同步探针：✅ 真实 WhatsApp ID + local ID + 增量 API 可读
 - V2 `3100` 影子 live/ready：✅ 200；未认证 API：401；create/status/stop：200
-- 线上资源：`index-BN8XBbSa.js` / `index-CdAyXNbe.css`，均为 200
+- 线上资源：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI 资源 200；公网 `whatsapp.future1.us` 当前返回 Cloudflare 525，需恢复 TLS 后再验收
 - 真实 QR/连接：⏳ 等待测试 WhatsApp 账号验收
 
 ### P2 — 工程与视觉精修

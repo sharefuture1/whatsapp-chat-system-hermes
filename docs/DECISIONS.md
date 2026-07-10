@@ -1,5 +1,16 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-10: Legacy 网页直发成功必须同步写回页面消息源
+
+**决策**：迁移期 `/api/reply` 仍通过 Legacy Bridge 发送时，只有底层明确返回成功和真实 WhatsApp message ID 后，FastAPI 才把 outbound assistant 消息写入 Hermes `state.db`。
+
+- 页面消息源仍是 `state.db`，不能只依赖浏览器 optimistic bubble。
+- 写回保存本地 message ID 与 `platform_message_id`；API 同时返回两者供前端稳定合并。
+- 发送失败不得落库为成功消息，前端保留失败 bubble、错误文案和原地重试。
+- 该方案只解决迁移期 Legacy 同步缺口；Bridge V2 正式发送仍按业务库 Outbox/事件回执规格实现。
+
+---
+
 ## 2026-07-10: Bridge V2 使用持久化 spool，并在真实账号验收前保持影子模式
 
 **决策**：Bridge V2 的事件投递采用每账号单 writer 的磁盘 FileSpool；任何账号状态、消息或回执先持久化，再发送至 FastAPI 内部事件接口。

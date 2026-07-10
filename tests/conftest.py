@@ -41,6 +41,9 @@ def create_profile(root: Path, *, password: str = 'test-pass', admin_channels: l
             user_id TEXT,
             title TEXT,
             started_at REAL,
+            ended_at REAL,
+            archived INTEGER NOT NULL DEFAULT 0,
+            message_count INTEGER DEFAULT 0,
             source TEXT
         );
         CREATE TABLE messages (
@@ -48,7 +51,10 @@ def create_profile(root: Path, *, password: str = 'test-pass', admin_channels: l
             session_id TEXT,
             role TEXT,
             content TEXT,
-            timestamp REAL
+            timestamp REAL,
+            platform_message_id TEXT,
+            observed INTEGER DEFAULT 0,
+            active INTEGER DEFAULT 1
         );
         '''
     )

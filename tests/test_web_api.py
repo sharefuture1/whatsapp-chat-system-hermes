@@ -227,6 +227,46 @@ def test_reply_preview_only_does_not_send(tmp_path):
     assert 'rewrite' in body
 
 
+def test_successful_web_reply_is_persisted_for_conversation_sync(monkeypatch, tmp_path):
+    from whatsapp_chat_system.messaging import HermesMessenger, SendResult
+
+    profile = create_profile(tmp_path / 'p-reply-sync')
+    seed_conversation(
+        profile,
+        user_id='48370592796813@lid',
+        user_name='Sync User',
+        session_id='s-reply-sync',
+        messages=[('user', 'incoming', 1700000010.0)],
+    )
+
+    def successful_send(self, target_id, message, json_output=True):
+        return SendResult(
+            success=True,
+            chat_id=target_id,
+            stdout='{}',
+            stderr='',
+            payload={'success': True, 'messageId': 'WA-WEB-1'},
+        )
+
+    monkeypatch.setattr(HermesMessenger, 'send_whatsapp', successful_send)
+    client = authed_client(profile)
+
+    response = client.post('/api/reply', json={
+        'target': '48370592796813@lid',
+        'message': 'persist me',
+        'mode': 'direct',
+        'preview_only': False,
+    })
+
+    assert response.status_code == 200
+    assert response.json()['message_id'] == 'WA-WEB-1'
+    detail = client.get('/api/conversations/48370592796813@lid?page=1&page_size=10').json()
+    persisted = [item for item in detail['messages'] if item['role'] == 'assistant']
+    assert len(persisted) == 1
+    assert persisted[0]['content'] == 'persist me'
+    assert persisted[0]['platform_message_id'] == 'WA-WEB-1'
+
+
 def test_logout_invalidates_session(tmp_path):
     profile = create_profile(tmp_path / 'p7')
     client = authed_client(profile)

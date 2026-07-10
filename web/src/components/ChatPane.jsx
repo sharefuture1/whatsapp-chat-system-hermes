@@ -39,11 +39,14 @@ function formatDay(ts) {
 }
 
 function mergeFreshMessages(serverItems, currentItems) {
+  const serverPlatformIds = new Set(serverItems.map(item => String(item.platform_message_id || '')).filter(Boolean))
   const serverKeys = new Set(serverItems.map(item => `${item.role}:${item.content}`))
   const unresolvedLocal = currentItems.filter(item => {
     const id = String(item.message_id || '')
-    if (!id.startsWith('tmp-')) return false
-    if (!item.pending && !item.failed) return false
+    if (!id.startsWith('tmp-') && !item.local_only) return false
+    if (!item.pending && !item.failed && !item.local_only) return false
+    const platformId = String(item.platform_message_id || '')
+    if (platformId && serverPlatformIds.has(platformId)) return false
     return !serverKeys.has(`${item.role}:${item.content}`)
   })
   return [...serverItems, ...unresolvedLocal]
@@ -306,9 +309,21 @@ export default function ChatPane({
       const data = await onReply(target, sourceText, sendMode)
       if (data?.success !== true) throw new Error(data?.detail || t('sendFailed'))
       const finalText = data?.rewrite?.message || optimisticText
-      const finalId = data?.message_id || data?.messageId || tmpId
+      const platformId = data?.message_id || data?.messageId || null
+      const finalId = data?.local_message_id || tmpId
       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
-      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, message_id: finalId, content: finalText, pending: false, failed: false, sent: true, lang: finalLang, translated: null } : m))
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? {
+        ...m,
+        message_id: finalId,
+        platform_message_id: platformId,
+        local_only: !data?.local_message_id,
+        content: finalText,
+        pending: false,
+        failed: false,
+        sent: true,
+        lang: finalLang,
+        translated: null,
+      } : m))
       setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
       if (target === userId && requestTracker.current.isActive(target)) {
         setTimeout(() => {
@@ -316,7 +331,14 @@ export default function ChatPane({
         }, 450)
       }
     } catch (error) {
-      setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: false, failed: true, sent: false, error: error?.message || t('sendFailed'), retryable: error?.retryable !== false } : m))
+      setMessages(prev => prev.map(m => m.message_id === tmpId ? {
+        ...m,
+        pending: false,
+        failed: true,
+        sent: false,
+        error: error?.message || t('sendFailed'),
+        retryable: error?.retryable !== false,
+      } : m))
     }
   }
 

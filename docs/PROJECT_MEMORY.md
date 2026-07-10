@@ -1,6 +1,6 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 10:00 UTC
+> 最后更新：2026-07-10 10:50 UTC
 
 ## 当前结论
 
@@ -12,11 +12,12 @@
 - 持久化 FileSpool/EventSink 与 FastAPI `/internal/events/whatsapp` 幂等事务接收已实现。
 - 生产仍使用 Legacy `127.0.0.1:3000` 和 Hermes profile/state 提供现有消息链；V2 仅在 `127.0.0.1:3100` 完成无真实账号的安全影子验证，尚未切流。
 - 真实扫码、真实收发、双账号同时在线、历史迁移、Outbox Worker 与 Hermes shutdown 尚未验收。
+- Legacy 网页直发同步缺口已修复：只有 Bridge 明确成功后才将 outbound assistant 消息和 WhatsApp ID 写回 `state.db`；页面刷新/增量不会再丢失成功气泡。
 
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-BN8XBbSa.js` / `index-CdAyXNbe.css`，资源 200。
+- 前端：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI 资源 200；公网域名当前被 Cloudflare `525` 阻断，待修复边缘 TLS 后复验。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2 影子：曾在 `127.0.0.1:3100` 启动并验证 live/ready、认证、create/status/stop；验证后已停止并清理临时 token/runtime。
 - 生产仍传入 `/root/.hermes/profiles/whatsapp-support`，属于迁移期兼容。
@@ -48,7 +49,7 @@
 ## 验证状态
 
 ```text
-pytest -q                          118 passed, 1 warning
+pytest -q                          119 passed, 1 warning
 bridge npm test                   63 passed
 bridge npm run lint               PASS
 bridge npm audit --omit=dev       0 vulnerabilities
@@ -57,6 +58,7 @@ web npm run build                 PASS
 Alembic upgrade→downgrade→upgrade PASS
 git diff --check                  PASS
 FastAPI /api/health               200
+Legacy web reply sync probe       PASS (real WhatsApp ID + local ID + delta API)
 V2 shadow live/ready              200
 V2 unauth API                     401
 V2 create/status/stop             200

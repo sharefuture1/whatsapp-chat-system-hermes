@@ -148,9 +148,10 @@
 
 ### SDD-P1-10 消息同步 gap 调查与修复
 
-- 状态：`Blocked`
-- 阻塞：需要真实 WhatsApp 多轮入站、回执、断线重连数据。
-- 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap。
+- 状态：`Implemented`
+- 已修复：Legacy 迁移期网页直发成功后，将 outbound assistant 消息及 WhatsApp message ID 同事务写回 `state.db`；刷新/增量 API 不再让成功气泡消失或误留感叹号。
+- 剩余阻塞：仍需真实 WhatsApp 断线重连、批量历史、乱序/重复事件和 Bridge V2 多账号数据才能完成端到端 `Verified`。
+- 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap；网页直发成功后刷新仍能看到同一条消息。
 
 ## 4. P2：UX、视觉和工程质量
 
