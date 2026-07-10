@@ -17,7 +17,7 @@
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI 资源 200；公网域名当前被 Cloudflare `525` 阻断，待修复边缘 TLS 后复验。
+- 前端：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI/Caddy 资源 200；公网域名当前被 Cloudflare `525` 阻断，DNS origin 仍指向旧服务器 `34.84.185.169`，待切到当前源站/Named Tunnel 后复验。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2 影子：曾在 `127.0.0.1:3100` 启动并验证 live/ready、认证、create/status/stop；验证后已停止并清理临时 token/runtime。
 - 生产仍传入 `/root/.hermes/profiles/whatsapp-support`，属于迁移期兼容。

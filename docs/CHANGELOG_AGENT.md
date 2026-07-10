@@ -7,7 +7,9 @@
 - 新增 `StateDB.append_assistant_message`：底层明确发送成功后才写入 active session，并保存 `platform_message_id`。
 - `/api/reply` 返回 `local_message_id`；会话详情/增量 API 暴露 `platform_message_id`，前端按本地 ID 和平台 ID 合并，避免成功气泡消失或重复。
 - 回归测试覆盖 `48370592796813@lid` 风格 LID 会话：网页直发成功后刷新仍存在同一条 assistant 消息及 WhatsApp message ID。
-- 验证：Python `119 passed`；Bridge `63 passed` + lint；Web `9 passed` + Vite build；线上 health 200。
+- 验证：Python `119 passed`；Bridge `63 passed` + lint；Web `9 passed` + Vite build；本机 FastAPI/Caddy health 200。
+- 部署：新增并启用 `whatsapp-chat-system.service`，FastAPI 8792 由 systemd 自动重启；当前构建资源为 `index-CZeVLI8-.js` / `index-CdAyXNbe.css`。
+- 公网阻断另行确认：`whatsapp.future1.us` 返回 Cloudflare 525，DNS origin 仍指向旧服务器 `34.84.185.169`，不是本次应用代码或当前源站服务故障。
 - 真实线上探针通过 Legacy Bridge 发送并立即验证：获得真实 WhatsApp ID、本地消息 ID `271`，增量 API 可读；随后将探针内容编辑为明确测试提示。
 - SDD-P1-10 由 `Blocked` 更新为 `Implemented`；完整断线/乱序/历史同步仍待 Bridge V2 真实账号验收。
 

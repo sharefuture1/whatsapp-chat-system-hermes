@@ -110,7 +110,7 @@
 - `/api/health`：✅ 200
 - Legacy 网页直发同步探针：✅ 真实 WhatsApp ID + local ID + 增量 API 可读
 - V2 `3100` 影子 live/ready：✅ 200；未认证 API：401；create/status/stop：200
-- 线上资源：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI 资源 200；公网 `whatsapp.future1.us` 当前返回 Cloudflare 525，需恢复 TLS 后再验收
+- 线上资源：`index-CZeVLI8-.js` / `index-CdAyXNbe.css`，本机 FastAPI/Caddy 资源 200；公网 `whatsapp.future1.us` 当前返回 Cloudflare 525，DNS origin 仍是旧服务器 `34.84.185.169`
 - 真实 QR/连接：⏳ 等待测试 WhatsApp 账号验收
 
 ### P2 — 工程与视觉精修
