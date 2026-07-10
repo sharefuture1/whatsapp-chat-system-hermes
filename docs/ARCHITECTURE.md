@@ -67,9 +67,14 @@ Supplementary profile-local files:
 ## Security model
 
 Current security is application-layer login:
-- password stored as salted sha256 record in `web-settings.json`
+- password stored as a PBKDF2-HMAC-SHA256 record in `web-settings.json`
 - successful login issues a session token
 - token is required in `x-session-token` for protected endpoints
+
+Runtime secret policy:
+- live passwords, bootstrap secrets, API keys, and session tokens must stay out of git-managed docs
+- profile-local runtime files may contain secrets and must be treated as sensitive operational state
+- screenshots/HAR/audit exports should be ignored or redacted before sharing
 
 This is sufficient for a private internal console, but not yet a full enterprise auth layer.
 

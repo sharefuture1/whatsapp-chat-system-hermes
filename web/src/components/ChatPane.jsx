@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useSettings } from '../settings'
-import { fmtTime } from '../format'
+import { fmtClock } from '../format'
 
 const QUICK_EMOJIS = ['😊', '😂', '🥺', '❤️', '👍', '🙏', '😌', '😉']
 
@@ -59,6 +59,20 @@ function maxMessageId(items) {
   }, 0)
 }
 
+function nextMessageInGrouped(items, index) {
+  for (let i = index + 1; i < items.length; i += 1) {
+    if (items[i]?.type === 'msg') return items[i]
+  }
+  return null
+}
+
+function shouldShowBubbleTime(item, nextItem) {
+  if (!nextItem) return true
+  if (nextItem.role !== item.role) return true
+  const delta = Math.abs(Number(nextItem.timestamp || 0) - Number(item.timestamp || 0))
+  return delta > 300
+}
+
 function mergeNewMessages(prev, incoming) {
   if (!incoming.length) return prev
   const seen = new Set(prev.map(item => String(item.message_id)))
@@ -70,6 +84,11 @@ function mergeNewMessages(prev, incoming) {
 export default function ChatPane({
   userId,
   userName,
+  contactProfile,
+  userOverride,
+  defaultReplyStyle,
+  defaultAiModel,
+  onSaveContactConfig,
   onBack,
   onReply,
   onHideMessage,
@@ -77,11 +96,9 @@ export default function ChatPane({
   sendingMeta,
   uiSettings,
   onOpenSettings,
-  onTogglePin,
-  pinned,
+  onOpenContactConfig,
   active,
   health,
-  onNextConversation,
   refreshTick,
 }) {
   const { t } = useSettings()
@@ -97,34 +114,43 @@ export default function ChatPane({
   const [mode, setMode] = useState('smart')
   const [preview, setPreview] = useState(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState(false)
+  const [contactDrawerOpen, setContactDrawerOpen] = useState(false)
+  const [contactDrawerTab, setContactDrawerTab] = useState('profile')
+  const [contactDraft, setContactDraft] = useState({ remark: '', notes: '', ai_model: '', custom_system_prompt: '', reply_style: '' })
+  const [contactSaving, setContactSaving] = useState(false)
+  const [contactSaved, setContactSaved] = useState(false)
+  const [activeMessageId, setActiveMessageId] = useState(null)
   const [hiddenTranslations, setHiddenTranslations] = useState({})
   const scrollRef = useRef(null)
   const lastBottomRef = useRef(true)
   const fetchedFor = useRef(null)
 
   useEffect(() => {
-    if (mode === 'direct' || !uiSettings?.ui?.show_preview_before_send) {
+    if (mode === 'direct') {
       setPreview({ mode: 'direct', language: 'direct', message: composer, used_fallback: false })
+      setPreviewError(false)
+      setPreviewLoading(false)
       return
     }
-    if (!userId || !composer.trim()) {
-      setPreview(null)
-      return
-    }
-    const controller = new AbortController()
-    const timer = setTimeout(async () => {
-      setPreviewLoading(true)
-      try {
-        const data = await api.post('/reply', { target: userId, message: composer, mode, preview_only: true }, { signal: controller.signal })
-        if (data?.rewrite) {
-          setPreview({ mode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback })
-        }
-      } catch {} finally {
-        setPreviewLoading(false)
-      }
-    }, uiSettings?.reply?.preview_debounce_ms || 320)
-    return () => { controller.abort(); clearTimeout(timer) }
-  }, [userId, composer, mode, uiSettings])
+    setPreview(null)
+    setPreviewError(false)
+    setPreviewLoading(false)
+  }, [composer, mode])
+
+  useEffect(() => {
+    setContactDraft({
+      remark: contactProfile?.remark || '',
+      notes: contactProfile?.notes || '',
+      ai_model: userOverride?.ai_model || '',
+      custom_system_prompt: userOverride?.custom_system_prompt || '',
+      reply_style: userOverride?.reply_style || '',
+    })
+    setContactDrawerOpen(false)
+    setContactDrawerTab('profile')
+    setContactSaving(false)
+    setContactSaved(false)
+  }, [userId, userOverride, contactProfile])
 
   const fetchPage = async (p, appendOlder = false) => {
     const res = await api.get(`/conversations/${encodeURIComponent(userId)}?page=${p}&page_size=${pageSize}`)
@@ -142,27 +168,20 @@ export default function ChatPane({
   }
 
   useEffect(() => {
-    if (!userId) {
-      setMessages([])
-      setHasMore(false)
-      setTotal(0)
-      setHiddenCount(0)
-      setPage(1)
-      fetchedFor.current = null
-      return
-    }
-    if (fetchedFor.current === userId) return
-    fetchedFor.current = userId
-    setInitialLoading(true)
-    setPage(1)
+    if (!userId) return
     setMessages([])
     setHasMore(false)
     setTotal(0)
     setHiddenCount(0)
+    setPage(1)
+    fetchedFor.current = null
     setMode(uiSettings?.reply?.default_mode || 'smart')
     setComposer('')
     setPreview(null)
+    setPreviewError(false)
+    setActiveMessageId(null)
     setHiddenTranslations({})
+    setInitialLoading(true)
     fetchPage(1, false)
       .then(() => { lastBottomRef.current = true })
       .catch(() => {})
@@ -176,8 +195,10 @@ export default function ChatPane({
       fetchPage(1, false).catch(() => {})
       return
     }
+    let cancelled = false
     api.get(`/conversations/${encodeURIComponent(userId)}/messages?after_id=${afterId}&limit=100`)
       .then(res => {
+        if (cancelled) return
         const items = res.messages || []
         if (!items.length) return
         lastBottomRef.current = true
@@ -185,7 +206,9 @@ export default function ChatPane({
         setTotal(prev => Math.max(prev, prev + items.length))
       })
       .catch(() => {})
-  }, [refreshTick, userId, messages])
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick, userId])
 
   const loadMore = async () => {
     if (loadingMore || !hasMore || !userId) return
@@ -211,13 +234,14 @@ export default function ChatPane({
     if (lastBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages.length])
+  }, [messages.length, messages[messages.length - 1]?.message_id, messages[messages.length - 1]?.timestamp])
 
   const onScroll = () => {
     const el = scrollRef.current
     if (!el) return
-    if (el.scrollTop < 60 && hasMore && !loadingMore) loadMore()
+    const distFromTop = el.scrollTop
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distFromTop < 60 && hasMore && !loadingMore && messages.length > 0) loadMore()
     lastBottomRef.current = distFromBottom < 80
   }
 
@@ -252,6 +276,7 @@ export default function ChatPane({
 
     setComposer('')
     setPreview(null)
+    setPreviewError(false)
     lastBottomRef.current = true
     setMessages(prev => [
       ...prev,
@@ -274,6 +299,7 @@ export default function ChatPane({
       const finalId = data?.message_id || data?.messageId || tmpId
       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
       setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, message_id: finalId, content: finalText, pending: false, sent: true, lang: finalLang, translated: null } : m))
+      setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
       setTimeout(() => fetchPage(1, false).catch(() => {}), 450)
     } catch {
       setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: false, failed: true } : m))
@@ -288,6 +314,31 @@ export default function ChatPane({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
+    }
+  }
+
+  const openContactDrawer = () => {
+    setContactSaved(false)
+    setContactDraft({
+      remark: contactProfile?.remark || '',
+      notes: contactProfile?.notes || '',
+      ai_model: userOverride?.ai_model || '',
+      custom_system_prompt: userOverride?.custom_system_prompt || '',
+      reply_style: userOverride?.reply_style || '',
+    })
+    setContactDrawerTab('profile')
+    setContactDrawerOpen(true)
+  }
+
+  const saveContactDrawer = async () => {
+    if (!userId || !onSaveContactConfig) return
+    setContactSaving(true)
+    try {
+      await onSaveContactConfig(userId, contactDraft)
+      setContactSaved(true)
+      setTimeout(() => setContactSaved(false), 1600)
+    } finally {
+      setContactSaving(false)
     }
   }
 
@@ -309,31 +360,46 @@ export default function ChatPane({
     return <section className={`wx-chat empty is-active${active ? '' : ''}`}><div className="wx-empty"><div style={{ fontSize: 48, marginBottom: 8 }}>💬</div><div>{t('selectConversation')}</div><div style={{ marginTop: 4, fontSize: 12 }}>{t('hintWorkspace')}</div></div></section>
   }
 
-  const isPinned = pinned?.includes(userId)
   const autoTranslate = !!uiSettings?.message_ops?.auto_translate
   const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
+  const headerTitle = contactProfile?.remark || userName
 
   return (
     <section className={`wx-chat is-active${active ? '' : ''}`}>
       <div className="wx-chat-header">
-        <button className="wx-icon-btn" onClick={onNextConversation} aria-label={t('nextChat')} title={t('nextChat')}><span aria-hidden="true">↻</span></button>
-        <div className="wx-avatar" style={{ background: avatarColor(userName) }}>{initials(userName)}</div>
-        <div className="wx-chat-header-meta">
-          <div className="wx-chat-title">{userName}</div>
-          <div className="wx-chat-sub"><span className={`wx-online-dot ${health ? '' : 'offline'}`} />{health ? t('online') : t('offline')} · {total} {t('totalMessages') || 'msgs'}{hiddenCount ? ` · ${hiddenCount} ${t('hiddenMessages')}` : ''}</div>
+        <button className="wx-icon-btn wx-back-btn" onClick={onBack} aria-label={t('back')} title={t('back')}>
+          <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <div className="wx-avatar" style={{ background: avatarColor(headerTitle) }}>{initials(headerTitle)}</div>
+        <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
+          <div className="wx-chat-title">{headerTitle}</div>
+          <div className="wx-chat-sub"><span className={`wx-online-dot ${health ? '' : 'offline'}`} />{health ? t('online') : t('offline')} · {total} {t('totalMessages') || 'msgs'}{allowLocalHide && hiddenCount ? ` · ${hiddenCount} ${t('hiddenMessages')}` : ''}</div>
         </div>
         <div className="wx-chat-header-right">
-          <button className="wx-icon-btn" onClick={() => onTogglePin(userId)} title={isPinned ? t('unpin') : t('pin')}><span aria-hidden="true">{isPinned ? '★' : '☆'}</span></button>
-          <button className={`wx-icon-btn ${autoTranslate ? '' : 'off'}`} onClick={onOpenSettings} title={t('autoTranslate')}><span aria-hidden="true">译</span></button>
-          <button className="wx-icon-btn" onClick={onOpenSettings} title={t('settings')}><span aria-hidden="true">⚙</span></button>
+          <button className="wx-icon-btn" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} title={t('contactProfile') || '联系人资料'} aria-label={t('contactProfile') || '联系人资料'}>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.5 4-6 8-6s8 2.5 8 6"/></svg>
+          </button>
+          <button className="wx-icon-btn" onClick={() => { openContactDrawer(); setContactDrawerTab('history') }} title={t('chatHistory') || '聊天记录'} aria-label={t('chatHistory') || '聊天记录'}>
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          </button>
         </div>
       </div>
 
       <div className="wx-messages" ref={scrollRef} onScroll={onScroll}>
         <div className="wx-messages-inner">
           {hasMore ? <div className="wx-loadmore"><button onClick={loadMore} disabled={loadingMore}>{loadingMore ? t('loading') : t('loadMore')}</button></div> : null}
-          {initialLoading ? <div className="wx-empty">{t('loading')}</div> : null}
-          {hiddenCount ? <div className="wx-hidden-note">{hiddenCount} {t('hiddenMessages')}</div> : null}
+          {initialLoading ? (
+            <div className="wx-skeleton-msg-list" style={{ padding: '16px 14px' }}>
+              {[80, 60, 90, 55, 75, 65, 85, 50].map((w, i) => (
+                <div key={i} className="wx-skeleton-msg" style={{ justifyContent: i % 2 === 0 ? 'flex-start' : 'flex-end' }}>
+                  {i % 2 !== 0 && <div className="wx-skeleton wx-skeleton-avatar" />}
+                  <div className={`wx-skeleton wx-skeleton-bubble ${w < 65 ? 'short' : w > 80 ? 'long' : ''} ${i % 2 !== 0 ? '' : 'right'}`} style={{ width: `${w}%` }} />
+                  {i % 2 === 0 && <div className="wx-skeleton wx-skeleton-avatar" />}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {allowLocalHide && hiddenCount ? <div className="wx-hidden-note">{hiddenCount} {t('hiddenMessages')}</div> : null}
           {!initialLoading && messages.length === 0 ? <div className="wx-empty">{t('noMessages')}</div> : null}
           {grouped.map((item, idx) => {
             if (item.type === 'day') {
@@ -344,40 +410,141 @@ export default function ChatPane({
             const failed = item.failed
             const statusLabel = failed ? t('sendFailed') : pending ? t('sending') : item.sent ? t('sent') : ''
             const hideTranslation = hiddenTranslations[item.message_id]
+            const effectiveHidden = allowLocalHide && item.hidden
+            const nextItem = nextMessageInGrouped(grouped, idx)
+            const showTime = shouldShowBubbleTime(item, nextItem)
+            const translatedText = String(item.translated || '').trim()
+            const contentText = String(item.content || '').trim()
+            const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && item.lang !== 'Unknown' && translatedText && translatedText !== contentText
             return (
-              <div className={`wx-bubble-row ${isOut ? 'out' : 'in'}`} key={`${item.message_id}-${idx}`}>
+              <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${idx}`} onClick={() => setActiveMessageId(item.message_id)}>
                 {!isOut ? <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(userName) }}>{initials(userName)}</div> : null}
                 <div>
-                  <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${item.hidden ? 'hidden' : ''}`}>{item.hidden ? t('hiddenPlaceholder') : item.content}</div>
-                  {autoTranslate && !item.hidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && item.lang !== 'Unknown' ? (
+                  <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>{effectiveHidden ? t('hiddenPlaceholder') : item.content}</div>
+                  {showTranslation ? (
                     <div className="wx-translation-line">
                       <span className="wx-translation-label">{t('translation')}:</span>
-                      <span className="wx-translation-text">{item.translated || t('translating')}</span>
-                      {item.translated ? <button className="wx-bubble-action" onClick={() => setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true }))}>{t('hideTranslation')}</button> : null}
+                      <span className="wx-translation-text">{translatedText}</span>
+                      <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
                     </div>
                   ) : null}
-                  <div className="wx-bubble-meta"><span>{fmtTime(item.timestamp)}</span>{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>· {statusLabel}</span> : null}</div>
+                  {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}</div> : null}
                 </div>
-                {allowLocalHide && !item.hidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={() => onHideMessage(item.message_id)}>{t('hide')}</button></div> : null}
+                {allowLocalHide && !effectiveHidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={(e) => { e.stopPropagation(); onHideMessage(item.message_id) }}>{t('hide')}</button></div> : null}
               </div>
             )
           })}
         </div>
       </div>
 
+      {contactDrawerOpen ? (
+        <div className="wx-drawer-backdrop" onClick={() => setContactDrawerOpen(false)}>
+          <aside className="wx-contact-drawer" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="wx-contact-drawer-hero">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div className="wx-avatar lg" style={{ background: avatarColor(contactDraft.remark || userName) }}>{initials(contactDraft.remark || userName)}</div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="wx-contact-remark">{t('contactDetails') || '聊天详情'}</div>
+                  <h3>{contactDraft.remark || userName}</h3>
+                  <p>{userName} · {userId}</p>
+                </div>
+                <button className="wx-icon-btn" onClick={() => setContactDrawerOpen(false)} aria-label={t('dismiss')}>
+                  <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </div>
+              <div className="wx-contact-drawer-hero-actions">
+                <button className="wx-mini-action" onClick={() => { navigator.clipboard?.writeText(userId) }}><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>{t('copyId') || '复制 ID'}</button>
+                <button className="wx-mini-action" onClick={() => { setContactDrawerOpen(false); setContactDrawerTab('ai') }}><svg viewBox="0 0 24 24"><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/><circle cx="12" cy="12" r="4"/></svg>{t('perContactReplyConfig') || 'AI 风格'}</button>
+              </div>
+            </div>
+            <div className="wx-contact-drawer-tabs">
+              <button type="button" className={`wx-drawer-tab ${contactDrawerTab === 'profile' ? 'active' : ''}`} onClick={() => setContactDrawerTab('profile')}>{t('contactProfile') || '资料'}</button>
+              <button type="button" className={`wx-drawer-tab ${contactDrawerTab === 'history' ? 'active' : ''}`} onClick={() => setContactDrawerTab('history')}>{t('chatHistory') || '聊天记录'}</button>
+              <button type="button" className={`wx-drawer-tab ${contactDrawerTab === 'ai' ? 'active' : ''}`} onClick={() => setContactDrawerTab('ai')}>{t('ai') || 'AI'}</button>
+            </div>
+            <div className="wx-contact-drawer-body">
+              {contactDrawerTab === 'profile' ? (
+                <div className="wx-contact-card">
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('contactRemark') || '备注'}</span>
+                    <input value={contactDraft.remark || ''} onChange={e => setContactDraft(prev => ({ ...prev, remark: e.target.value }))} placeholder={userName} />
+                  </div>
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('contactNotes') || '联系人说明'}</span>
+                    <textarea rows={4} value={contactDraft.notes || ''} onChange={e => setContactDraft(prev => ({ ...prev, notes: e.target.value }))} placeholder="记录这个聊天对象的背景、关系、沟通习惯。" />
+                  </div>
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('basicInfo') || '基本信息'}</span>
+                    <div className="wx-contact-meta-list">
+                      <div className="wx-contact-meta-row"><span>{t('contactId') || '联系人ID'}</span><strong>{userId}</strong></div>
+                      <div className="wx-contact-meta-row"><span>{t('displayName') || '显示名'}</span><strong>{userName}</strong></div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {contactDrawerTab === 'history' ? (
+                <>
+                  <div className="wx-contact-summary-grid">
+                    <div className="wx-contact-summary-card"><span>{t('totalMessages') || '消息数'}</span><strong>{total}</strong></div>
+                    <div className="wx-contact-summary-card"><span>{t('hiddenMessages') || '隐藏'}</span><strong>{hiddenCount}</strong></div>
+                  </div>
+                  <div className="wx-history-tips">
+                    <span className="wx-contact-card-label">{t('chatHistory') || '聊天记录'}</span>
+                    <p>{t('chatHistoryHelp') || '当前窗口就是该联系人的完整聊天记录，可在主聊天区滚动查看；这里保留摘要与快捷入口。'} </p>
+                    <button type="button" className="ghost-btn" onClick={() => setContactDrawerOpen(false)}>{t('returnToChat') || '返回聊天继续查看'}</button>
+                  </div>
+                </>
+              ) : null}
+
+              {contactDrawerTab === 'ai' ? (
+                <div className="wx-contact-card">
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('settingAiModel') || 'AI 模型'}</span>
+                    <input value={contactDraft.ai_model || ''} onChange={e => setContactDraft(prev => ({ ...prev, ai_model: e.target.value }))} placeholder={defaultAiModel || 'gpt-5.3-codex-spark'} />
+                    <span className="wx-contact-card-hint">{t('inheritGlobalModel') || '留空则继承全局模型'}</span>
+                  </div>
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('settingDefaultReplyStyle') || '回复风格'}</span>
+                    <textarea rows={3} value={contactDraft.reply_style || ''} onChange={e => setContactDraft(prev => ({ ...prev, reply_style: e.target.value }))} placeholder={defaultReplyStyle || '像熟人聊天，短句，少模板感'} />
+                  </div>
+                  <div className="wx-contact-card-row">
+                    <span className="wx-contact-card-label">{t('settingCustomSystemPrompt') || '系统提示词'}</span>
+                    <textarea rows={5} value={contactDraft.custom_system_prompt || ''} onChange={e => setContactDraft(prev => ({ ...prev, custom_system_prompt: e.target.value }))} placeholder="为这个联系人补充专属提示词，例如：更温柔、更口语化、先共情再建议。" />
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="wx-drawer-actions">
+                <button type="button" className="ghost-btn" onClick={onOpenContactConfig}>{t('openInSettings') || '去完整设置页'}</button>
+                <button type="button" className="wx-primary-btn" onClick={saveContactDrawer} disabled={contactSaving}>{contactSaving ? t('saving') : contactSaved ? `✓ ${t('saved')}` : t('save')}</button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       <div className="wx-composer">
         <div className="wx-composer-toolbar">
-          <button className={`wx-mode-pill ${mode !== 'direct' ? 'active' : ''}`} onClick={() => setMode(mode === 'direct' ? 'smart' : mode === 'smart' ? 'translate' : 'direct')} title={t('mode')}>{mode === 'direct' ? t('modeDirect') : mode === 'smart' ? t('modeSmart') : t('modeTranslate')}</button>
+          <button type="button" className={`wx-mode-pill ${mode !== 'direct' ? 'active' : ''}`} onClick={() => setMode(mode === 'direct' ? 'smart' : mode === 'smart' ? 'translate' : 'direct')} title={t('mode')}>
+            <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2 }}><path d="M4 12h11M11 8l4 4-4 4M20 6v12"/></svg>
+            {mode === 'direct' ? t('modeDirect') : mode === 'smart' ? t('modeSmart') : t('modeTranslate')}
+            {mode !== 'direct' && <span className="wx-mode-badge">AI</span>}
+          </button>
           <div className="wx-emoji-strip" aria-label={t('quickEmoji')}>
-            {QUICK_EMOJIS.map(emoji => <button key={emoji} className="wx-emoji-btn" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}
+            {QUICK_EMOJIS.map(emoji => <button key={emoji} type="button" className="wx-emoji-btn" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}
           </div>
           <div style={{ flex: 1 }} />
-          <div className="subtle" style={{ fontSize: 12 }}>{sendingMeta ? `${t('lastSend')}: ${sendingMeta.mode}` : ''}</div>
+          {sendingMeta ? <span style={{ fontSize: 11, color: 'var(--wx-text-muted)' }}>{t('lastSend') || '上次'}: {sendingMeta.mode}</span> : null}
         </div>
-        {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip">{previewLoading ? t('generatingPreview') : <><span style={{ marginRight: 4 }}>{t('preview')}:</span><span className="preview-text">{preview.message}</span></>}</div> : null}
+        {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip"><span>{t('preview') || '预览'}:</span><span className="preview-text">{preview.message}</span></div> : null}
+        {previewError && mode !== 'direct' ? <div className="wx-preview-strip wx-preview-error">{t('previewFailed') || '预览失败'}</div> : null}
         <div className="wx-composer-input">
           <textarea value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} style={{ height: Math.min(140, Math.max(40, composer.split('\n').length * 22 + 16)) }} />
-          <button className="wx-send-btn" onClick={sendMessage} disabled={!composer.trim() || sending}>{sending ? '...' : t('send')}</button>
+          <button type="button" className={`wx-send-btn${sending ? ' sending' : ''}`} onClick={sendMessage} disabled={!composer.trim() || sending}>
+            {sending ? <span className="wx-spinner sm" /> : null}
+            {!sending && (composer.trim() ? t('send') : t('send') + ' ↗')}
+          </button>
         </div>
       </div>
     </section>

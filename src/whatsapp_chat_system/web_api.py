@@ -3,12 +3,14 @@ from __future__ import annotations
 import secrets
 import time
 import re
+import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppConfig, build_password_record, load_json, save_json, verify_password
@@ -62,7 +64,67 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class WorkspaceCreateRequest(BaseModel):
+    id: str | None = None
+    label: str
+    platform: str
+    profile: str | None = None
+    profile_path: str | None = None
+    enabled: bool = True
+    primary: bool = False
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    label: str | None = None
+    platform: str | None = None
+    profile: str | None = None
+    profile_path: str | None = None
+    enabled: bool | None = None
+    primary: bool | None = None
+
+
+class ScheduleRequest(BaseModel):
+    target: str
+    message: str
+    run_at: float
+    mode: str = 'smart'
+    use_memory: bool = True
+
+
+class BroadcastRequest(BaseModel):
+    targets: list[str]
+    message: str
+    mode: str = 'smart'
+    use_memory: bool = True
+
+
+class PluginToggleRequest(BaseModel):
+    plugin_id: str
+    enabled: bool
+
+
 _origins_cache = OriginsCache(ttl_seconds=30)
+
+
+def _resolve_frontend_dist(explicit: str | Path | None = None) -> Path | None:
+    if explicit:
+        candidate = Path(explicit)
+        if candidate.is_dir() and (candidate / 'index.html').is_file():
+            return candidate
+        return None
+    candidates: list[Path] = []
+    env_value = os.getenv('CHAT_SYSTEM_WEB_DIST', '').strip()
+    if env_value:
+        candidates.append(Path(env_value))
+    repo_dist = Path(__file__).resolve().parents[2] / 'web' / 'dist'
+    candidates.extend([
+        repo_dist,
+        Path('/var/www/whatsapp-chat-system/web/dist'),
+    ])
+    for candidate in candidates:
+        if candidate.is_dir() and (candidate / 'index.html').is_file():
+            return candidate
+    return None
 
 
 def _load_origins(config: AppConfig) -> dict[str, dict[str, Any]]:
@@ -107,12 +169,25 @@ def _language_set_for_text(text: str) -> list[str]:
     return [] if lang == 'Unknown' else [lang]
 
 
+def _hide_messages_enabled(config: AppConfig) -> bool:
+    return bool(config.web_settings.get('message_ops', {}).get('hide_messages_enabled', False))
+
+
+def _hidden_message_ids(config: AppConfig) -> set[int]:
+    if not _hide_messages_enabled(config):
+        return set()
+    return {int(x) for x in (config.web_settings.get('hidden_message_ids') or []) if str(x).isdigit() or isinstance(x, int)}
+
+
 def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict[str, Any]]:
     rows = db.fetch_conversation_summaries(config.admin_ids)
+    chat_ops = config.web_settings.get('chat_ops') if isinstance(config.web_settings.get('chat_ops'), dict) else {}
+    deleted = set(str(x) for x in (chat_ops or {}).get('deleted', []))
+    pinned = [str(x) for x in (chat_ops or {}).get('pinned', [])]
     results: list[dict[str, Any]] = []
     for row in rows:
         user_id = str(row['user_id'] or '')
-        if not user_id:
+        if not user_id or user_id in deleted:
             continue
         session_ids = [sid for sid in str(row['session_ids'] or '').split(',') if sid]
         user_name = _name_for_user(config, user_id, session_ids, str(row['title'] or ''))
@@ -136,6 +211,7 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
             'priority': priority,
             'last_message_lang': _language_hint_for(last_text),
             'last_message_translated': _maybe_translate_for_user(config, user_id, last_text),
+            'pinned': user_id in pinned,
         })
     return results
 
@@ -314,49 +390,85 @@ def _platform_catalog() -> list[dict[str, Any]]:
     ]
 
 
+def _slugify_workspace_value(value: str) -> str:
+    slug = re.sub(r'[^a-z0-9]+', '-', value.strip().lower()).strip('-')
+    return slug or 'workspace'
+
+
+def _sanitize_workspace_input(payload: dict[str, Any], *, workspace_id: str | None = None) -> dict[str, Any]:
+    platform = _slugify_workspace_value(str(payload.get('platform') or 'whatsapp'))
+    raw_profile = str(payload.get('profile') or payload.get('id') or workspace_id or f'{platform}-workspace').strip()
+    profile = _slugify_workspace_value(raw_profile)
+    workspace_key = _slugify_workspace_value(str(workspace_id or payload.get('id') or profile))
+    label = str(payload.get('label') or workspace_key).strip() or workspace_key
+    profile_path = str(payload.get('profile_path') or f'/root/.hermes/profiles/{profile}').strip()
+    return {
+        'id': workspace_key,
+        'label': label,
+        'platform': platform,
+        'profile': profile,
+        'profile_path': profile_path,
+        'enabled': bool(payload.get('enabled', True)),
+        'primary': bool(payload.get('primary', False)),
+    }
+
+
+def _workspace_entries(config: AppConfig) -> list[dict[str, Any]]:
+    return [item for item in (config.web_settings.get('workspaces') or []) if isinstance(item, dict)]
+
+
+def _save_workspaces(config: AppConfig, items: list[dict[str, Any]]) -> None:
+    config.web_settings['workspaces'] = items
+    save_json(config.paths.web_settings_file, config.web_settings)
+
+
 def _workspace_status(config: AppConfig) -> list[dict[str, Any]]:
     catalog = {item['platform']: item for item in _platform_catalog()}
     out: list[dict[str, Any]] = []
-    for item in config.web_settings.get('workspaces') or []:
-        if not isinstance(item, dict):
-            continue
-        platform = str(item.get('platform') or 'unknown')
-        profile = str(item.get('profile') or item.get('id') or platform)
-        profile_path = Path(str(item.get('profile_path') or f'/root/.hermes/profiles/{profile}'))
+    for raw_item in _workspace_entries(config):
+        item = _sanitize_workspace_input(raw_item, workspace_id=str(raw_item.get('id') or ''))
+        platform = item['platform']
+        profile = item['profile']
+        profile_path = Path(item['profile_path'])
         meta = catalog.get(platform, {})
         status = 'not_configured'
-        if profile_path.exists():
+        try:
+            exists = profile_path.exists()
+        except PermissionError:
+            exists = False
+        if exists:
             status = 'configured'
-            if (profile_path / 'gateway.pid').exists():
+            try:
+                running = (profile_path / 'gateway.pid').exists()
+            except PermissionError:
+                running = False
+            if running:
                 status = 'running'
+        connect_command = str(meta.get('setup_command') or '').replace('<profile>', profile)
         out.append({
             **item,
-            'platform': platform,
-            'profile': profile,
-            'profile_path': str(profile_path),
             'status': status,
             'login_type': meta.get('login_type') or 'manual',
-            'setup_command': str(meta.get('setup_command') or '').replace('<profile>', profile),
+            'connect_command': connect_command,
+            'setup_command': connect_command,
         })
     return out
 
-def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -> FastAPI:
+def build_app(
+    profile: str | Path | None = None,
+    web_dist: str | Path | None = None,
+) -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
     router = AdminRouter(config)
     forwarder = AdminForwarder(config)
     refresher = MemoryRefresher(config)
+    frontend_dist = _resolve_frontend_dist(web_dist)
 
     app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            'http://127.0.0.1:38998',
-            'http://127.0.0.1:38999',
-            'http://127.0.0.1:5174',
-            'https://whats.future1.us',
-            'https://www.whats.future1.us',
-        ],
+        allow_origins=['*'],
         allow_credentials=False,
         allow_methods=['*'],
         allow_headers=['*'],
@@ -364,6 +476,8 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
 
     @app.middleware('http')
     async def auth_guard(request: Request, call_next):
+        if not request.url.path.startswith('/api'):
+            return await call_next(request)
         if request.url.path in {'/api/health', '/api/login'}:
             return await call_next(request)
         if not _is_authenticated(config, request):
@@ -428,7 +542,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         if not q:
             return {'q': q, 'results': []}
         limit = max(1, min(100, limit))
-        hidden = set(config.web_settings.get('hidden_message_ids') or [])
+        hidden = _hidden_message_ids(config)
         results: list[dict[str, Any]] = []
         for row in db.search_messages(q, limit * 2, config.admin_ids):
             message_id = row['message_id']
@@ -464,7 +578,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
     def conversation_new_messages(user_id: str, after_id: int = 0, limit: int = 100) -> dict[str, Any]:
         after_id = max(0, int(after_id or 0))
         limit = max(1, min(200, int(limit or 100)))
-        hidden = set(config.web_settings.get('hidden_message_ids') or [])
+        hidden = _hidden_message_ids(config)
         rows = db.fetch_user_messages_after(user_id, after_id, limit)
         messages = [
             {
@@ -490,7 +604,7 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         page = max(1, page)
         page_size = max(1, min(500, page_size))
         offset = (page - 1) * page_size
-        hidden = set(config.web_settings.get('hidden_message_ids') or [])
+        hidden = _hidden_message_ids(config)
         rows = db.fetch_user_messages(user_id, page_size, offset)
         if not rows and page == 1:
             raise HTTPException(status_code=404, detail='Conversation not found')
@@ -556,6 +670,8 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             'mode': request.mode,
             'source_text': request.message,
             'memory_markdown': prepared['memory_markdown'][:2000],
+            'profile_sidecar': prepared.get('profile_sidecar') or {},
+            'reply_overrides': prepared.get('reply_overrides') or {},
         }
         if request.preview_only:
             return {'success': True, **preview_payload, 'preview_only': True}
@@ -563,6 +679,59 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
         result['memory_markdown'] = prepared['memory_markdown'][:2000]
         result['preview_only'] = False
         return result
+
+    @app.get('/api/workspaces')
+    def list_workspaces() -> dict[str, Any]:
+        return {'items': _workspace_status(config), 'platform_catalog': _platform_catalog()}
+
+    @app.post('/api/workspaces')
+    def create_workspace(request: WorkspaceCreateRequest) -> dict[str, Any]:
+        items = _workspace_entries(config)
+        workspace = _sanitize_workspace_input(request.model_dump(exclude_none=True))
+        if any(str(item.get('id') or '') == workspace['id'] for item in items):
+            raise HTTPException(status_code=409, detail='Workspace already exists')
+        if workspace['primary']:
+            for item in items:
+                item['primary'] = False
+        items.append(workspace)
+        _save_workspaces(config, items)
+        return {'success': True, 'workspace': _workspace_status(config)[-1]}
+
+    @app.put('/api/workspaces/{workspace_id}')
+    def update_workspace(workspace_id: str, request: WorkspaceUpdateRequest) -> dict[str, Any]:
+        items = _workspace_entries(config)
+        updated = None
+        for index, item in enumerate(items):
+            if str(item.get('id') or '') != workspace_id:
+                continue
+            merged = dict(item)
+            for key, value in request.model_dump(exclude_none=True).items():
+                merged[key] = value
+            updated = _sanitize_workspace_input(merged, workspace_id=workspace_id)
+            items[index] = updated
+            break
+        if updated is None:
+            raise HTTPException(status_code=404, detail='Workspace not found')
+        if updated['primary']:
+            for item in items:
+                if str(item.get('id') or '') != workspace_id:
+                    item['primary'] = False
+        _save_workspaces(config, items)
+        for item in _workspace_status(config):
+            if item['id'] == workspace_id:
+                return {'success': True, 'workspace': item}
+        raise HTTPException(status_code=404, detail='Workspace not found')
+
+    @app.delete('/api/workspaces/{workspace_id}')
+    def delete_workspace(workspace_id: str) -> dict[str, Any]:
+        items = _workspace_entries(config)
+        remaining = [item for item in items if str(item.get('id') or '') != workspace_id]
+        if len(remaining) == len(items):
+            raise HTTPException(status_code=404, detail='Workspace not found')
+        if remaining and not any(bool(item.get('primary')) for item in remaining):
+            remaining[0]['primary'] = True
+        _save_workspaces(config, remaining)
+        return {'success': True, 'deleted': workspace_id, 'items': _workspace_status(config)}
 
     @app.get('/api/settings')
     def settings() -> dict[str, Any]:
@@ -622,6 +791,8 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
 
     @app.post('/api/messages/hide')
     def hide_messages(payload: dict[str, Any]) -> dict[str, Any]:
+        if not _hide_messages_enabled(config):
+            raise HTTPException(status_code=403, detail='Message hiding is disabled')
         ids = payload.get('message_ids') or []
         existing = list(config.web_settings.get('hidden_message_ids') or [])
         existing_set = set(existing)
@@ -643,7 +814,249 @@ def build_app(profile: str | Path = '/root/.hermes/profiles/whatsapp-support') -
             raise HTTPException(status_code=400, detail='Unknown job')
         return {'success': code == 0, 'job': request.job, 'exit_code': code}
 
+    # ---------------- Chat list ops (pin / hide / delete) ----------------
+    def _chat_ops() -> dict[str, Any]:
+        ops = config.web_settings.get('chat_ops')
+        if not isinstance(ops, dict):
+            ops = {'pinned': [], 'hidden': [], 'deleted': []}
+            config.web_settings['chat_ops'] = ops
+        ops.setdefault('pinned', [])
+        ops.setdefault('hidden', [])
+        ops.setdefault('deleted', [])
+        return ops
+
+    @app.post('/api/chat/pin')
+    def chat_pin(payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get('user_id') or '')
+        pinned = bool(payload.get('pinned', True))
+        if not user_id:
+            raise HTTPException(status_code=400, detail='user_id required')
+        ops = _chat_ops()
+        current = [str(x) for x in ops['pinned']]
+        if pinned and user_id not in current:
+            current.insert(0, user_id)
+        elif not pinned:
+            current = [x for x in current if x != user_id]
+        ops['pinned'] = current
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'pinned': current}
+
+    @app.post('/api/chat/delete')
+    def chat_delete(payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get('user_id') or '')
+        if not user_id:
+            raise HTTPException(status_code=400, detail='user_id required')
+        ops = _chat_ops()
+        deleted = [str(x) for x in ops.get('deleted', []) if x != user_id]
+        deleted.append(user_id)
+        ops['deleted'] = deleted[-200:]
+        ops['pinned'] = [x for x in ops.get('pinned', []) if x != user_id]
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'deleted': ops['deleted']}
+
+    @app.post('/api/chat/restore')
+    def chat_restore(payload: dict[str, Any]) -> dict[str, Any]:
+        user_id = str(payload.get('user_id') or '')
+        if not user_id:
+            raise HTTPException(status_code=400, detail='user_id required')
+        ops = _chat_ops()
+        ops['deleted'] = [x for x in ops.get('deleted', []) if x != user_id]
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'deleted': ops['deleted']}
+
+    # ---------------- Scheduled message ----------------
+    @app.get('/api/schedule')
+    def list_schedule() -> dict[str, Any]:
+        items = config.web_settings.get('schedule') or []
+        items = sorted([i for i in items if isinstance(i, dict)], key=lambda i: float(i.get('run_at') or 0))
+        return {'items': items}
+
+    @app.post('/api/schedule')
+    def add_schedule(request: ScheduleRequest) -> dict[str, Any]:
+        if not request.target or not request.message:
+            raise HTTPException(status_code=400, detail='target and message required')
+        if request.run_at <= 0:
+            raise HTTPException(status_code=400, detail='run_at must be a future timestamp')
+        items = list(config.web_settings.get('schedule') or [])
+        entry = {
+            'id': f"sch-{int(time.time()*1000)}",
+            'target': request.target,
+            'message': request.message,
+            'run_at': float(request.run_at),
+            'mode': request.mode,
+            'use_memory': request.use_memory,
+            'status': 'pending',
+            'created_at': time.time(),
+        }
+        items.append(entry)
+        config.web_settings['schedule'] = items
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'item': entry, 'items': items}
+
+    @app.delete('/api/schedule/{schedule_id}')
+    def delete_schedule(schedule_id: str) -> dict[str, Any]:
+        items = [i for i in (config.web_settings.get('schedule') or []) if str(i.get('id')) != schedule_id]
+        config.web_settings['schedule'] = items
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'items': items}
+
+    # ---------------- Broadcast (mass send) ----------------
+    @app.post('/api/broadcast')
+    def broadcast(request: BroadcastRequest) -> dict[str, Any]:
+        if not request.targets:
+            raise HTTPException(status_code=400, detail='targets required')
+        if not request.message:
+            raise HTTPException(status_code=400, detail='message required')
+        results = []
+        for target in request.targets:
+            try:
+                prepared = router.prepare_reply(target, request.message, request.mode)
+                sent = router.send_prepared_reply(prepared['target'], prepared['rewrite'], request.message, request.mode)
+                results.append({'target': target, 'success': True, 'message': sent.get('rewrite', {}).get('message')})
+            except Exception as exc:  # noqa: BLE001
+                results.append({'target': target, 'success': False, 'error': str(exc)})
+        log = list(config.web_settings.get('broadcast_log') or [])
+        entry = {
+            'id': f"bc-{int(time.time()*1000)}",
+            'targets': request.targets,
+            'message': request.message,
+            'mode': request.mode,
+            'results': results,
+            'created_at': time.time(),
+        }
+        log.append(entry)
+        config.web_settings['broadcast_log'] = log[-30:]
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'entry': entry}
+
+    @app.get('/api/broadcast')
+    def list_broadcast() -> dict[str, Any]:
+        items = list(config.web_settings.get('broadcast_log') or [])
+        items = sorted([i for i in items if isinstance(i, dict)], key=lambda i: float(i.get('created_at') or 0), reverse=True)
+        return {'items': items[:30]}
+
+    # ---------------- Plugin center ----------------
+    PLUGIN_CATALOG = [
+        {
+            'id': 'auto_translate',
+            'name': 'Auto translate',
+            'description': 'Translate non-Chinese inbound messages in real time.',
+            'category': 'messaging',
+            'builtin': True,
+        },
+        {
+            'id': 'quick_reply',
+            'name': 'Quick reply',
+            'description': 'AI-drafted reply suggestions for the active conversation.',
+            'category': 'messaging',
+            'builtin': True,
+        },
+        {
+            'id': 'broadcast',
+            'name': 'Mass broadcast',
+            'description': 'Send the same message to many contacts at once.',
+            'category': 'productivity',
+            'builtin': True,
+        },
+        {
+            'id': 'schedule',
+            'name': 'Scheduled send',
+            'description': 'Schedule a message to be sent at a specific time.',
+            'category': 'productivity',
+            'builtin': True,
+        },
+        {
+            'id': 'memory',
+            'name': 'Conversation memory',
+            'description': 'Persist per-contact summaries and language hints.',
+            'category': 'memory',
+            'builtin': True,
+        },
+        {
+            'id': 'voice_tts',
+            'name': 'Voice playback (TTS)',
+            'description': 'Speak messages aloud for hands-free review.',
+            'category': 'productivity',
+            'builtin': True,
+        },
+        {
+            'id': 'media_pack',
+            'name': 'Media pack',
+            'description': 'Image, voice, and document handling for richer replies.',
+            'category': 'media',
+            'builtin': True,
+        },
+        {
+            'id': 'analytics',
+            'name': 'Analytics dashboard',
+            'description': 'Per-conversation reply and response-time stats.',
+            'category': 'analytics',
+            'builtin': True,
+        },
+        {
+            'id': 'auto_tag',
+            'name': 'Auto tag',
+            'description': 'Tag conversations by topic, urgency, or language.',
+            'category': 'messaging',
+            'builtin': True,
+        },
+        {
+            'id': 'followup',
+            'name': 'Follow-up reminders',
+            'description': 'Auto-suggest a follow-up message when a chat goes quiet.',
+            'category': 'productivity',
+            'builtin': True,
+        },
+    ]
+
+    def _plugin_state() -> dict[str, bool]:
+        state = config.web_settings.get('plugins')
+        if not isinstance(state, dict):
+            state = {p['id']: True for p in PLUGIN_CATALOG}
+            config.web_settings['plugins'] = state
+        # backfill any missing plugins
+        for p in PLUGIN_CATALOG:
+            state.setdefault(p['id'], True)
+        return state
+
+    @app.get('/api/plugins')
+    def list_plugins() -> dict[str, Any]:
+        state = _plugin_state()
+        items = [
+            {**p, 'enabled': bool(state.get(p['id'], True))}
+            for p in PLUGIN_CATALOG
+        ]
+        return {'items': items}
+
+    @app.post('/api/plugins/toggle')
+    def toggle_plugin(request: PluginToggleRequest) -> dict[str, Any]:
+        if not any(p['id'] == request.plugin_id for p in PLUGIN_CATALOG):
+            raise HTTPException(status_code=404, detail='Unknown plugin')
+        state = _plugin_state()
+        state[request.plugin_id] = bool(request.enabled)
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'plugin_id': request.plugin_id, 'enabled': state[request.plugin_id]}
+
+    @app.delete('/api/plugins/{plugin_id}')
+    def remove_plugin(plugin_id: str) -> dict[str, Any]:
+        state = _plugin_state()
+        if plugin_id not in state:
+            raise HTTPException(status_code=404, detail='Unknown plugin')
+        state[plugin_id] = False
+        save_json(config.paths.web_settings_file, config.web_settings)
+        return {'success': True, 'plugin_id': plugin_id, 'enabled': False}
+
+    if frontend_dist:
+        app.mount('/assets', StaticFiles(directory=frontend_dist / 'assets', check_dir=True), name='web-assets')
+
+        @app.get('/{full_path:path}', include_in_schema=False)
+        def frontend_shell(full_path: str = ''):
+            return FileResponse(Path(frontend_dist) / 'index.html')
+
     return app
 
 
-app = build_app()
+try:
+    app = build_app()
+except PermissionError:
+    app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')

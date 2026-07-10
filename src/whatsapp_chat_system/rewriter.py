@@ -22,9 +22,17 @@ class Rewriter:
         self.config = config
         self.logger = logger
 
-    def rewrite(self, target: dict, zh_text: str, memory_md: str) -> RewriteResult:
+    def rewrite(
+        self,
+        target: dict,
+        zh_text: str,
+        memory_md: str,
+        *,
+        sidecar: dict | None = None,
+        reply_overrides: dict | None = None,
+    ) -> RewriteResult:
         try:
-            language, message = self._rewrite_with_model(target, zh_text, memory_md)
+            language, message = self._rewrite_with_model(target, zh_text, memory_md, sidecar=sidecar, reply_overrides=reply_overrides)
             return RewriteResult(language=language, message=message, used_fallback=False)
         except Exception as exc:
             self.logger('model_rewrite_failed', target=target.get('id'), error=str(exc), text=zh_text)
@@ -110,9 +118,27 @@ class Rewriter:
             self.logger('auto_translate_failed', error=str(exc), text=text, source_lang=source_lang)
             return text
 
-    def _rewrite_with_model(self, target: dict, zh_text: str, memory_md: str) -> tuple[str, str]:
+    def _rewrite_with_model(
+        self,
+        target: dict,
+        zh_text: str,
+        memory_md: str,
+        *,
+        sidecar: dict | None = None,
+        reply_overrides: dict | None = None,
+    ) -> tuple[str, str]:
         target_name = str(target.get('name') or '')
         target_language = detect_preferred_language(memory_md, target_name)
+        reply_settings = self.config.web_settings.get('reply') or {}
+        effective_model = str((reply_overrides or {}).get('ai_model') or reply_settings.get('ai_model') or self.config.model['model']).strip()
+        custom_prompt = str((reply_overrides or {}).get('custom_system_prompt') or reply_settings.get('custom_system_prompt') or '').strip()
+        default_style = str(reply_settings.get('default_reply_style') or '').strip()
+        custom_style = str((reply_overrides or {}).get('reply_style') or '').strip()
+        structured_style = ', '.join((sidecar or {}).get('response_style') or [])
+        style_hint = '\n'.join(x for x in [default_style, custom_style, structured_style] if x).strip()
+        system_content = '你只返回合法 JSON。像真人聊天，短句，不重复。'
+        if custom_prompt:
+            system_content = f"{system_content}\n{custom_prompt}".strip()
         prompt = (
             '你负责把管理员输入改写成给目标用户的最终聊天消息。\n'
             '要求：\n'
@@ -125,20 +151,25 @@ class Rewriter:
             f'目标用户: {target_name}\n'
             f'目标语言偏好: {target_language}\n'
             f'用户画像摘要:\n{memory_md[:1400]}\n\n'
+            f'自定义回复风格:\n{style_hint or "无"}\n\n'
             f'管理员原文:\n{zh_text}\n'
         )
         payload = {
-            'model': self.config.model['model'],
+            'model': effective_model,
             'messages': [
-                {'role': 'system', 'content': '你只返回合法 JSON。像真人聊天，短句，不重复。'},
+                {'role': 'system', 'content': system_content},
                 {'role': 'user', 'content': prompt},
             ],
             'temperature': 0.2,
             'response_format': {'type': 'json_object'},
         }
+        base_url = (self.config.model.get('base_url') or '').rstrip('/')
+        api_key = str(self.config.model.get('api_key') or '')
+        if not base_url or not api_key:
+            raise ValueError('model configuration missing base_url/api_key')
         response = requests.post(
-            f"{self.config.model['base_url'].rstrip('/')}/chat/completions",
-            headers={'Authorization': f"Bearer {self.config.model['api_key']}", 'Content-Type': 'application/json'},
+            f"{base_url}/chat/completions",
+            headers={'Authorization': f"Bearer {api_key}", 'Content-Type': 'application/json'},
             json=payload,
             timeout=90,
         )

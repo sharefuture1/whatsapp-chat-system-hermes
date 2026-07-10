@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Messaging Operations Console backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/whatsapp-chat-system
+Environment=CHAT_SYSTEM_WEB_DIST=/var/www/whatsapp-chat-system/web/dist
+ExecStart=/var/www/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli --profile /root/.hermes/profiles/whatsapp-support serve --host 127.0.0.1 --port 8792 --web-dist /var/www/whatsapp-chat-system/web/dist
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

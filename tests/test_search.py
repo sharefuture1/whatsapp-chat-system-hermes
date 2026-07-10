@@ -50,6 +50,9 @@ def test_search_skips_hidden_messages(tmp_path):
         messages=[('user', 'secret needle here', 1700000000.0), ('user', 'other text', 1700000001.0)],
     )
     client = authed_client(profile)
+    settings = client.get('/api/settings').json()
+    settings['web_settings']['message_ops']['hide_messages_enabled'] = True
+    client.put('/api/settings', json={'channels': settings['channels'], 'web_settings': settings['web_settings']})
     detail = client.get('/api/conversations/u@lid?page=1&page_size=10').json()
     secret_mid = next(m['message_id'] for m in detail['messages'] if 'secret' in m['content'])
     client.post('/api/messages/hide', json={'message_ids': [secret_mid]})

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from './api'
 import { SettingsProvider, useSettings } from './settings'
 import ChatList from './components/ChatList'
@@ -10,7 +10,7 @@ import MePage from './components/MePage'
 import SettingsPanel from './components/SettingsPanel'
 import TabBar from './components/TabBar'
 
-const TOKEN_KEY = 'chat-system-token'
+const TOKEN_KEY='***'
 const PAGE_SIZE = 30
 const PIN_KEY = 'chat-system-pinned'
 const READ_KEY = 'chat-system-read'
@@ -60,13 +60,16 @@ function AppInner() {
   const [query, setQuery] = useState('')
   const [platformFilter, setPlatformFilter] = useState('all')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsInitialTab, setSettingsInitialTab] = useState('reply')
   const [activeTab, setActiveTab] = useState('chats')
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
   })
-  const [readMap, setReadMap] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(READ_KEY) || '{}') } catch { return {} }
-  })
+  const readMapRef = useRef(null)
+  if (readMapRef.current === null) {
+    try { readMapRef.current = JSON.parse(localStorage.getItem(READ_KEY) || '{}') } catch { readMapRef.current = {} }
+  }
+  const [readTick, setReadTick] = useState(0)
 
   const logout = useCallback(async () => {
     try {
@@ -132,22 +135,23 @@ function AppInner() {
       setConversationsHasMore(Boolean(convRes.has_more))
       setConversationsPage(convRes.page || 1)
       setRefreshTick(prev => prev + 1)
+      // Sync pinned set from server-side authoritative flag
+      setPinned(prev => {
+        const next = items.filter(i => i.pinned).map(i => i.user_id)
+        if (next.length === prev.length && next.every((id, idx) => prev[idx] === id)) return prev
+        localStorage.setItem(PIN_KEY, JSON.stringify(next))
+        return next
+      })
 
       setSelectedId(prev => {
+        if (!prev) {
+          setSelectedName('')
+          return ''
+        }
         const current = items.find(c => c.user_id === prev)
         if (current) {
           setSelectedName(current.user_name)
           return prev
-        }
-        const unreadCandidate = items.find(c => {
-          const ts = Number(c.last_timestamp || 0)
-          const lastRead = readMap[c.user_id] || readTime(c.user_id)
-          return ts > lastRead
-        })
-        const fallback = unreadCandidate || items[0] || null
-        if (fallback) {
-          setSelectedName(fallback.user_name)
-          return fallback.user_id
         }
         setSelectedName('')
         return ''
@@ -155,7 +159,7 @@ function AppInner() {
     } catch (e) {
       if (!silent) showError(e)
     }
-  }, [fetchConversationsPage, readMap])
+  }, [fetchConversationsPage])
 
   const loadMoreConversations = useCallback(async () => {
     if (loadingMore || !conversationsHasMore) return
@@ -226,20 +230,38 @@ function AppInner() {
     }
   }
 
-  const togglePin = useCallback((userId) => {
+  const togglePin = useCallback(async (userId) => {
+    const isPinned = pinned.includes(userId)
     setPinned(prev => {
-      const next = prev.includes(userId) ? prev.filter(p => p !== userId) : [...prev, userId]
-      localStorage.setItem(PIN_KEY, JSON.stringify(next))
-      return next
+      const updated = isPinned ? prev.filter(p => p !== userId) : [userId, ...prev.filter(p => p !== userId)]
+      localStorage.setItem(PIN_KEY, JSON.stringify(updated))
+      return updated
     })
-  }, [])
+    try {
+      await api.post('/chat/pin', { user_id: userId, pinned: !isPinned })
+      refreshWorkspace({ silent: true })
+    } catch {}
+  }, [pinned, refreshWorkspace])
+
+  const deleteChat = useCallback(async (userId) => {
+    setPinned(prev => {
+      const updated = prev.filter(p => p !== userId)
+      localStorage.setItem(PIN_KEY, JSON.stringify(updated))
+      return updated
+    })
+    try {
+      await api.post('/chat/delete', { user_id: userId })
+    } catch {}
+    refreshWorkspace()
+  }, [refreshWorkspace])
 
   const markRead = useCallback((userId, ts) => {
     if (!userId) return
     const cur = readTime(userId)
     if (ts > cur) {
       writeTime(userId, ts)
-      setReadMap(prev => ({ ...prev, [userId]: ts }))
+      readMapRef.current = { ...(readMapRef.current || {}), [userId]: ts }
+      setReadTick(prev => prev + 1)
     }
   }, [])
 
@@ -254,17 +276,19 @@ function AppInner() {
     }
   }, [conversations, markRead])
 
-  const nextConversation = useCallback(() => {
-    if (!conversations.length) return
-    if (!selectedId) {
-      const first = conversations[0]
-      if (first) selectConversation(first.user_id)
-      return
+  const unread = useMemo(() => {
+    const out = {}
+    const readMap = readMapRef.current || {}
+    for (const c of conversations) {
+      const ts = Number(c.last_timestamp || 0)
+      const lastRead = readMap[c.user_id] || readTime(c.user_id)
+      if (ts > lastRead) out[c.user_id] = 1
     }
-    const idx = conversations.findIndex(c => c.user_id === selectedId)
-    const next = conversations[(idx + 1 + conversations.length) % conversations.length]
-    if (next) selectConversation(next.user_id)
-  }, [conversations, selectedId, selectConversation])
+    return out
+  }, [conversations, readTick])
+
+  const unreadChats = useMemo(() => Object.values(unread).reduce((a, b) => a + b, 0), [unread])
+  const pinnedSet = useMemo(() => new Set(pinned), [pinned])
 
   useEffect(() => {
     if (!selectedId) return
@@ -282,45 +306,86 @@ function AppInner() {
 
   const filteredConversations = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const contactProfiles = settings.web_settings?.contact_profiles || {}
     return conversations.filter(item => {
       if (platformFilter !== 'all' && item.platform !== platformFilter) return false
+      const remark = String(contactProfiles[item.user_id]?.remark || '').toLowerCase()
       if (!q) return true
       return item.user_name?.toLowerCase().includes(q) ||
         item.user_id?.toLowerCase().includes(q) ||
-        item.last_message?.toLowerCase().includes(q)
+        item.last_message?.toLowerCase().includes(q) ||
+        remark.includes(q)
     })
-  }, [conversations, query, platformFilter])
-
-  const unread = useMemo(() => {
-    const out = {}
-    for (const c of conversations) {
-      const ts = Number(c.last_timestamp || 0)
-      const lastRead = readMap[c.user_id] || readTime(c.user_id)
-      if (ts > lastRead) out[c.user_id] = 1
-    }
-    return out
-  }, [conversations, readMap])
-
-  const unreadChats = useMemo(() => Object.values(unread).reduce((a, b) => a + b, 0), [unread])
-  const pinnedItems = useMemo(() => {
-    const map = new Map(conversations.map(c => [c.user_id, c]))
-    return pinned.map(id => map.get(id)).filter(Boolean)
-  }, [pinned, conversations])
+  }, [conversations, query, platformFilter, settings.web_settings?.contact_profiles])
 
   if (!sessionToken) {
     return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
   }
 
   const autoTranslate = !!settings.web_settings?.message_ops?.auto_translate
+  const selectedConversation = useMemo(() => conversations.find(c => c.user_id === selectedId) || null, [conversations, selectedId])
+  const selectedContactProfile = useMemo(() => {
+    if (!selectedConversation?.user_id) return null
+    return (settings.web_settings?.contact_profiles || {})[selectedConversation.user_id] || null
+  }, [settings.web_settings?.contact_profiles, selectedConversation])
+  const selectedUserOverride = useMemo(() => {
+    if (!selectedConversation?.user_id) return null
+    return (settings.web_settings?.reply?.user_overrides || {})[selectedConversation.user_id] || null
+  }, [settings.web_settings?.reply?.user_overrides, selectedConversation])
+
+  const quickSaveContactConfig = async (userId, patchFields) => {
+    if (!userId) return
+    setSaving(true)
+    try {
+      const currentOverrides = settings.web_settings?.reply?.user_overrides || {}
+      const currentProfiles = settings.web_settings?.contact_profiles || {}
+      const existing = currentOverrides[userId] || {}
+      const existingProfile = currentProfiles[userId] || {}
+      const nextEntry = {
+        ai_model: String(patchFields.ai_model ?? existing.ai_model ?? '').trim(),
+        custom_system_prompt: String(patchFields.custom_system_prompt ?? existing.custom_system_prompt ?? '').trim(),
+        reply_style: String(patchFields.reply_style ?? existing.reply_style ?? '').trim(),
+      }
+      const nextProfile = {
+        remark: String(patchFields.remark ?? existingProfile.remark ?? '').trim(),
+        notes: String(patchFields.notes ?? existingProfile.notes ?? '').trim(),
+      }
+      await api.put('/settings', {
+        channels: settings.channels || [],
+        web_settings: {
+          ...settings.web_settings,
+          contact_profiles: {
+            ...currentProfiles,
+            [userId]: nextProfile,
+          },
+          reply: {
+            ...(settings.web_settings?.reply || {}),
+            user_overrides: {
+              ...currentOverrides,
+              [userId]: nextEntry,
+            },
+          },
+        },
+      })
+      await refreshSettings()
+      setBanner(t('saved'))
+    } catch (e) {
+      showError(e)
+      throw e
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="wx-shell">
       <div className="wx-shell-content">
         {activeTab === 'chats' && (
-          <div className="wx-chat-layout">
+          <div className={`wx-chat-layout ${selectedId ? 'mobile-chat-open' : 'mobile-list-open'}`}>
             <ChatList
               conversations={filteredConversations}
               selectedId={selectedId}
+              selectedProfileMap={settings.web_settings?.contact_profiles || {}}
               onSelect={selectConversation}
               query={query}
               onQueryChange={setQuery}
@@ -328,36 +393,34 @@ function AppInner() {
               hasMore={conversationsHasMore}
               onLoadMore={loadMoreConversations}
               loadingMore={loadingMore}
-              pinned={pinnedItems}
+              pinned={pinnedSet}
               onTogglePin={togglePin}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onChangeLanguage={settingsApi.setLanguage}
-              onToggleTheme={settingsApi.toggleTheme}
-              language={settingsApi.language}
-              languages={settingsApi.languages}
-              theme={settingsApi.theme}
-              onLogout={logout}
+              onDeleteChat={deleteChat}
               unread={unread}
               autoTranslate={autoTranslate}
               platformFilter={platformFilter}
               platformOptions={platformOptions}
               onPlatformFilterChange={setPlatformFilter}
+              onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
             />
             <ChatPane
               userId={selectedId}
               userName={selectedName}
-              onBack={() => {}}
+              contactProfile={selectedContactProfile}
+              userOverride={selectedUserOverride}
+              defaultReplyStyle={settings.web_settings?.reply?.default_reply_style || ''}
+              defaultAiModel={settings.web_settings?.reply?.ai_model || 'gpt-5.3-codex-spark'}
+              onSaveContactConfig={quickSaveContactConfig}
+              onBack={() => { setSelectedId(''); setSelectedName('') }}
               onReply={sendReply}
               onHideMessage={hideMessage}
               sending={sending}
               sendingMeta={sendingMeta}
               uiSettings={settings.web_settings}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onTogglePin={togglePin}
-              pinned={pinned}
+              onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
+              onOpenContactConfig={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
               active
               health={health}
-              onNextConversation={nextConversation}
               refreshTick={refreshTick}
             />
           </div>
@@ -368,16 +431,24 @@ function AppInner() {
         )}
 
         {activeTab === 'discover' && (
-          <DiscoverPage dashboard={dashboard} channels={settings.channels || []} />
+          <DiscoverPage dashboard={dashboard} channels={settings.channels || []} conversations={conversations} />
         )}
 
         {activeTab === 'me' && (
           <MePage
             health={health}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
             onLogout={logout}
             profilePath={settings.profile}
             autoTranslate={autoTranslate}
+            profileSummary={{
+              userId: selectedConversation?.user_id || '',
+              userName: selectedContactProfile?.remark || selectedConversation?.user_name || '',
+              aiModel: selectedUserOverride?.ai_model || settings.web_settings?.reply?.ai_model || 'gpt-5.3-codex-spark',
+              replyStyle: selectedUserOverride?.reply_style || settings.web_settings?.reply?.default_reply_style || '',
+              prompt: selectedUserOverride?.custom_system_prompt || '',
+              notes: selectedContactProfile?.notes || '',
+            }}
           />
         )}
       </div>
@@ -386,6 +457,8 @@ function AppInner() {
 
       <SettingsPanel
         open={settingsOpen}
+        initialTab={settingsInitialTab}
+        selectedConversation={selectedConversation}
         onClose={() => setSettingsOpen(false)}
         settings={settings.web_settings}
         channels={settings.channels || []}

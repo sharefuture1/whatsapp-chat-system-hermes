@@ -13,7 +13,7 @@ from .web_api import build_app
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='whatsapp-chat-system')
-    parser.add_argument('--profile', default='/root/.hermes/profiles/whatsapp-support')
+    parser.add_argument('--profile', default=str(AppConfig.from_profile().paths.profile))
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('router', help='Process admin outbound routing commands')
     sub.add_parser('forward', help='Forward user/assistant chat summaries to the admin')
@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser('serve', help='Run FastAPI backend for web console')
     serve.add_argument('--host', default='0.0.0.0')
     serve.add_argument('--port', type=int, default=8787)
+    serve.add_argument('--web-dist', default=None, help='Optional built frontend directory to mount at /')
     return parser
 
 
@@ -35,7 +36,7 @@ def main() -> int:
     if args.command == 'refresh-memory':
         return MemoryRefresher(config).run()
     if args.command == 'serve':
-        uvicorn.run(build_app(args.profile), host=args.host, port=args.port)
+        uvicorn.run(build_app(args.profile, web_dist=args.web_dist), host=args.host, port=args.port)
         return 0
     parser.error(f'unknown command: {args.command}')
     return 2

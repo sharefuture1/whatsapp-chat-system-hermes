@@ -21,3 +21,14 @@ export function fmtRelative(ts) {
   const days = Math.floor(hours / 24)
   return `${days}d`
 }
+
+
+export function fmtClock(ts) {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  try {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  } catch {
+    return d.toISOString().slice(11, 16)
+  }
+}

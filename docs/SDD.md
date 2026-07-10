@@ -191,7 +191,7 @@ WhatsApp 用户 ──► Hermes 网关 ──► state.db ──┐
 - 状态：IP 维度的失败计数 + 429。
 
 **S-6 [P1] 敏感默认值入库/入文档** ✅ 已完成
-- 状态：默认密码可通过 `CHAT_SYSTEM_BOOTSTRAP_PASSWORD` 覆盖，避免写死到文档；README 只在 `Bootstrap password used in the current deployment` 段提示立即改密。
+- 状态：默认密码可通过 `CHAT_SYSTEM_BOOTSTRAP_PASSWORD` 覆盖；仓库文档不再记录当前部署密码，只保留运行期 secrets policy 与轮换要求。
 
 **S-7 [P2] token 存 localStorage（XSS 可窃取）**
 - 定位：客户端将 token 写入 `localStorage`。

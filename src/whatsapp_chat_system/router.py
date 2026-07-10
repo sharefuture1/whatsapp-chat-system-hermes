@@ -8,6 +8,7 @@ from .messaging import HermesMessenger, load_targets, refresh_aliases, resolve_t
 from .parsing import BARE_IGNORE, INFO_COMMANDS, parse_command, parse_incomplete
 from .rewriter import RewriteResult, Rewriter
 from .storage import EventLogger, StateDB
+from .structured_profile import read_sidecar
 
 
 @dataclass(slots=True)
@@ -84,12 +85,17 @@ class AdminRouter:
         target = resolve_target(target_text, targets, aliases)
         if not target:
             raise ValueError('target_not_found')
-        memory_md = self.load_user_memory(self.config, str(target.get('id') or ''))
-        rewrite = self._rewrite_for_mode(target, message, memory_md, mode)
+        target_id = str(target.get('id') or '')
+        memory_md = self.load_user_memory(self.config, target_id)
+        sidecar = read_sidecar(target_id, self.config.paths.memory_dir) or {}
+        reply_overrides = (((self.config.web_settings.get('reply') or {}).get('user_overrides') or {}).get(target_id) or {})
+        rewrite = self._rewrite_for_mode(target, message, memory_md, mode, sidecar=sidecar, reply_overrides=reply_overrides)
         return {
             'target': target,
             'rewrite': rewrite,
             'memory_markdown': memory_md,
+            'profile_sidecar': sidecar,
+            'reply_overrides': reply_overrides,
         }
 
     def send_prepared_reply(self, target: dict[str, Any], rewrite: RewriteResult, source_text: str, mode: str) -> dict[str, Any]:
@@ -112,9 +118,24 @@ class AdminRouter:
             'message_ids': send_result.payload.get('messageIds') or send_result.payload.get('message_ids') or [],
         }
 
-    def _rewrite_for_mode(self, target: dict[str, Any], message: str, memory_md: str, mode: str) -> RewriteResult:
+    def _rewrite_for_mode(
+        self,
+        target: dict[str, Any],
+        message: str,
+        memory_md: str,
+        mode: str,
+        *,
+        sidecar: dict[str, Any] | None = None,
+        reply_overrides: dict[str, Any] | None = None,
+    ) -> RewriteResult:
         if mode == 'smart':
-            return self.rewriter.rewrite(target, self._truncate(message, int(self.config.web_settings['reply']['smart_max_length'] * 2)), memory_md)
+            return self.rewriter.rewrite(
+                target,
+                self._truncate(message, int(self.config.web_settings['reply']['smart_max_length'] * 2)),
+                memory_md,
+                sidecar=sidecar,
+                reply_overrides=reply_overrides,
+            )
         if mode == 'translate':
             return self.rewriter.translate_only(target, self._truncate(message, int(self.config.web_settings['reply']['translate_max_length'] * 2)), memory_md)
         return RewriteResult(language='direct', message=self._truncate(message, 500), used_fallback=False)

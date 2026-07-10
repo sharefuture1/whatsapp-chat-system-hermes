@@ -112,6 +112,10 @@ def default_web_settings() -> dict[str, Any]:
             "allow_fallback": True,
             "preview_debounce_ms": 180,
             "prefer_detected_language": True,
+            "ai_model": "gpt-5.3-codex-spark",
+            "custom_system_prompt": "",
+            "default_reply_style": "",
+            "user_overrides": {},
         },
         "ui": {
             "auto_refresh_seconds": 4,
@@ -130,7 +134,7 @@ def default_web_settings() -> dict[str, Any]:
                 "label": "WhatsApp Support",
                 "platform": "whatsapp",
                 "profile": "whatsapp-support",
-                "profile_path": "/root/.hermes/profiles/whatsapp-support",
+                "profile_path": str(DEFAULT_PROFILE),
                 "enabled": True,
                 "primary": True,
             }

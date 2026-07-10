@@ -18,6 +18,7 @@ This project now acts as a conversation-first control surface for Hermes profile
 - conversation memory generation
 - configurable admin delivery channels
 - Vercel-ready frontend that can call a remote backend API
+- self-hosted production mode with built SPA mounted by FastAPI or served by nginx
 
 ## Current UI model
 
@@ -34,13 +35,14 @@ Design principles:
 - newest messages should stay anchored at the bottom
 - mobile and desktop should both be first-class experiences
 
-## Current password
+## Runtime secrets policy
 
-Current deployment password:
-- `test?99`
-
-If you change it in the UI, this README may become stale. The current runtime value always lives in:
+Do not store live passwords or API secrets in this repository.
+Current runtime auth state always lives in the target Hermes profile, typically:
 - `/root/.hermes/profiles/whatsapp-support/web-settings.json`
+
+If bootstrapping a fresh deployment, prefer runtime env override:
+- `CHAT_SYSTEM_BOOTSTRAP_PASSWORD=...`
 
 ## Important limitations
 
@@ -57,7 +59,7 @@ It does NOT support:
 ```text
 src/whatsapp_chat_system/
   cli.py                    CLI entrypoints
-  web_api.py                FastAPI API
+  web_api.py                FastAPI API (+ optional built SPA mount)
   config.py                 profile-aware config + merged defaults + auth settings
   router.py                 admin routing logic
   rewriter.py               smart / translate / auto-translation logic
@@ -87,6 +89,11 @@ web/src/
     MePage.jsx
     SettingsPanel.jsx
     TabBar.jsx
+
+deploy/
+  apply-production.sh       build + install + restart helper
+  nginx/                    sample reverse-proxy config
+  systemd/                  production unit file
 
 tests/
   conftest.py               isolated profile fixtures
@@ -119,6 +126,37 @@ npm run dev -- --host 127.0.0.1 --port 38998
 
 Open:
 - `http://127.0.0.1:38998/`
+
+## Production deployment
+
+Frontend must be built before production startup:
+
+```bash
+cd /var/www/whatsapp-chat-system
+npm --prefix web ci
+npm --prefix web run build
+```
+
+Then run either:
+
+1. FastAPI-mounted SPA mode
+```bash
+CHAT_SYSTEM_WEB_DIST=/var/www/whatsapp-chat-system/web/dist \
+/var/www/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli \
+  --profile /root/.hermes/profiles/whatsapp-support \
+  serve --host 127.0.0.1 --port 8792 --web-dist /var/www/whatsapp-chat-system/web/dist
+```
+
+2. systemd-managed mode
+```bash
+cd /var/www/whatsapp-chat-system
+bash deploy/apply-production.sh
+```
+
+This production path removes dependence on:
+- `npm run dev`
+- `vite preview`
+- ad-hoc Python static servers
 
 ## Authentication model
 
@@ -217,21 +255,31 @@ cd /root/whatsapp-chat-system
 Frontend build verification:
 
 ```bash
-cd /root/whatsapp-chat-system/web
-npm run build
+cd /root/whatsapp-chat-system
+npm --prefix web ci
+npm --prefix web run build
+```
+
+Runtime verification:
+
+```bash
+curl -fsS http://127.0.0.1:8792/api/health
+curl -I http://127.0.0.1:8792/
+curl -fsS http://127.0.0.1:8792/chats/123 | head
 ```
 
 ## Security notes
 
 Before wider use:
-- rotate any copied profile-local API keys
-- change the deployment password immediately if shared
+- rotate profile-local API keys separately from repo changes
+- keep login/bootstrap secrets out of git
 - keep login throttling and session TTL enabled
 - consider IP allowlisting / tunnel access policy
+- keep backend bound to localhost behind reverse proxy / tunnel
 
 ## Status
 
-Validated locally:
+Validated in mirror workspace:
 - backend tests passing
 - frontend production build passing
 - secure login working
@@ -240,3 +288,4 @@ Validated locally:
 - automatic translation cache
 - WeChat-style shell with 4 tabs
 - Vercel-ready frontend API linkage
+- built frontend can now be served from FastAPI root in production mode
