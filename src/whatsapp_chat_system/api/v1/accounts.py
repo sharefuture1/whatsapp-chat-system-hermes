@@ -26,6 +26,7 @@ class BridgeProtocol(Protocol):
     def logout(self, account_id: str) -> dict[str, Any]: ...
     def stop(self, account_id: str) -> dict[str, Any]: ...
     def delete(self, account_id: str, *, delete_session: bool = False) -> dict[str, Any]: ...
+    def send(self, account_id: str, *, chat_id: str, text: str) -> dict[str, Any]: ...
 
 
 class AccountCreateRequest(BaseModel):
@@ -46,6 +47,7 @@ class AccountUpdateRequest(BaseModel):
 class AccountDeleteRequest(BaseModel):
     confirm_name: str
     delete_session: bool = False
+
 
 
 def create_accounts_router(

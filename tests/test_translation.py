@@ -61,6 +61,26 @@ def test_auto_translate_off_short_circuits(tmp_path):
     assert detail['messages'][0]['translated'] is None
 
 
+def test_translate_endpoint_accepts_v2_string_message_id(monkeypatch, tmp_path):
+    from whatsapp_chat_system.rewriter import RewriteResult
+    from whatsapp_chat_system import web_api
+
+    class TranslationWorker:
+        def translate_to_zh_result(self, text, source_lang):
+            return RewriteResult(language='Chinese', message='你好', used_fallback=False, error=None)
+
+    monkeypatch.setattr(web_api, '_translation_worker', lambda config: TranslationWorker())
+    profile = create_profile(tmp_path / 'p-v2-translation')
+    client = authed_client(profile)
+    response = client.post('/api/messages/uuid-message-1/translate', json={
+        'user_id': 'account:person@lid',
+        'content': 'ສະບາຍດີ',
+    })
+    assert response.status_code == 200
+    assert response.json()['message_id'] == 'uuid-message-1'
+    assert response.json()['translated'] == '你好'
+
+
 def test_translate_endpoint_provider_failure_is_structured(monkeypatch, tmp_path):
     from whatsapp_chat_system.rewriter import RewriteResult
     from whatsapp_chat_system import web_api

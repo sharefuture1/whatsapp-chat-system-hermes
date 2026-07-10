@@ -1,5 +1,21 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：修复 V2 消息刷新/发送、AI 翻译并新增“我→全局 AI”
+
+- 根因 1：`ChatPane` 对 V2 会话直接跳过 `refreshTick`，因此独立库有新消息时当前聊天窗口不刷新。
+- 根因 2：V2 会话发送仍误调用 Legacy `/api/reply`，没有锁定当前 V2 `account_id/conversation_id`。
+- 根因 3：翻译路由只接受整数 message ID，V2 UUID 消息被 FastAPI 参数校验拒绝；前端又跳过 `Unknown` 语言，自动翻译不会执行。
+- 新增 V2 `POST /api/v1/conversations/{conversation_id}/reply`：按会话账号调用 Bridge，真实成功后写入独立消息表并返回 local/platform ID。
+- V2 当前聊天在轮询 tick 时重新读取独立会话消息；发送与读取统一使用同一数据面。
+- 翻译缓存与 API 支持整数/字符串 message ID；Unknown 外语文本也会进入翻译尝试，失败保持可重试而不是伪装成功。
+- “我”页面新增全局 AI 入口，集中配置 Provider、模型、密钥、全局提示词、全局回复风格和自动翻译；保存后热生效。
+- 聊天容器补齐最小宽度、独立滚动、安全区与稳定 scrollbar，避免布局挤压和输入区遮挡。
+- TDD 新增 V2 账号绑定发送落库测试、UUID 翻译测试；Python `122 passed`、Web `12 passed`、Bridge `63 passed`，Vite build 通过。
+- 已部署资源：`index-DZE5MIrh.js` / `index-elpJaKRv.css`；FastAPI health、Bridge live/ready 均为 200。
+- 运行边界：当前 V2 业务账号状态为 offline；事件端点对已知账号正常接收，未知/历史 acceptance 账号事件返回业务 `account_not_found`，不能宣称真实在线消息已端到端验收。
+
+---
+
 ## 2026-07-10：多平台多账号聚合收件箱、通讯录和微信式布局
 
 - 修正产品模型：聊天 `ALL` 现在聚合 Legacy 和 V2 的全部会话，平台层使用 `ALL/WA/...`，平台下使用 `全部账号/WA1/WA2/WA3` 二级筛选。

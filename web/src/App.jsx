@@ -240,10 +240,12 @@ function AppInner() {
     setApiSettings(fresh)
   }
 
-  const sendReply = async (target, message, mode) => {
+  const sendReply = async (conversation, message, mode) => {
     setSending(true)
     try {
-      const data = await api.post('/reply', { target, message, mode, preview_only: false })
+      const data = conversation?.source === 'standalone' && conversation?.conversation_id
+        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message })
+        : await api.post('/reply', { target: conversation?.user_id, message, mode, preview_only: false })
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
         error.code = data?.code || 'delivery_failed'
@@ -485,7 +487,7 @@ function AppInner() {
               defaultAiModel={settings.web_settings?.reply?.ai_model || settings.model?.default || ''}
               onSaveContactConfig={quickSaveContactConfig}
               onBack={() => { setSelectedId(''); setSelectedName('') }}
-              onReply={sendReply}
+              onReply={(target, message, mode) => sendReply(selectedConversation, message, mode)}
               onHideMessage={hideMessage}
               sending={sending}
               sendingMeta={sendingMeta}
@@ -518,11 +520,13 @@ function AppInner() {
         {activeTab === 'me' && !accountCenterOpen && (
           <MePage
             health={health}
-            onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
+            onOpenSettings={() => { setSettingsInitialTab('ui'); setSettingsOpen(true) }}
+            onOpenGlobalAi={() => { setSettingsInitialTab('ai'); setSettingsOpen(true) }}
             onOpenAccounts={() => setAccountCenterOpen(true)}
             onLogout={logout}
             autoTranslate={autoTranslate}
             accountSummary={accountsController.summary}
+            aiSummary={{ configured: !!apiSettings.api_key_configured, model: apiSettings.default_model || settings.web_settings?.reply?.ai_model || '' }}
           />
         )}
 

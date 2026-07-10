@@ -47,6 +47,10 @@ class FakeBridge:
         self.calls.append(('delete', account_id, delete_session))
         return {'success': True}
 
+    def send(self, account_id, *, chat_id, text):
+        self.calls.append(('send', account_id, chat_id, text))
+        return {'success': True, 'message_id': 'wa-real-1'}
+
 
 @pytest.fixture
 def api(tmp_path, monkeypatch):
@@ -178,6 +182,38 @@ def test_bridge_unavailable_returns_structured_retryable_error(api):
     assert response.status_code == 503
     assert response.json()['error']['code'] == 'bridge_unavailable'
     assert response.json()['error']['retryable'] is True
+
+
+def test_v2_reply_uses_own_account_and_persists_outbound_message(api):
+    from whatsapp_chat_system.db.models import Contact, Conversation, Message
+
+    client, bridge, factory = api
+    account = create_account(client, 'WA2')
+    with factory() as db:
+        contact = Contact(account_id=account['id'], remote_jid='person@lid', display_name='Person')
+        db.add(contact)
+        db.flush()
+        conversation = Conversation(account_id=account['id'], contact_id=contact.id, remote_jid='person@lid')
+        db.add(conversation)
+        db.commit()
+        conversation_id = conversation.id
+
+    response = client.post(f'/api/v1/conversations/{conversation_id}/reply', json={'message': 'hello'})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['success'] is True
+    assert body['message_id'] == 'wa-real-1'
+    assert body['local_message_id']
+    assert ('send', account['id'], 'person@lid', 'hello') in bridge.calls
+    with factory() as db:
+        row = db.get(Message, body['local_message_id'])
+        assert row.account_id == account['id']
+        assert row.conversation_id == conversation_id
+        assert row.direction == 'outbound'
+        assert row.status == 'sent'
+        assert row.wa_message_id == 'wa-real-1'
+        assert row.content == 'hello'
 
 
 def test_create_bridge_failure_compensates_database_row(api):

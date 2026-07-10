@@ -852,7 +852,7 @@ def build_app(
         else:
             resolved_account_bridge = DisabledBridgeClient()
     app.include_router(create_accounts_router(resolved_account_factory, resolved_account_bridge))
-    app.include_router(create_conversations_router(resolved_account_factory))
+    app.include_router(create_conversations_router(resolved_account_factory, resolved_account_bridge))
     resolved_event_token = (
         internal_event_token
         if internal_event_token is not None
@@ -1256,15 +1256,16 @@ def build_app(
         return {'success': True, 'channels': payload}
 
     @app.post('/api/messages/{message_id}/translate')
-    def translate_message(message_id: int, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def translate_message(message_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         body = body or {}
         user_id = str(body.get('user_id') or '')
         text = str(body.get('content') or '')
         if not user_id or not text:
             raise HTTPException(status_code=400, detail='user_id and content required')
+        public_message_id: int | str = int(message_id) if message_id.isdigit() else message_id
         lang = _language_hint_for(text)
         if lang in ('Chinese', 'Unknown'):
-            return {'message_id': message_id, 'lang': lang, 'translated': None}
+            return {'message_id': public_message_id, 'lang': lang, 'translated': None}
         worker = _translation_worker(config)
         translated = worker.translate_to_zh_result(text, lang)
         if translated.message and translated.message != text:
@@ -1274,7 +1275,7 @@ def build_app(
                 'zh': translated.message,
             })
         payload = {
-            'message_id': message_id,
+            'message_id': public_message_id,
             'lang': lang,
             'translated': translated.message or None,
         }

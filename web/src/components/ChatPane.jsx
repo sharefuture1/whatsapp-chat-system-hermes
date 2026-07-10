@@ -223,9 +223,15 @@ export default function ChatPane({
   }, [userId, conversationId, standalone, pageSize, uiSettings])
 
   useEffect(() => {
-    if (standalone) return
     if (!userId || !refreshTick || fetchedFor.current !== userId) return
     const targetUserId = userId
+    if (standalone) {
+      const wasAtBottom = lastBottomRef.current
+      fetchPage(targetUserId, 1, false).then(res => {
+        if (res && wasAtBottom) lastBottomRef.current = true
+      }).catch(() => {})
+      return
+    }
     const wasAtBottom = lastBottomRef.current
     const drain = async () => {
       let cursor = deltaCursorRef.current || maxMessageId(messages)
@@ -290,7 +296,7 @@ export default function ChatPane({
   }
 
   const translateOne = async (msg) => {
-    if (!msg?.message_id || msg.translated || msg.lang === 'Chinese' || msg.lang === 'Unknown') return
+    if (!msg?.message_id || msg.translated || msg.lang === 'Chinese') return
     try {
       const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
       if (res?.success === false || !res?.translated) return
@@ -300,7 +306,7 @@ export default function ChatPane({
 
   useEffect(() => {
     if (!uiSettings?.message_ops?.auto_translate) return
-    const pending = messages.filter(m => !m.hidden && !m.translated && m.lang && m.lang !== 'Chinese' && m.lang !== 'Unknown')
+    const pending = messages.filter(m => !m.hidden && !m.translated && m.content && m.lang !== 'Chinese')
     if (pending.length === 0) return
     let cancelled = false
     ;(async () => {

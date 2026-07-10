@@ -1,6 +1,6 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 12:11 UTC
+> 最后更新：2026-07-10 12:45 UTC
 
 ## 当前结论
 
@@ -15,14 +15,16 @@
 - 通讯录已接入独立 `/api/v1/contacts` 并与 Legacy 会话联系人聚合，支持平台/账号筛选、账号分组、搜索和会话跳转。
 - 独立库当前实测：`1` 个 V2 业务账号、`2` 个联系人、`2` 个会话、`8` 条消息；Legacy 当前 API 返回 `3` 条会话，统一 ALL 预期显示 `5` 条。
 - 真实扫码、第二个 V2 账号隔离、历史迁移、Outbox Worker 与 Hermes shutdown 尚未全部验收。
-- Legacy 网页直发同步缺口已修复：只有 Bridge 明确成功后才将 outbound assistant 消息和 WhatsApp ID 写回 `state.db`；页面刷新/增量不会再丢失成功气泡。
+- V2 当前聊天已按轮询刷新独立消息 API；V2 发送改用当前会话所属账号 Bridge，成功后写独立消息表，不再误走 Legacy `/api/reply`。
+- 翻译 API/缓存支持 Legacy 整数和 V2 UUID message ID；“我 → 全局 AI”可配置模型、密钥、提示词、回复风格和自动翻译。
+- 当前 V2 业务账号真实状态为 `offline`，所以代码链与运行健康已验证，但新的真实入站/出站/翻译端到端验收仍需账号重新上线。
 
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-zmRcX5WP.js` / `index-CpWFmy3-.css`，本机 FastAPI 资源 200；统一收件箱和多账号通讯录已部署。
+- 前端：`index-DZE5MIrh.js` / `index-elpJaKRv.css`，本机 FastAPI 资源 200；聊天同步修复与全局 AI 设置已部署。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
-- Bridge V2：`127.0.0.1:3100` 当前运行，内部 token 与 FastAPI 配置一致；真实账号状态为 online。
+- Bridge V2：`127.0.0.1:3100` 当前运行，live/ready 200，内部 token 与 FastAPI 配置一致；当前登记业务账号状态为 offline。
 - 独立会话 API：`/api/v1/conversations` 返回当前 V2 独立库数据，实测全部账号视图 2 条会话。
 - 生产仍传入 `/root/.hermes/profiles/whatsapp-support`，属于迁移期兼容。
 
@@ -53,11 +55,11 @@
 ## 验证状态
 
 ```text
-pytest -q                          120 passed, 1 warning
+pytest -q                          122 passed, 1 warning
 bridge npm test                   63 passed
 bridge npm run lint               PASS
 bridge npm audit --omit=dev       0 vulnerabilities
-web node --test tests/*.test.js   9 passed
+web node --test tests/*.test.js   12 passed
 web npm run build                 PASS
 Alembic upgrade→downgrade→upgrade PASS
 git diff --check                  PASS

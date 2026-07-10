@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,10 @@ from whatsapp_chat_system.db.models import Contact, Conversation, Message, Whats
 
 
 PLATFORM = 'whatsapp'
+
+
+class ConversationReplyRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=10000)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -34,7 +39,9 @@ def _account_payload(account: WhatsAppAccount) -> dict[str, Any]:
     }
 
 
-def create_conversations_router(session_factory: Callable[[], Session]) -> APIRouter:
+def create_conversations_router(
+    session_factory: Callable[[], Session], bridge: Any | None = None
+) -> APIRouter:
     router = APIRouter(prefix='/api/v1', tags=['conversations'])
 
     def get_session() -> Generator[Session, None, None]:
@@ -228,6 +235,7 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
                 'content': message.content or '',
                 'message_type': message.message_type,
                 'status': message.status,
+                'lang': 'Unknown',
                 'timestamp': _timestamp(message.occurred_at or message.created_at),
                 'occurred_at': _iso(message.occurred_at),
                 'created_at': _iso(message.created_at),
@@ -241,6 +249,48 @@ def create_conversations_router(session_factory: Callable[[], Session]) -> APIRo
             'messages': messages,
             'total_messages': len(messages),
             'has_more': False,
+        }
+
+    @router.post('/conversations/{conversation_id}/reply')
+    def reply_to_conversation(
+        conversation_id: str,
+        payload: ConversationReplyRequest,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        if bridge is None:
+            raise HTTPException(status_code=503, detail='WhatsApp bridge unavailable')
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail='Conversation not found')
+        sent = bridge.send(
+            conversation.account_id,
+            chat_id=conversation.remote_jid,
+            text=payload.message,
+        )
+        now = datetime.utcnow()
+        message = Message(
+            account_id=conversation.account_id,
+            conversation_id=conversation.id,
+            contact_id=conversation.contact_id,
+            wa_message_id=sent['message_id'],
+            direction='outbound',
+            sender_jid=None,
+            message_type='text',
+            content=payload.message,
+            status='sent',
+            occurred_at=now,
+            sent_at=now,
+        )
+        session.add(message)
+        conversation.last_message_preview = payload.message
+        conversation.last_message_at = now
+        session.commit()
+        return {
+            'success': True,
+            'local_message_id': message.id,
+            'message_id': message.wa_message_id,
+            'account_id': conversation.account_id,
+            'conversation_id': conversation.id,
         }
 
     return router

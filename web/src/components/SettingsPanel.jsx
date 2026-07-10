@@ -92,6 +92,15 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
         default_model: aiModel || null,
         api_key: aiApiKey || null,
       })
+      await onSave({
+        channels: draftChannels,
+        web_settings: {
+          reply: { ...reply, user_overrides: Object.fromEntries(userOverrides.filter(item => String(item.user_id || '').trim()).map(item => [String(item.user_id).trim(), { ai_model: String(item.ai_model || '').trim(), custom_system_prompt: String(item.custom_system_prompt || '').trim(), reply_style: String(item.reply_style || '').trim() }])) },
+          ui,
+          message_ops: messageOps,
+        },
+        password: null,
+      })
       setAiSaved(true)
       setAiApiKey('')
     } finally {
@@ -206,8 +215,12 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
             <div className="settings-section">
               <h3>AI {t('settings') || '设置'}</h3>
               <p className="subtle" style={{ marginBottom: 16 }}>
-                配置问鼎 AI（Wending AI）模型与密钥。修改后立即生效，无需重启服务。
+                配置全局问鼎 AI、默认模型和自动翻译。联系人与账号可在此基础上覆盖。
               </p>
+              <div className="wx-ai-status-strip">
+                <span className={`pill ${apiSettings.api_key_configured ? 'ok' : 'muted'}`}>{apiSettings.api_key_configured ? 'Provider 已连接' : 'Provider 未配置'}</span>
+                <span>{apiSettings.default_model || 'gpt-5.3-codex-spark'}</span>
+              </div>
               <div className="settings-grid">
                 <label className="full-span">
                   <span>API 密钥</span>
@@ -245,6 +258,9 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
                     placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
                   />
                 </label>
+                <label className="checkbox full-span"><input type="checkbox" checked={!!messageOps.auto_translate} onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))} />全局自动翻译外语消息为中文</label>
+                <label className="full-span"><span>{t('settingCustomSystemPrompt') || '全局系统提示词'}</span><textarea rows="4" value={reply.custom_system_prompt || ''} onChange={e => setReply(prev => ({ ...prev, custom_system_prompt: e.target.value }))} placeholder="所有账号和联系人默认继承，可在联系人设置中覆盖" /></label>
+                <label className="full-span"><span>{t('settingDefaultReplyStyle') || '全局回复风格'}</span><textarea rows="3" value={reply.default_reply_style || ''} onChange={e => setReply(prev => ({ ...prev, default_reply_style: e.target.value }))} placeholder="例如：短句、自然、像真人客服、先理解再回答" /></label>
               </div>
               {aiSaved && (
                 <div style={{ color: 'var(--wx-brand)', fontSize: 13, marginTop: 8 }}>

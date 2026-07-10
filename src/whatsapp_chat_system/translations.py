@@ -56,12 +56,12 @@ def save_translations(memory_dir: Path, user_id: str, payload: dict[str, Any]) -
     tmp.replace(path)
 
 
-def get_translation(memory_dir: Path, user_id: str, message_id: int) -> dict[str, Any] | None:
+def get_translation(memory_dir: Path, user_id: str, message_id: int | str) -> dict[str, Any] | None:
     data = load_translations(memory_dir, user_id)
     return data.get("items", {}).get(str(message_id))
 
 
-def put_translation(memory_dir: Path, user_id: str, message_id: int, payload: dict[str, Any]) -> None:
+def put_translation(memory_dir: Path, user_id: str, message_id: int | str, payload: dict[str, Any]) -> None:
     with _LOCK:
         data = load_translations(memory_dir, user_id)
         items = data.setdefault("items", {})
@@ -81,7 +81,7 @@ def bulk_put(memory_dir: Path, user_id: str, entries: dict[str, dict[str, Any]])
         save_translations(memory_dir, user_id, data)
 
 
-def load_many(memory_dir: Path, user_id: str, message_ids: list[int]) -> dict[str, dict[str, Any]]:
+def load_many(memory_dir: Path, user_id: str, message_ids: list[int | str]) -> dict[str, dict[str, Any]]:
     if not message_ids:
         return {}
     data = load_translations(memory_dir, user_id)

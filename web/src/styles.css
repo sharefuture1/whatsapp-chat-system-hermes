@@ -491,6 +491,13 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-contact-name { font-size: 15px; font-weight: 500; }
 .wx-contact-meta { min-width: 0; display: grid; gap: 3px; }
 .wx-setting-row { justify-content: space-between; }
+.wx-ai-entry > span:nth-child(2) { display: grid; gap: 3px; text-align: left; margin-right: auto; }
+.wx-ai-entry small { color: var(--wx-text-muted); font-size: 12px; font-weight: 400; }
+.wx-ai-status-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 16px; background: var(--wx-panel-soft); border-radius: var(--wx-radius-md); color: var(--wx-text-secondary); font-size: 13px; }
+.wx-chat { min-width: 0; }
+.wx-chat-header { min-height: 58px; padding-top: env(safe-area-inset-top, 0px); }
+.wx-chat-messages { min-height: 0; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.wx-composer { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
 .wx-setting-row.multi { align-items: flex-start; }
 .wx-setting-row-form select { min-width: 140px; text-align: right; background: transparent; border: 0; padding: 4px 8px; }
 .wx-setting-row.link { color: inherit; background: transparent; }
