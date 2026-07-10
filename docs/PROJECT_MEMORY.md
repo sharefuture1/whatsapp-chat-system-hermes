@@ -68,6 +68,23 @@ git diff --check                      PASS
 - Hermes profile：`/root/.hermes/profiles/whatsapp-support`
 - GitHub：`https://github.com/sharefuture1/whatsapp-chat-system-hermes`
 
+## SDD 开发规范（强制）
+
+- 权威入口：`docs/sdd/README.md`。
+- 所有需求、架构、数据/API 契约、优化清单、质量门禁和迁移计划均已进入 `docs/sdd/`。
+- `AGENTS.md` 与 `CLAUDE.md` 已强制要求：先规格、需求 ID、TDD、双阶段审查、全量验证、再更新文档和部署。
+- `TODO_AGENT.md` 仅显示当前执行状态，不再作为需求真源。
+- 旧 `docs/SDD.md` 已标为 Deprecated；`docs/ARCHITECTURE.md` 只保留 Legacy 基线和目标架构摘要。
+
+## 架构迁移目标（已定稿，尚未实施）
+
+- 目标：系统独立于 Hermes 运行，直接接入问鼎 AI OpenAI-compatible API。
+- AI 默认值：`https://wendingai.future1.us/v1` / `gpt-5.3-codex-spark`。
+- 多账号：每个 WhatsApp 账号独立 Baileys socket 与 session，所有业务数据强制带 `account_id`。
+- 业务真源：迁移到独立数据库；发送使用 Outbox，定时/群发使用真实 Worker。
+- 迁移策略：先 AI/config，再新库，再独立 Bridge 单账号/多账号，最后 UI 与旧数据迁移；切换前保持可回滚。
+- 详细方案：`docs/plans/2026-07-10-standalone-wendingai-multi-account.md`。
+
 ## 仍需关注
 
 - P0：定时发送目前只保存配置，尚无真实执行 worker

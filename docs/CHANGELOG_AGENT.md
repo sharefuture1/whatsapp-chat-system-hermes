@@ -1,5 +1,30 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：建立强制 SDD 文档体系
+
+- 新建 `docs/sdd/` 权威规格目录：总纲、产品需求、系统架构、数据模型、API/事件、优化待办、开发流程、迁移上线。
+- 将全部待优化项按 P0/P1/P2 收入 `docs/sdd/05-optimization-backlog.md`，补齐状态、需求关联和验收标准。
+- 将独立运行、问鼎 AI 默认配置、多 WhatsApp 账号、Outbox、Worker、插件接线、前端 UX、安全和可观测性统一规格化。
+- `AGENTS.md` 与 `CLAUDE.md` 写入强制 SDD 流程：先规格和需求 ID，再计划/TDD/双阶段审查/门禁/部署验证。
+- `TODO_AGENT.md` 降级为当前执行视图；旧 `docs/SDD.md` 标为 Deprecated；`docs/ARCHITECTURE.md` 改为新规格入口和 Legacy 基线摘要。
+- 后续只有达到 `Verified` 的 SDD 需求才能标记完成。
+- 本次只修改文档和开发治理规则，不改生产业务代码；当前 8792 Uvicorn 启动通知属于现有 Legacy 服务状态。
+
+---
+
+## 2026-07-10：独立运行 + 问鼎 AI + 多 WhatsApp 账号方案
+
+- 完成现有运行链审计：确认 AI 配置、消息数据库、CLI fallback、Bridge 生命周期和账号 UI 均依赖 Hermes profile/gateway。
+- 确认当前 Bridge 为单进程单全局 socket、单 session 目录、内存 `messageQueue`，不能直接满足可靠多账号。
+- 确认问鼎 AI OpenAI-compatible 入口可达：`GET /v1/models` 未认证返回 401，说明域名与认证网关正常；聊天接口应使用 `POST /v1/chat/completions`。
+- 定稿目标架构：FastAPI 控制面 + 独立多账号 Baileys Bridge + 独立业务数据库 + Worker + React 管理台。
+- 默认 AI：`https://wendingai.future1.us/v1` / `gpt-5.3-codex-spark`；模型优先级为联系人 > 账号 > 全局。
+- 设计 `account_id` 全链路隔离、webhook 幂等事件、Outbox 发送、定时/群发 Worker、旧 Hermes 只读 importer 和分阶段切换方案。
+- 新增详细实施文档：`docs/plans/2026-07-10-standalone-wendingai-multi-account.md`。
+- 本次仅完成审计和方案，不修改生产运行代码、不停止 Hermes gateway。
+
+---
+
 ## 2026-07-10：TabBar 图标渲染 + 模型默认值透出 + 插件真正生效
 
 ### TabBar 图标

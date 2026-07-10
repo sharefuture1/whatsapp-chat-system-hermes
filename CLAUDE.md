@@ -2,12 +2,14 @@
 
 ## 项目概述
 
-WhatsApp 客服工作台（Hermes Messaging Operations Console）。三层架构：
-1. **Hermes profile runtime** — WhatsApp gateway + state.db
-2. **Python FastAPI 后端** — 读 Hermes 状态，暴露安全 API
-3. **React 操作员 UI** — 会话列表、聊天、设置
+WhatsApp 多账号客服工作台。当前生产仍运行 Legacy 架构，但已批准迁移为独立系统：
 
-**线上地址**：`http://127.0.0.1:8792`（后端），前端直接由后端 FastAPI 挂载 `web/dist`
+- **当前 Legacy**：Hermes profile runtime + 单账号 WhatsApp Bridge + `state.db` + FastAPI + React；
+- **目标 Standalone**：独立 FastAPI 控制面 + PostgreSQL/Redis + Worker + 多账号 Baileys Bridge + React；
+- **AI 目标**：直接连接 `https://wendingai.future1.us/v1`，默认模型 `gpt-5.3-codex-spark`；
+- **权威规格**：`docs/sdd/`，所有后续开发必须严格按 SDD 执行。
+
+当前线上地址：`http://127.0.0.1:8792`，前端由 FastAPI 挂载 `web/dist`。
 
 ## 核心路径
 
@@ -57,11 +59,15 @@ curl http://127.0.0.1:8792/assets/$(curl -s http://127.0.0.1:8792/ | grep -o 'as
 
 ## 每次任务前必读
 
-1. `docs/PROJECT_MEMORY.md` — 当前项目状态、最新部署哈希、已知问题
-2. `docs/TODO_AGENT.md` — 待办任务
-3. `docs/CHANGELOG_AGENT.md` — 变更记录
-4. `docs/DECISIONS.md` — 架构决策
-5. `docs/DEPLOYMENT.md` — 部署文档
+1. `docs/sdd/README.md` — SDD 总纲和权威文档索引
+2. 与任务相关的 `docs/sdd/*` — 需求、架构、数据、API、优化、开发流程、迁移
+3. `docs/PROJECT_MEMORY.md` — 当前项目状态
+4. `docs/TODO_AGENT.md` — 当前执行视图
+5. `docs/CHANGELOG_AGENT.md` — 变更记录
+6. `docs/DECISIONS.md` — 架构决策
+7. `docs/DEPLOYMENT.md` — 部署文档
+
+未读取并确认相关 SDD 需求 ID，不允许开始业务代码修改。复杂任务必须先写 `docs/plans/YYYY-MM-DD-*.md`，并严格执行 RED → GREEN → REFACTOR、规格审查、代码质量审查和部署验证。
 
 ## 开发规范
 

@@ -2,6 +2,32 @@
 
 ## 当前优先级排序
 
+> 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
+
+### P0 — 独立化与多账号主线
+
+- [ ] **Phase 1：独立配置与问鼎 AI Provider**
+  - 移除 AI 对 Hermes `config.yaml` 的运行时依赖
+  - 默认 `https://wendingai.future1.us/v1` + `gpt-5.3-codex-spark`
+  - 统一超时、重试、错误映射、模型优先级与调用审计
+- [ ] **Phase 2：建立带 `account_id` 的业务数据库**
+  - accounts / contacts / conversations / messages / AI profiles / outbox
+  - `(account_id, remote_jid)` 隔离，同账号 WhatsApp message ID 幂等
+- [ ] **Phase 3：抽出独立 Bridge V2，先跑通单账号**
+  - 复制并重构 Baileys Bridge 到本项目，不再由 Hermes gateway 启动
+  - 二维码、状态、收发、媒体、回执、持久化事件重试
+- [ ] **Phase 4：Bridge V2 多账号隔离**
+  - 每账号独立 socket/session/status/限速/重连
+  - A 账号断线、登出、发送不得影响 B 账号
+- [ ] **Phase 5：Outbox、定时与群发 Worker**
+  - 定时任务真实执行，群发支持进度/取消/幂等/逐项结果
+- [ ] **Phase 6：前端 WhatsApp 账号中心**
+  - UI 内扫码登录、账号切换、在线状态、AI Profile、发送账号锁定
+- [ ] **Phase 7：只读迁移旧 Hermes 数据并切换**
+  - 导入报告、双写观察、可回滚；切换后停止 Hermes gateway
+
+详细计划：`docs/plans/2026-07-10-standalone-wendingai-multi-account.md`。
+
 ### P0 — 阻断核心聊天体验
 
 - [x] **修复会话列表左滑与 SVG 图标**

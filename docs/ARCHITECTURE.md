@@ -1,96 +1,46 @@
 # Architecture
 
-## Overview
+> 权威架构规格：[`docs/sdd/02-system-architecture.md`](./sdd/02-system-architecture.md)
+>
+> 数据模型：[`docs/sdd/03-data-model.md`](./sdd/03-data-model.md)
+>
+> API/事件：[`docs/sdd/04-api-and-events.md`](./sdd/04-api-and-events.md)
 
-The project is a profile-aware operator console layered on top of an existing Hermes WhatsApp support workspace.
+## Current Production: Legacy
 
-There are three major layers:
+当前生产仍采用过渡架构：
 
-1. Hermes profile runtime
-   - WhatsApp gateway
-   - Hermes state.db session/message storage
-   - Hermes send command for outbound platform delivery
+1. Hermes profile runtime 提供 WhatsApp gateway、单账号 Bridge 和 `state.db`；
+2. Python FastAPI 读取 Legacy 数据并提供 API；
+3. React 管理台由 FastAPI 挂载构建产物；
+4. 当前后端监听 `127.0.0.1:8792`，Bridge 监听 `127.0.0.1:3000`。
 
-2. Python application layer
-   - reads Hermes session/message state
-   - derives user summaries and routing behavior
-   - exposes a secure FastAPI API
+这只是当前运行基线，不是未来目标架构。
 
-3. React operator UI
-   - authenticates with a password-backed session token
-   - lists conversations and message history
-   - previews and sends replies
-   - manages operator settings and routing
+## Approved Target: Standalone
 
-## Data sources
+目标架构为：
 
-Primary durable source:
-- `state.db`
+```text
+React UI
+  → FastAPI Control Plane
+  → PostgreSQL + Redis + Background Worker
+  → Independent Multi-account Baileys Bridge
+  → WhatsApp
 
-Supplementary profile-local files:
-- `sessions/sessions.json`
-- `channel_directory.json`
-- `user-aliases.json`
-- `admin-channels.json`
-- `web-settings.json`
-- `user-memory-md/*.md`
+FastAPI AI Orchestrator
+  → https://wendingai.future1.us/v1
+  → gpt-5.3-codex-spark
+```
 
-## Core backend responsibilities
+关键要求：
 
-### web_api.py
-- auth guard
-- dashboard metrics
-- conversation APIs
-- reply preview/send APIs
-- settings APIs
-- local hide APIs
-- job trigger APIs
+- 不依赖 Hermes CLI、profile、gateway 或 Hermes `state.db`；
+- 每个 WhatsApp 账号独立 socket、session、状态、重连和限速；
+- 所有联系人、会话、消息和任务带 `account_id`；
+- 发消息通过 Outbox/Worker；
+- 定时和群发由真实 Worker 执行；
+- Bridge 事件通过幂等 webhook 进入业务数据库；
+- 旧 Hermes 数据仅由只读 importer 迁移。
 
-### router.py
-- resolves targets by alias/name/id
-- loads user memory
-- chooses rewrite strategy
-- sends final outbound messages through Hermes
-
-### rewriter.py
-- smart rewrite mode
-- translate-only mode
-- fallback control
-- output validation / length control
-
-### forwarder.py
-- forwards user/assistant transcript pairs to configured admin channels
-
-### memory_refresh.py
-- synthesizes markdown memory files from Hermes transcript history
-
-## Security model
-
-Current security is application-layer login:
-- password stored as a PBKDF2-HMAC-SHA256 record in `web-settings.json`
-- successful login issues a session token
-- token is required in `x-session-token` for protected endpoints
-
-Runtime secret policy:
-- live passwords, bootstrap secrets, API keys, and session tokens must stay out of git-managed docs
-- profile-local runtime files may contain secrets and must be treated as sensitive operational state
-- screenshots/HAR/audit exports should be ignored or redacted before sharing
-
-This is sufficient for a private internal console, but not yet a full enterprise auth layer.
-
-## Functional constraints
-
-### WhatsApp message deletion
-The app currently cannot revoke/delete messages for both sides because the Hermes WhatsApp bridge does not expose a delete/revoke endpoint.
-
-Therefore the UI exposes only:
-- local hide
-- local bulk hide
-
-## Suggested future extensions
-
-- real remote deletion if the bridge is extended
-- websocket/live updates
-- durable operator notes and tags in a dedicated app DB
-- multi-operator roles
-- session expiry and login throttling
+任何架构变更必须先修改 `docs/sdd/` 和 `docs/DECISIONS.md`。

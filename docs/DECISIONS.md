@@ -1,5 +1,46 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-10: SDD 成为强制开发规格
+
+**决策**：`docs/sdd/` 成为本项目需求、架构、数据模型、API、优化清单、开发流程和迁移策略的唯一权威规格源。
+
+所有后续任务必须：
+
+1. 先读取并确认相关 SDD；
+2. 绑定需求 ID；
+3. 复杂任务先写实施计划；
+4. 使用 RED → GREEN → REFACTOR；
+5. 完成规格符合性和代码质量审查；
+6. 通过全量门禁和真实运行验证；
+7. 更新 SDD 状态及项目四文件。
+
+`TODO_AGENT.md` 只作为当前执行视图；旧 `docs/SDD.md` 和 `docs/ARCHITECTURE.md` 不再承载完整权威规格。紧急修复也必须在同一任务内补齐 SDD 和回归测试。
+
+---
+
+## 2026-07-10: 独立运行、问鼎 AI 与多 WhatsApp 账号架构
+
+**现状证据**：
+
+- 当前 FastAPI 从 Hermes profile 的 `config.yaml`、`state.db` 和 JSON sidecar 读取配置/消息。
+- 当前发送路径先调用本机 `127.0.0.1:3000` Bridge，失败后回退 `hermes --profile ... send`。
+- 当前 Bridge 由 Hermes gateway 拉起，进程内只有一个全局 Baileys `sock` 和一个内存消息队列。
+- 当前数据表没有 `account_id`，`workspace_id` 实际只等于 `source=whatsapp`，不能隔离多个 WhatsApp 账号。
+
+**决策**：采用“FastAPI 控制面 + 独立多账号 Baileys Bridge + 业务数据库 + Worker + React 管理台”。
+
+- 运行时不依赖 Hermes CLI、Hermes profile、Hermes gateway 或 Hermes `state.db`。
+- 问鼎 AI 使用 OpenAI-compatible API：`https://wendingai.future1.us/v1`。
+- 全局默认模型固定为 `gpt-5.3-codex-spark`；优先级为联系人 override > 账号 AI profile > 全局默认。
+- 每条联系人、会话、消息、任务必须带 `account_id`；联系人全局键是 `(account_id, remote_jid)`。
+- Bridge 每账号独立 socket 和 session 目录，通过 webhook 幂等推送消息事件。
+- 发消息使用数据库 Outbox；定时与群发由真实 Worker 执行。
+- 旧 Hermes 数据仅通过只读 importer 一次性迁移，迁移后不参与运行。
+
+**详细实施方案**：`docs/plans/2026-07-10-standalone-wendingai-multi-account.md`。
+
+---
+
 ## 2026-07-09: StaticFiles `/assets` mount path bug
 
 **问题**：Starlette StaticFiles mount 到 `/assets` 时，URL path `/assets/index.js` 会被 strip `/assets` 前缀，然后查找 `directory/index.js`。但文件实际在 `dist/assets/index.js`，导致 404。

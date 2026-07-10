@@ -5,12 +5,42 @@
 **接到任何任务，立即执行：**
 
 1. 读 `CLAUDE.md` — 项目路径/命令/陷阱
-2. 读 `docs/PROJECT_MEMORY.md` — 当前状态
-3. 读 `docs/TODO_AGENT.md` — 待办列表
-4. 读 `docs/DECISIONS.md` — 相关决策记录
-5. 读 `docs/CHANGELOG_AGENT.md` — 最新变更
+2. 读 `docs/sdd/README.md` — SDD 总纲与权威文档索引
+3. 读与任务相关的 SDD：需求、架构、数据、API、优化、流程、迁移
+4. 读 `docs/PROJECT_MEMORY.md` — 当前状态
+5. 读 `docs/TODO_AGENT.md` — 当前执行视图
+6. 读 `docs/DECISIONS.md` — 相关决策记录
+7. 读 `docs/CHANGELOG_AGENT.md` — 最新变更
 
-**未读文档不开始干活。** 这是强制要求。
+**未读 SDD 和项目文档不开始干活。** 这是强制要求。
+
+## SDD 强制开发原则
+
+`docs/sdd/` 是需求、架构、API、数据模型、质量标准和优化事项的唯一权威规格源。
+
+每项开发必须严格执行：
+
+```text
+先更新/确认 SDD
+→ 绑定需求 ID
+→ 写实施计划（复杂任务）
+→ 先写失败测试
+→ 最小实现
+→ 规格符合性审查
+→ 代码质量审查
+→ 全量门禁
+→ 更新 SDD 状态和项目四文件
+→ 真实部署验证
+```
+
+强制规则：
+
+- 没有对应需求 ID 时，先补 SDD，禁止直接写业务代码。
+- 代码与 SDD 冲突时先修规格或停止实现，不能静默偏离。
+- `TODO_AGENT.md` 只记录当前执行状态，不能替代 SDD。
+- 只有达到 `Verified` 的需求才能标记完成。
+- 紧急修复可先止血，但必须在同一任务内补测试和 SDD。
+- 具体流程以 `docs/sdd/06-development-workflow.md` 为准。
 
 ## 工作流程
 

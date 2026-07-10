@@ -1,0 +1,221 @@
+# 优化待办规格
+
+> 本文档是所有待优化项目的权威清单。`TODO_AGENT.md` 只作为当前执行视图，不能新增与本文档冲突的需求。
+
+## 1. 状态定义
+
+- `Approved`：规格已批准，等待开发；
+- `In Progress`：已有开发任务和测试；
+- `Implemented`：代码完成，待全量验收；
+- `Verified`：已通过规格验收；
+- `Blocked`：注明阻塞条件。
+
+## 2. P0：独立化和可靠核心链路
+
+### SDD-P0-01 独立配置与问鼎 AI Provider
+
+- 状态：`Approved`
+- 需求：FR-CORE-001~003、FR-AI-001~007
+- 目标文件：
+  - `src/whatsapp_chat_system/settings.py`
+  - `src/whatsapp_chat_system/ai/provider.py`
+  - `src/whatsapp_chat_system/ai/service.py`
+  - `src/whatsapp_chat_system/rewriter.py`
+- 验收：
+  - 默认 URL/模型严格为问鼎 AI 和 `gpt-5.3-codex-spark`；
+  - mock server 确认调用 `/v1/chat/completions`；
+  - 401/429/5xx/timeout 有结构化错误与有限重试；
+  - API/log 不泄露 key；
+  - 没有 Hermes config 时 AI 配置仍能加载。
+
+### SDD-P0-02 新业务数据库与账号隔离
+
+- 状态：`Approved`
+- 需求：DATA-001~007、FR-ACC-003、FR-CON-003
+- 验收：
+  - 两账号相同 JID 可并存；
+  - 查询无跨账号泄漏；
+  - 重复 WhatsApp message ID 幂等；
+  - Alembic upgrade/downgrade 测试通过。
+
+### SDD-P0-03 独立 Bridge V2 单账号
+
+- 状态：`Approved`
+- 验收：
+  - 不运行 Hermes gateway 仍可扫码、连接、收发和恢复 session；
+  - Bridge 有 live/ready health；
+  - webhook 失败进入持久化 spool；
+  - 发信无真实 message ID 时判失败。
+
+### SDD-P0-04 Bridge V2 多账号
+
+- 状态：`Approved`
+- 验收：
+  - 至少两个账号同时在线；
+  - A 断线/登出/删除不影响 B；
+  - A 会话不会使用 B socket 发送；
+  - session、spool、限速和状态完全隔离。
+
+### SDD-P0-05 Outbox 可靠发送
+
+- 状态：`Approved`
+- 需求：FR-MSG-004~006
+- 验收：
+  - API 返回 queued，而非提前 sent；
+  - Worker 重启后继续 pending 任务；
+  - 幂等 key 防重复发送；
+  - 状态机和失败重试测试覆盖。
+
+### SDD-P0-06 定时任务真实 Worker
+
+- 状态：`Approved`
+- 当前缺陷：现有 `/api/schedule` 只保存配置，不执行。
+- 验收：
+  - 到点真实发送；
+  - 多 Worker 不重复；
+  - 可取消；
+  - 账号离线时进入可追踪失败/重试状态。
+
+### SDD-P0-07 群发后台任务
+
+- 状态：`Approved`
+- 当前缺陷：现有 HTTP handler 同步循环发送。
+- 验收：
+  - 后台分片执行；
+  - 账号级限速和抖动；
+  - 进度、暂停、取消、续跑、逐项结果；
+  - 重试不重复发送已成功目标。
+
+## 3. P1：产品可用性
+
+### SDD-P1-01 前端 WhatsApp 账号中心
+
+- 状态：`Approved`
+- 当前缺陷：页面保存 Hermes profile/path/命令，不是真登录管理。
+- 验收：UI 内创建、QR、实时状态、重连、登出、停用、删除；不出现 Hermes profile 概念。
+
+### SDD-P1-02 真实未读计数
+
+- 状态：`Approved`
+- 验收：入站增加、进入会话/显式已读清零、跨设备状态一致；不使用前端估算冒充真实值。
+
+### SDD-P1-03 独立联系人模型
+
+- 状态：`Approved`
+- 验收：联系人不依赖现有会话；支持备注、标签、分组、语言、搜索和账号筛选。
+
+### SDD-P1-04 微信式信息架构收敛
+
+- 状态：`Approved`
+- 内容：
+  - “发现”改“工作台”；
+  - “我”页只保留操作员和全局设置；
+  - 聊天头部只保留返回、名称、状态和“…”；
+  - Emoji/AI 模式进入更多面板；
+  - 设置移动端全屏分级。
+
+### SDD-P1-05 翻译异步化
+
+- 状态：`Approved`
+- 验收：消息读取不等待模型；翻译任务可缓存、失败重试并实时回填。
+
+### SDD-P1-06 插件完整接线
+
+- 状态：`Approved`
+- 当前缺陷：部分插件只有 UI/catalog，无 hook。
+- 验收：每个 available 插件有真实 API/worker gate；无 hook 时 `available=false`。
+
+### SDD-P1-07 认证升级
+
+- 状态：`Approved`
+- 内容：HttpOnly Cookie、CSRF、服务端 session hash、移除弱默认密码、审计、预留 RBAC。
+
+### SDD-P1-08 数据库分页与索引
+
+- 状态：`Approved`
+- 验收：会话、消息、搜索使用数据库游标分页；有 explain/index 验证；大数据集不全表装入 Python。
+
+### SDD-P1-09 运行配置数据库化
+
+- 状态：`Approved`
+- 当前缺陷：多个请求写 JSON，缺文件锁/事务。
+- 验收：设置、插件、会话操作和任务迁移数据库；必要 JSON 写入使用原子替换。
+
+### SDD-P1-10 消息同步 gap 调查与修复
+
+- 状态：`Blocked`
+- 阻塞：需要真实 WhatsApp 多轮入站、回执、断线重连数据。
+- 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap。
+
+## 4. P2：UX、视觉和工程质量
+
+### SDD-P2-01 CSS 治理
+
+- 清理重复规则和旧 `.wx-tabbar*`；
+- 自动扫描 JSX 使用但未定义的类；
+- 页面滚动和 safe area 统一。
+
+### SDD-P2-02 统一 SVG Icon System
+
+- 功能性 emoji/字符全部替换；
+- 提供统一 size/stroke/currentColor；
+- 为 TabBar 和按钮增加渲染回归测试。
+
+### SDD-P2-03 Avatar 与媒体体验
+
+- 真实头像、失败回退、懒加载；
+- 图片/语音/视频/文档消息有明确状态和失败提示。
+
+### SDD-P2-04 可访问性
+
+- focus-visible；
+- dialog focus trap；
+- aria-live；
+- 键盘操作；
+- reduced motion；
+- 色彩对比。
+
+### SDD-P2-05 深色模式和语言实时切换
+
+- 默认跟随系统；
+- 切换无需刷新；
+- 全部语言 key 集合一致。
+
+### SDD-P2-06 Playwright 主链路
+
+覆盖：
+
+- 登录；
+- 账号切换；
+- 会话滚动；
+- 左滑操作；
+- 聊天发送/失败重试；
+- QR 页面；
+- 插件开关；
+- 移动端输入和 safe area。
+
+### SDD-P2-07 统一错误与日志
+
+- FastAPI 全局异常映射；
+- request ID；
+- 结构化日志；
+- 前端错误文案和重试动作；
+- 敏感字段脱敏。
+
+## 5. 已验证基线，不得回归
+
+- 左滑后才显示置顶/删除；
+- 左滑与纵向滚动方向锁；
+- TabBar 和按钮 SVG 使用显式尺寸/currentColor；
+- 发送只有显式真实成功才显示成功；
+- 失败消息可重试；
+- 增量消息严格按 ID 游标；
+- 快速切换联系人不串线；
+- 聊天移动端隐藏根 TabBar；
+- 输入框自动增高，IME Enter 不误发；
+- 查看历史时不强制滚底；
+- CORS OPTIONS 不被 auth 拦截；
+- i18n key 全语言对齐；
+- StaticFiles `/assets` 路径正确。
+
+任何重构必须保留对应回归测试。
