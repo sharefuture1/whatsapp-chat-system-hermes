@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +20,10 @@ from pydantic import BaseModel, Field
 from .ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
 from .ai.provider import WendingAIProvider
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
+from .api.internal.whatsapp_events import (
+    create_whatsapp_events_router,
+    whatsapp_validation_exception_handler,
+)
 from .bridge.client import BridgeClient, BridgeError
 from .config import AppConfig, build_password_record, load_json, save_json, verify_password
 from .db import create_engine, create_session_factory, session_scope
@@ -694,6 +699,7 @@ def build_app(
     web_dist: str | Path | None = None,
     account_session_factory: sessionmaker[Session] | None = None,
     account_bridge: BridgeProtocol | None = None,
+    internal_event_token: str | None = None,
 ) -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
@@ -845,6 +851,26 @@ def build_app(
         else:
             resolved_account_bridge = DisabledBridgeClient()
     app.include_router(create_accounts_router(resolved_account_factory, resolved_account_bridge))
+    resolved_event_token = (
+        internal_event_token
+        if internal_event_token is not None
+        else (os.getenv('WHATSAPP_BRIDGE_INTERNAL_TOKEN') or '').strip()
+    )
+    app.include_router(create_whatsapp_events_router(resolved_account_factory, resolved_event_token))
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(request: Request, exc: RequestValidationError):
+        internal_response = whatsapp_validation_exception_handler(request, exc)
+        if internal_response is not None:
+            return internal_response
+        return JSONResponse({'detail': exc.errors()}, status_code=422)
+
+    @app.middleware('http')
+    async def request_id_middleware(request: Request, call_next):
+        request.state.request_id = request.headers.get('X-Request-ID') or f'req_{secrets.token_hex(16)}'
+        response = await call_next(request)
+        response.headers['X-Request-ID'] = request.state.request_id
+        return response
 
     @app.middleware('http')
     async def auth_guard(request: Request, call_next):

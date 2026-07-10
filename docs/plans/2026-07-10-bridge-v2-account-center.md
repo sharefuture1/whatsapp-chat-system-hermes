@@ -104,6 +104,16 @@
 
 **GREEN:** 使用 injectable fake Baileys factory 完成内核；复制协议逻辑时注明来源，禁止修改系统 Hermes 安装目录。
 
+**规格审查修复 RED/GREEN（2026-07-10）：**
+- RED：在原 19 passed 基线上先新增 QR `qr_data_url`、同帧 QR/connecting 优先级、close generation 失效、fake scheduler 指数退避、stop/logout/delete 取消 timer、401/440 分类、全响应 `X-Request-ID` 回显/生成测试；首次运行 26 tests 中 9 failed，失败点与审查阻断项一致。
+- GREEN：实现账号级可注入 scheduler/jitter 的指数退避，close 立即失效旧 generation，`loggedOut=401` 且 `connectionReplaced=440` 重连，QR 契约改为 `qr_data_url`，所有 Bridge 响应附请求 ID；`npm test` 26 passed，`npm run lint` 通过。
+- Scope：仅修改 Task 5 的 `bridge/src`、`bridge/tests` 与本计划记录，未实现 Task 6 event spool/webhook。
+
+**代码质量审查 Important 修复 RED/GREEN（2026-07-10）：**
+- RED：新增 delete/create/connect 并发竞态、QR 过期重复读取、canonical/legacy token 冲突、HTTP timeout、readiness、`closeAll` 与 SIGTERM/SIGINT 测试；首次运行 33 tests 中 8 failed。
+- GREEN：按账号生命周期 Promise 串行化删除与后续 create/connect；QR 过期保留稳定 flag 并将状态归一为 `offline/has_qr=false`；`WHATSAPP_BRIDGE_INTERNAL_TOKEN` 为权威且冲突 fail-closed；补 server timeout、manager readiness/closeAll 和进程优雅关闭。
+- Verify：`npm test` 33 passed；`npm run lint` 通过；`npm audit --omit=dev` 为 0 vulnerabilities；未进入 Task 6。
+
 ## Task 6：持久化 Event Spool 和内部事件接收
 
 **Files:**
@@ -121,6 +131,13 @@
 - event_id 幂等；
 - A event 不更新 B；
 - message.upsert 事务化 upsert contact/conversation/message。
+
+**完成记录（2026-07-10）：**
+- RED→GREEN：实现 FileSpool/EventSink、FastAPI internal receiver、Alembic `0003`，覆盖 500/timeout/401 保留、422 dead-letter、restart replay、duplicate、identity conflict、账号隔离、事务落库与单调状态/回执。
+- 审查修复：按 sequence claim；旧 event payload hash 回填；真实 startBridge 自动 replay；sent/delivered/read/failed 接线；重复 receipt 独立身份；同账号唯一 sink owner；QR 过期/stop 离线事件；安全错误脱敏。
+- 安全：loopback、token fail-closed、Host 防 DNS rebinding、请求 ID、目录 `0700`、不记录 QR/raw credential。
+- 验证：Bridge 63 passed、lint 通过、audit 0；Python 118 passed；Alembic upgrade→downgrade→upgrade；V2 3100 无真实账号影子 live/ready/auth/create/status/stop 通过。
+- 状态：代码为 `Implemented`；真实扫码、真实收发/回执、双账号在线仍待 Task 11 使用测试账号验收。
 
 ## Task 7：前端账号领域控制器
 

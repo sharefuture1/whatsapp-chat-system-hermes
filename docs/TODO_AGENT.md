@@ -15,7 +15,9 @@
   - `(account_id, remote_jid)` 隔离，同账号 WhatsApp message ID 幂等
 - [>] **Phase 3：抽出独立 Bridge V2，先跑通单账号**
   - [x] 账号控制面 API、Bridge Client 契约、fail-closed 安全配置
-  - [ ] Node/Baileys Bridge V2、二维码、状态事件、收发、媒体、回执、持久化事件重试
+  - [x] Task 5 Node/Baileys 基础：账号 session/socket、QR/状态、stop/logout/delete、自动重连、请求 ID、生命周期竞态防护、统一 token 与优雅关闭
+  - [x] Task 6 内部事件接收与持久化 spool：幂等/hash、sequence、事务落库、回执、重启 replay、dead-letter
+  - [ ] 使用真实测试账号验收扫码、session 恢复、入站、出站 message ID 和回执
 - [ ] **Phase 4：Bridge V2 多账号隔离**
   - 每账号独立 socket/session/status/限速/重连
   - A 账号断线、登出、发送不得影响 B 账号
@@ -94,13 +96,16 @@
 ### 当前验证结果（2026-07-10）
 
 - `npm run build`：✅ 通过
-- `pytest -q`：✅ 106 passed
-- `node --test tests/*.test.js`：✅ 9 passed
+- `pytest -q`：✅ 118 passed
+- `node --test web/tests/*.test.js`：✅ 9 passed
+- `cd bridge && npm test`：✅ 63 passed
+- Bridge lint：✅ 通过
+- Bridge production audit：✅ 0 vulnerabilities
 - Alembic upgrade → downgrade → upgrade：✅ 通过
 - `/api/health`：✅ 200
+- V2 `3100` 影子 live/ready：✅ 200；未认证 API：401；create/status/stop：200
 - 线上资源：`index-BN8XBbSa.js` / `index-CdAyXNbe.css`，均为 200
-- 未认证 `/api/v1/accounts`：✅ 401
-- 真实 QR/连接：⏳ 等待独立 Node/Baileys Bridge V2
+- 真实 QR/连接：⏳ 等待测试 WhatsApp 账号验收
 
 ### P2 — 工程与视觉精修
 

@@ -1,5 +1,49 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：完成 Bridge V2 Task 5/6 代码链与安全影子验证
+
+- 新增独立 `bridge/` Node/Baileys 6.7.22 服务：账号级 session/socket、QR、状态、发送、typing、stop/logout/delete、generation 与独立重连。
+- 新增 FileSpool/EventSink：先落盘再 POST、pending/inflight/dead、崩溃恢复、重试退避、422 dead-letter、账号隔离和持久化 sequence。
+- Bridge 重启会自动扫描并 replay spool；账号注册复用同一 sink owner，避免双 owner sequence/claim 竞态。
+- 同 event ID 对 canonical envelope 做一致性校验；不一致显式 `event_identity_conflict`，不静默吞事件。
+- 新增 `/internal/events/whatsapp`：内部 token、request ID、结构化错误、`(account_id,event_id)` 幂等和 payload hash 冲突。
+- `message.upsert` 在同一事务 upsert contact/conversation/message/event；账号状态与消息回执均按 sequence/status 单调更新。
+- 新增 `message.sent/delivered/read/failed` 事件；重复 receipt occurrence 使用独立事件身份，避免永久 409 spool。
+- QR 定时器和读取触发过期均发送 `account.disconnected`；stop 同步离线事件。
+- Bridge 状态和 `account.error` 对外仅返回稳定脱敏消息，不暴露 session 路径、token 或底层异常。
+- 新增 Alembic `0003`：sequence、payload_hash、消息时间字段、旧数据 canonical hash 回填和 downgrade 冲突保护。
+- 多轮规格/代码质量审查修复：401/440 分类、QR 优先级、请求追踪、生命周期竞态、双 sink owner、spool identity conflict、错误脱敏和 event pipeline/socket 状态分离。
+- 验证：Python `118 passed`；Bridge `63 passed`；Bridge lint 通过；audit 0 vulnerabilities；Web `9 passed` + Vite build；Alembic 往返和 `git diff --check` 通过。
+- V2 在 `127.0.0.1:3100` 完成无真实账号影子验证：live/ready 200、未认证 401、create/status/stop 200；随后停止并清理临时 token/runtime。
+- Legacy `127.0.0.1:3000` 与 FastAPI `8792` 保持运行，未切流、未停止 Hermes gateway。
+- 尚未宣称完成：真实 QR 扫码、真实收发/回执、双账号同时在线和 Hermes shutdown。
+
+---
+
+## 2026-07-10：修复 Bridge V2 Task 5 代码质量 Important 项
+
+- 按 `account_id` 串行化 delete 与并发 create/connect，消除请求先成功后被进行中删除移除的生命周期竞态。
+- QR 过期后保留稳定 expired 语义：重复 GET 持续 `410 qr_expired`，状态归一为 `offline` 且 `has_qr=false`，直到新 QR 或新 connect。
+- Node 配置统一以 `WHATSAPP_BRIDGE_INTERNAL_TOKEN` 为权威；兼容旧 `BRIDGE_INTERNAL_TOKEN`，两者同时存在且不同则启动 fail-closed。
+- 设置 `requestTimeout=30s`、`headersTimeout=15s`、`keepAliveTimeout=5s`；readiness 绑定 manager 初始化/关闭状态。
+- 新增 `manager.closeAll()` 与 SIGTERM/SIGINT 幂等优雅关闭，先停止 HTTP listener，再关闭全部账号 session。
+- 严格 TDD：新增测试后 RED 为 33 tests / 8 failed；GREEN 为 33 passed；lint、audit（0 vulnerabilities）和 `git diff --check` 通过。
+- 未实现 Task 6 event spool/webhook，未提交代码。
+
+---
+
+## 2026-07-10：修复 Bridge V2 Task 5 规格审查阻断项
+
+- QR API 对齐 SDD/FastAPI/前端：返回 `status=qr_pending` 与 `qr_data_url`，并确保同一 `connection.update` 同时含 QR/connecting 时保持 `qr_pending`。
+- close 立即推进 socket generation，使旧 socket 的迟到 open/close 无法覆盖 offline/logged_out/新连接状态。
+- 新增每账号独立自动重连：指数退避、上限与 jitter 均可注入；测试使用 fake scheduler，无真实等待。
+- stop/logout/delete 取消待执行重连；401 `loggedOut` 不重连；Baileys 6.7.22 的 440 `connectionReplaced` 进入 offline/reconnect。
+- Bridge 所有成功、健康、认证失败、路由错误和异常响应均回显合法入站 `X-Request-ID`，否则生成新 ID。
+- 严格 TDD：原 19 passed；新增测试后的 RED 为 26 tests / 9 failed；GREEN 为 26 passed；`npm run lint` 与 `git diff --check` 通过。
+- 仅修改 Task 5 Bridge 内核/测试，未开始 Task 6 event spool/webhook。
+
+---
+
 ## 2026-07-10：推进 SDD-P0-03 / SDD-P1-01 多账户控制面与账号中心
 
 - 明确当前仍未彻底脱离 Hermes：Legacy 消息读取/启动 profile 与现有 Bridge 生命周期仍待迁移。

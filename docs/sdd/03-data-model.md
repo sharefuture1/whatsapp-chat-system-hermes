@@ -138,17 +138,32 @@ UNIQUE(account_id, wa_message_id) WHERE wa_message_id IS NOT NULL
 
 ```text
 id            UUID PK
-event_id      varchar unique not null
+event_id      varchar not null
 account_id    FK not null
 event_type    varchar not null
 occurred_at   timestamptz
+sequence      bigint not null
 payload       json
+payload_hash  varchar not null
 processed_at  timestamptz
 status        enum(received, processed, failed)
 error         text nullable
 ```
 
 用于 webhook 幂等和审计。
+
+约束与处理规则：
+
+```text
+UNIQUE(account_id, event_id)
+INDEX(account_id, sequence)
+```
+
+- 相同账号/event_id 只有 payload hash 一致时才算 duplicate；
+- 状态事件按账号 sequence 单调应用，迟到事件不得回退账号状态；
+- `message.upsert` 在同一事务内 upsert contact/conversation/message 并标记事件 processed；
+- 所有关联写入必须验证 contact/conversation/message 的 account_id 一致，禁止跨账号外键引用；
+- 账号业务删除时事件保留策略必须由归档/审计流程执行，不得无提示清除证据。
 
 ### 2.6 `ai_profiles`
 

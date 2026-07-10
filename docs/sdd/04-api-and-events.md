@@ -99,7 +99,9 @@ Bridge 仅绑定 `127.0.0.1` 或 Unix socket。
 }
 ```
 
-二维码过期返回 `410 qr_expired`。
+二维码过期返回 `410 qr_expired`。同一二维码一旦过期，在收到新 QR 或开始新一轮 `connect` 前，重复读取必须持续返回 `410 qr_expired`；账号状态同时必须满足 `has_qr=false`，不得继续报告 `qr_pending`。
+
+账号生命周期操作按 `account_id` 串行化；`DELETE` 执行期间到达的同账号 `create/connect` 必须等待删除完成后再执行，不得先返回成功再被进行中的删除移除。
 
 ### `POST /api/v1/accounts/{account_id}/logout`
 
@@ -296,6 +298,7 @@ Body：
 - `GET /accounts/{id}/status`
 - `GET /accounts/{id}/qr`
 - `POST /accounts/{id}/logout`
+- `POST /accounts/{id}/stop`
 - `DELETE /accounts/{id}`
 - `POST /accounts/{id}/send`
 - `POST /accounts/{id}/send-media`
@@ -316,6 +319,23 @@ Body：
 
 没有 `message_id` 不得认为成功。
 
+`POST /accounts/{id}/stop` 只关闭当前账号 socket、取消重连并保留 session 凭据，账号可在之后显式 reconnect；不得等同于 WhatsApp logout，也不得退出 Node 主进程。
+
+`POST /accounts/{id}/send-media` 本阶段只接受受控媒体引用，不接受任意绝对路径：
+
+```json
+{
+  "chat_id": "...",
+  "media_type": "image",
+  "media_ref": "account-scoped-media-id",
+  "caption": null,
+  "file_name": null,
+  "mime_type": null
+}
+```
+
+Bridge 必须校验 `media_ref` 最终路径位于当前账号媒体根目录内。
+
 ## 9. Bridge → FastAPI 事件
 
 Endpoint：
@@ -328,13 +348,46 @@ Envelope：
 
 ```json
 {
-  "event_id": "account:wa-message-id:message.upsert",
+  "event_id": "stable-event-id",
   "event_type": "message.upsert",
   "account_id": "...",
   "occurred_at": "2026-07-10T00:00:00Z",
+  "sequence": 42,
   "payload": {}
 }
 ```
+
+Envelope 规则：
+
+- `event_id` 在 `account_id` 范围内稳定唯一；数据库唯一键为 `(account_id, event_id)`；
+- `sequence` 是每个账号连接事件流的单调整数，状态事件不得被较小 sequence 回退；
+- Receiver 保存 canonical payload hash；相同 `(account_id,event_id)` 但 payload/hash 不同返回 `409 event_identity_conflict`；
+- 已 `processed` 的重复事件返回 200/duplicate=true；首次失败若事务回滚则允许同一 event 重试；
+- Bridge 必须先将事件原子写入本地 spool，再发 webhook；timeout、网络错误、401/403、409、5xx 均不得删除 spool；422 schema error 移入 dead-letter。
+
+`message.upsert` payload v1：
+
+```json
+{
+  "schema_version": 1,
+  "wa_message_id": "ABC123",
+  "remote_jid": "85620...@s.whatsapp.net",
+  "sender_jid": "85620...@s.whatsapp.net",
+  "participant_jid": null,
+  "from_me": false,
+  "conversation_type": "dm",
+  "message_type": "text",
+  "timestamp": "2026-07-10T00:00:00Z",
+  "text": "hello",
+  "push_name": "Customer",
+  "quoted_wa_message_id": null,
+  "media": null
+}
+```
+
+核心字段禁止静默忽略未知值；A 账号 envelope 只能写 A 账号联系人、会话和消息。
+
+消息回执状态只允许单调推进 `sent < delivered < read`；迟到回执不得回退，`failed` 不得覆盖已确认的 sent/delivered/read。
 
 事件类型：
 

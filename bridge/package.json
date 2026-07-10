@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-bridge-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint": "node --check src/*.js && node --check src/events/*.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.22",
+    "qrcode": "1.5.4"
+  }
+}

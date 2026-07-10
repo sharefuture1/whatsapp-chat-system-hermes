@@ -1,61 +1,76 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 07:10 UTC
+> 最后更新：2026-07-10 10:00 UTC
 
 ## 当前结论
 
-项目**尚未彻底从 Hermes 分离**：
+项目**尚未彻底从 Hermes 分离**，但独立 Bridge V2 的代码链路已进入 `Implemented`：
 
-- AI Provider 和账号级业务数据库已独立。
-- 多账户控制面 API、Bridge HTTP Client 契约、微信式账号中心 UI 已落地。
-- 生产读取消息/会话和启动参数仍依赖 Legacy Hermes profile/state；独立 Node/Baileys Bridge V2、事件接收、Outbox Worker 和历史切换尚未完成。
-- 账号中心不会伪造在线或二维码；Bridge V2 未安全配置时写操作返回结构化 `bridge_not_configured`，并补偿删除未成功注册的账号记录。
+- AI Provider、账号级业务数据库已独立。
+- 多账户控制面 API、Bridge HTTP Client、微信式账号中心 UI 已落地。
+- 独立 Node/Baileys Bridge V2 已实现账号级 session/socket、QR、状态、重连、发送和回执事件。
+- 持久化 FileSpool/EventSink 与 FastAPI `/internal/events/whatsapp` 幂等事务接收已实现。
+- 生产仍使用 Legacy `127.0.0.1:3000` 和 Hermes profile/state 提供现有消息链；V2 仅在 `127.0.0.1:3100` 完成无真实账号的安全影子验证，尚未切流。
+- 真实扫码、真实收发、双账号同时在线、历史迁移、Outbox Worker 与 Hermes shutdown 尚未验收。
 
-## 线上资源
+## 线上与影子状态
 
-- 后端地址：`http://127.0.0.1:8792`
-- 前端 JS：`index-BN8XBbSa.js`
-- 前端 CSS：`index-CdAyXNbe.css`
-- `/api/health`：200
-- 新 JS 资源：200
-- 未认证 `/api/v1/accounts`：401
-- 生产仍以 `/root/.hermes/profiles/whatsapp-support` 提供 Legacy 消息数据，属于迁移期兼容，不代表完成分离。
+- FastAPI：`http://127.0.0.1:8792`，health 200。
+- 前端：`index-BN8XBbSa.js` / `index-CdAyXNbe.css`，资源 200。
+- Legacy Bridge：`127.0.0.1:3000`，保持运行。
+- Bridge V2 影子：曾在 `127.0.0.1:3100` 启动并验证 live/ready、认证、create/status/stop；验证后已停止并清理临时 token/runtime。
+- 生产仍传入 `/root/.hermes/profiles/whatsapp-support`，属于迁移期兼容。
 
-## 本轮实现
+## 本轮实现：Task 5 + Task 6
 
-- SDD-P0-03/P1-01 实施计划：`docs/plans/2026-07-10-bridge-v2-account-center.md`。
-- 新增账号 repository/service，所有账号业务通过独立 SQLAlchemy Session。
-- 新增 `GET/POST/PATCH/DELETE /api/v1/accounts` 以及 connect/qr/logout 操作。
-- 新增只允许 loopback 的 Bridge Client，带超时、结构化错误和安全响应。
-- 未配置内部 Bridge token 时 fail-closed，不使用可预测默认密钥。
-- Bridge 注册失败会补偿删除数据库账号；停用账号先停止 Bridge，再提交 `enabled=false`。
-- 新增迁移 `0002_ai_runtime_timeout_retry.py`，修复 AI runtime timeout/retry ORM 与迁移漂移。
-- 前端新增“我 → WhatsApp 账号”账号中心、账号列表/详情/状态/删除确认/二维码页面。
-- 用户可见设置页已移除 Hermes profile、profile path 和 CLI 命令入口。
-- 四语言补齐账号中心文案；默认新账号 `auto_reply_mode=off`。
+### Bridge V2
+
+- 新增 `bridge/` 独立 Node 进程，Baileys 锁定 `6.7.22`。
+- AccountManager 按 `account_id` 隔离 session/socket/spool/media。
+- 每账号连接互斥、socket generation、指数退避+jitter、stop/logout/delete 语义和生命周期串行化。
+- loopback/Host/token/request-id/HTTP timeout/live-ready/优雅关闭安全门禁。
+- QR `qr_data_url`、稳定过期语义；定时器或读取触发过期均发送 offline 事件。
+- 发送必须获得真实 WhatsApp message ID；回执产生 sent/delivered/read/failed 事件。
+- 状态 API 和 account.error 只返回稳定脱敏文案，不暴露路径、token 或底层异常。
+
+### 可靠事件链
+
+- FileSpool 先原子落盘再 POST，账号目录 `0700`。
+- pending/inflight/dead、崩溃恢复、指数退避、422 dead-letter、500/timeout/401 保留重试。
+- 每账号 sequence 持久化单调；按 sequence/入队顺序 claim。
+- 重启自动扫描并 replay spool；同账号只保留一个 EventSink owner。
+- 同 event_id 会比较 canonical envelope；不一致显式 identity conflict，不静默吞事件。
+- FastAPI 内部事件接口使用常量时间 token 校验、结构化错误和 request ID。
+- Receiver 支持 account 状态、message.upsert、sent/delivered/read/failed；按 `(account_id,event_id)` 幂等并校验 payload hash。
+- message/contact/conversation/event 同事务落库，状态与回执单调，不跨账号。
+- Alembic `0003` 补充 sequence、payload_hash、消息时间字段及旧事件 hash 回填；downgrade 跨账号 event ID 冲突会明确中止。
 
 ## 验证状态
 
 ```text
-pytest -q                         106 passed, 1 warning
-node --test web/tests/*.test.js  9 passed
-npm run build                    PASS
-git diff --check                 PASS
+pytest -q                          118 passed, 1 warning
+bridge npm test                   63 passed
+bridge npm run lint               PASS
+bridge npm audit --omit=dev       0 vulnerabilities
+web node --test tests/*.test.js   9 passed
+web npm run build                 PASS
 Alembic upgrade→downgrade→upgrade PASS
-/api/health                      200
-/assets/index-BN8XBbSa.js        200
-unauth /api/v1/accounts          401
+git diff --check                  PASS
+FastAPI /api/health               200
+V2 shadow live/ready              200
+V2 unauth API                     401
+V2 create/status/stop             200
 ```
 
 唯一警告是 FastAPI/Starlette TestClient 上游弃用提醒。
 
 ## 下一阶段阻断
 
-- 实现独立 Node/Baileys Bridge V2：真实 QR、每账号 session、状态、收发、媒体和回执。
-- 实现 `/internal/events/whatsapp` 幂等事件接收与 account 状态落库。
-- 完成 A/B 多账号隔离、断线恢复和删除 session 真实验证。
-- 将消息读取/发送迁移到独立数据库和 Outbox Worker。
-- 完成 Legacy 只读迁移与最终停止 Hermes gateway/profile/state 依赖。
+1. 用测试 WhatsApp 账号完成真实扫码、session 重启恢复、入站消息、出站真实 message ID 和回执验收。
+2. 启动第二账号，完成 A/B 同时在线、断线/登出/删除互不影响验收。
+3. 将账号控制面安全配置到 Bridge V2 3100，并保持 Legacy 3000 可回滚。
+4. 完成 Outbox Worker 和发送路径切换。
+5. 只读导入 Legacy 数据、影子比对、最终停止 Hermes gateway/profile/state 依赖。
 
 ## 环境
 

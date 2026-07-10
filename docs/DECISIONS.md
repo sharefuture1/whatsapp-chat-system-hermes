@@ -1,5 +1,20 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-10: Bridge V2 使用持久化 spool，并在真实账号验收前保持影子模式
+
+**决策**：Bridge V2 的事件投递采用每账号单 writer 的磁盘 FileSpool；任何账号状态、消息或回执先持久化，再发送至 FastAPI 内部事件接口。
+
+- 每账号仅一个 `EventSink/FileSpool` owner，重启 replay 后注册账号必须复用同一 owner。
+- 事件唯一边界为 `(account_id,event_id)`；相同 ID 的 canonical envelope 不一致必须显式冲突，不得静默覆盖。
+- FastAPI 以单事务写入事件、联系人、会话和消息；状态与回执按 sequence/rank 单调。
+- QR、session credential、底层路径和 token 不进入 webhook、状态 API 或用户响应。
+- Legacy Bridge `3000` 在 V2 真实扫码、收发、session 恢复和双账号验收前保持运行；V2 使用 `3100` 影子验证，不提前切流。
+- 无真实 WhatsApp 账号的 health/auth/create/status/stop 验证只能证明运行和安全门禁，不能将需求标记为 `Verified`。
+
+详细实现：`docs/plans/2026-07-10-bridge-v2-account-center.md` Task 5/6。
+
+---
+
 ## 2026-07-10: Bridge V2 未配置时 fail-closed，账号 UI 不伪造登录
 
 **决策**：账号控制面可以先于独立 Node/Baileys Bridge V2 上线，但不得用假 QR、静态状态或数据库预写 `online` 冒充已登录。

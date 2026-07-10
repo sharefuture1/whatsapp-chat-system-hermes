@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
 
@@ -29,7 +29,7 @@ EXPECTED_COLUMNS = {
     'whatsapp_accounts': {
         'id', 'name', 'phone_number', 'status', 'session_ref', 'is_primary', 'enabled',
         'auto_reply_mode', 'ai_profile_id', 'last_seen_at', 'last_error_code',
-        'last_error_message', 'created_at', 'updated_at',
+        'last_error_message', 'last_event_sequence', 'created_at', 'updated_at',
     },
     'contacts': {
         'id', 'account_id', 'remote_jid', 'phone_number', 'lid', 'display_name', 'remark',
@@ -44,7 +44,7 @@ EXPECTED_COLUMNS = {
         'id', 'account_id', 'conversation_id', 'contact_id', 'wa_message_id', 'direction',
         'sender_jid', 'message_type', 'content', 'media_metadata', 'quoted_message_id', 'status',
         'error_code', 'error_message', 'retry_count', 'created_at', 'sent_at', 'delivered_at',
-        'read_at',
+        'read_at', 'occurred_at', 'received_at',
     },
     'ai_profiles': {
         'id', 'name', 'provider', 'base_url', 'default_model', 'system_prompt', 'reply_style',
@@ -60,7 +60,7 @@ EXPECTED_COLUMNS = {
     },
     'whatsapp_events': {
         'id', 'event_id', 'account_id', 'event_type', 'occurred_at', 'payload', 'processed_at',
-        'status', 'error',
+        'status', 'error', 'sequence', 'payload_hash',
     },
     'outbox_messages': {
         'id', 'message_id', 'account_id', 'idempotency_key', 'status', 'attempts', 'available_at',
@@ -151,7 +151,8 @@ def test_core_unique_constraints_partial_message_idempotency_and_indexes(tmp_pat
         assert ('account_id', 'remote_jid') in _unique_column_sets(inspector, 'contacts')
         assert ('account_id', 'remote_jid') in _unique_column_sets(inspector, 'conversations')
         assert ('account_id', 'wa_message_id') in _unique_column_sets(inspector, 'messages')
-        assert ('event_id',) in _unique_column_sets(inspector, 'whatsapp_events')
+        assert ('account_id', 'event_id') in _unique_column_sets(inspector, 'whatsapp_events')
+        assert ('account_id', 'sequence') in _index_column_sets(inspector, 'whatsapp_events')
         assert ('message_id',) in _unique_column_sets(inspector, 'outbox_messages')
         assert ('idempotency_key',) in _unique_column_sets(inspector, 'outbox_messages')
 
@@ -249,3 +250,76 @@ def test_required_non_null_and_composite_primary_key_metadata():
     assert {column.name for column in ContactAIOverride.__table__.primary_key.columns} == {
         'account_id', 'contact_id',
     }
+
+
+def test_0003_backfills_old_event_hash_as_same_canonical_envelope(tmp_path):
+    from whatsapp_chat_system.events.whatsapp import WhatsAppEventEnvelope, canonical_hash
+
+    database_path = tmp_path / 'old-event.db'
+    config = _alembic_config(database_path)
+    command.upgrade(config, '0002')
+    engine = create_engine(f'sqlite:///{database_path}')
+    payload = {'state': 'online'}
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO whatsapp_accounts
+              (id, name, status, session_ref, is_primary, enabled, auto_reply_mode, created_at, updated_at)
+            VALUES
+              ('account-a', 'A', 'online', 'account:account-a', 1, 1, 'off',
+               '2026-07-10 00:00:00.000000', '2026-07-10 00:00:00.000000')
+        """))
+        connection.execute(text("""
+            INSERT INTO whatsapp_events
+              (id, event_id, account_id, event_type, occurred_at, payload, status)
+            VALUES
+              ('old-row', 'old-event', 'account-a', 'account.connected',
+               '2026-07-10 00:00:00.000000', :payload, 'processed')
+        """), {'payload': '{"state":"online"}'})
+    engine.dispose()
+
+    command.upgrade(config, '0003')
+    engine = create_engine(f'sqlite:///{database_path}')
+    with engine.connect() as connection:
+        stored = connection.execute(text(
+            "SELECT sequence, payload_hash FROM whatsapp_events WHERE id='old-row'"
+        )).one()
+    engine.dispose()
+    envelope = WhatsAppEventEnvelope.model_validate({
+        'event_id': 'old-event', 'event_type': 'account.connected', 'account_id': 'account-a',
+        'occurred_at': '2026-07-10T00:00:00Z', 'sequence': 0, 'payload': payload,
+    })
+    assert stored.sequence == 0
+    assert stored.payload_hash == canonical_hash(envelope)
+
+
+def test_0003_downgrade_aborts_clearly_on_cross_account_event_id_conflict(tmp_path):
+    database_path = tmp_path / 'downgrade-conflict.db'
+    config = _alembic_config(database_path)
+    command.upgrade(config, '0003')
+    engine = create_engine(f'sqlite:///{database_path}')
+    with engine.begin() as connection:
+        for account_id in ('account-a', 'account-b'):
+            connection.execute(text("""
+                INSERT INTO whatsapp_accounts
+                  (id, name, status, session_ref, is_primary, enabled, auto_reply_mode,
+                   last_event_sequence, created_at, updated_at)
+                VALUES
+                  (:id, :id, 'offline', :ref, 0, 1, 'off', 0,
+                   '2026-07-10 00:00:00', '2026-07-10 00:00:00')
+            """), {'id': account_id, 'ref': f'account:{account_id}'})
+            connection.execute(text("""
+                INSERT INTO whatsapp_events
+                  (id, event_id, account_id, event_type, occurred_at, payload, status,
+                   sequence, payload_hash)
+                VALUES
+                  (:id, 'shared-event', :account_id, 'account.disconnected',
+                   '2026-07-10 00:00:00', '{}', 'processed', 1, :payload_hash)
+            """), {
+                'id': f'event-{account_id}',
+                'account_id': account_id,
+                'payload_hash': account_id.ljust(64, '0'),
+            })
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match='cross-account.*event_id.*shared-event'):
+        command.downgrade(config, '0002')

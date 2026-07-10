@@ -41,8 +41,8 @@
 
 ### SDD-P0-03 独立 Bridge V2 单账号
 
-- 状态：`In Progress`
-- 当前进度：账号控制面 API、Bridge HTTP Client 契约与 fail-closed 配置已实现；Node/Baileys Bridge、内部事件接收、真实扫码验收尚未完成。
+- 状态：`Implemented`
+- 当前进度：账号控制面、独立 Node/Baileys Bridge、持久化 spool、内部事件接收、状态/消息/回执事务落库均已实现并通过全量测试与 3100 无真实账号安全影子验证。真实 WhatsApp 扫码、session 恢复、真实收发/回执仍待测试账号验收，完成后才可进入 `Verified`。
 - 实施计划：`docs/plans/2026-07-10-bridge-v2-account-center.md`
 - 验收：
   - 不运行 Hermes gateway 仍可扫码、连接、收发和恢复 session；

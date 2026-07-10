@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -101,6 +102,7 @@ class WhatsAppAccount(TimestampMixin, Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(128))
     last_error_message: Mapped[str | None] = mapped_column(Text)
+    last_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
 class Contact(TimestampMixin, Base):
@@ -239,6 +241,8 @@ class Message(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AIRuntimeSetting(TimestampMixin, Base):
@@ -284,9 +288,10 @@ class ContactAIOverride(Base):
 class WhatsAppEvent(Base):
     __tablename__ = 'whatsapp_events'
     __table_args__ = (
-        UniqueConstraint('event_id', name='uq_whatsapp_events_event_id'),
+        UniqueConstraint('account_id', 'event_id', name='uq_whatsapp_events_account_event_id'),
         CheckConstraint("status IN ('received', 'processed', 'failed')", name='status_valid'),
         Index('ix_whatsapp_events_account_status_occurred', 'account_id', 'status', 'occurred_at'),
+        Index('ix_whatsapp_events_account_sequence', 'account_id', 'sequence'),
     )
 
     id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
@@ -301,6 +306,8 @@ class WhatsAppEvent(Base):
         DateTime(timezone=True), nullable=False, default=utc_now
     )
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default='received')
     error: Mapped[str | None] = mapped_column(Text)
