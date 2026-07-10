@@ -28,6 +28,13 @@ web/.vite/
 *.db-shm
 *.db-wal
 
+# Local audit / evidence artifacts
+screenshots/
+audit-artifacts/
+.artifacts/screenshots/
+.artifacts/audits/
+*.har
+
 # IDE
 .vscode/
 .idea/
