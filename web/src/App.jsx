@@ -174,8 +174,15 @@ function AppInner() {
   }, [conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
 
   const refreshSettings = useCallback(async () => {
-    setSettings(await api.get('/settings'))
+    const [settingsData, aiData] = await Promise.all([
+      api.get('/settings'),
+      api.get('/v1/ai/settings').catch(() => ({})),
+    ])
+    setSettings(settingsData)
+    setApiSettings(aiData)
   }, [])
+
+  const [apiSettings, setApiSettings] = useState({})
 
   useEffect(() => {
     api.get('/health').then(setHealth).catch(() => {})
@@ -205,6 +212,13 @@ function AppInner() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const saveAiSettings = async ({ base_url, default_model, api_key }) => {
+    await api.put('/v1/ai/settings', { base_url, default_model, api_key })
+    // 重新加载 AI 设置到本地 state
+    const fresh = await api.get('/v1/ai/settings')
+    setApiSettings(fresh)
   }
 
   const sendReply = async (target, message, mode) => {
@@ -485,6 +499,8 @@ function AppInner() {
         onSave={saveSettings}
         saving={saving}
         modelDefault={settings.model?.default || ''}
+        apiSettings={apiSettings}
+        onSaveAiSettings={saveAiSettings}
       />
 
       {banner ? <div className="wx-toast">{banner}</div> : null}

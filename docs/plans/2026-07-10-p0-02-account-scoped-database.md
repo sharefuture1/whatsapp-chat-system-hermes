@@ -17,9 +17,12 @@
 - `conversations`
 - `messages`
 - `ai_profiles`
+- `ai_runtime_settings`
 - `contact_ai_overrides`
 - `whatsapp_events`
 - `outbox_messages`
+
+同时完成管理员设置页的问鼎 AI 全局模型/API key 配置：模型明文可编辑；API key 只允许新增/替换，服务端认证加密存储，页面和 API 不回显明文。
 
 本阶段不实现：
 
@@ -56,11 +59,15 @@
 - `tests/test_db_migrations.py`
 - `tests/test_db_account_isolation.py`
 - `tests/test_db_idempotency.py`
+- `tests/test_ai_runtime_settings.py`
 
 修改：
 
-- `pyproject.toml`：增加 SQLAlchemy、Alembic；测试增加必要依赖。
+- `pyproject.toml`：增加 SQLAlchemy、Alembic、cryptography；测试增加必要依赖。
 - `src/whatsapp_chat_system/settings.py`：增加独立数据库设置，不读取 Hermes profile。
+- `src/whatsapp_chat_system/ai/service.py`、`web_api.py`：读取数据库覆盖并热更新。
+- `web/src/components/SettingsPanel.jsx`：增加模型和 API key 安全编辑区。
+- 四语言 i18n：增加模型、密钥、保存、已配置和安全提示文案。
 - SDD/四文件：状态与验证记录。
 
 ## TDD 任务
@@ -81,7 +88,7 @@ GREEN：实现 `DatabaseSettings`、engine/session factory。
 
 RED：
 
-- `alembic upgrade head` 创建 8 张首批表；
+- `alembic upgrade head` 创建 9 张首批表；
 - 必需外键、唯一约束和索引存在；
 - `alembic downgrade base` 可完全回退；
 - 再次 upgrade 可成功。
@@ -113,7 +120,22 @@ RED：
 
 GREEN：实现 repository 幂等接口和约束错误映射。
 
-### Task 5：集成与兼容
+### Task 5：AI Runtime 设置和设置页
+
+RED：
+
+- 数据库模型覆盖环境默认模型，空值恢复默认；
+- 新 key 以认证加密密文存储，数据库和 GET API 不出现明文；
+- 空 key 更新保留原值；显式清除后回退环境 key；
+- 无 `AI_SECRET_ENCRYPTION_KEY` 时拒绝保存明文 key；
+- 保存后下一次 AI 请求使用新模型/key，无需重启；
+- 设置 API 只返回 `api_key_configured/api_key_hint`；
+- 设置页能编辑模型和替换 key，不回显已有 key；
+- 更新写审计事件且不含 key。
+
+GREEN：实现加密 secret store、runtime settings repository、PUT/DELETE API 和设置页。
+
+### Task 6：集成与兼容
 
 RED：
 

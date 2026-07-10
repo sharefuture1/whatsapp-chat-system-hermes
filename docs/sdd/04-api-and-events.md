@@ -192,11 +192,36 @@ Body：
   "provider": "wendingai",
   "base_url": "https://wendingai.future1.us/v1",
   "default_model": "gpt-5.3-codex-spark",
-  "api_key_configured": true
+  "effective_model": "gpt-5.3-codex-spark",
+  "model_source": "database_override",
+  "api_key_configured": true,
+  "api_key_hint": "••••a9K2"
 }
 ```
 
-不得返回 API key。
+不得返回 API key 或密文。
+
+### `PUT /api/v1/ai/settings`
+
+```json
+{
+  "default_model": "gpt-5.4",
+  "api_key": "new-secret-or-empty-to-keep"
+}
+```
+
+规则：
+
+- 仅管理员可调用；
+- `default_model` trim 后为空则恢复 `gpt-5.3-codex-spark`；
+- `api_key` 为空或省略表示保留当前密钥；
+- 新密钥必须使用 `AI_SECRET_ENCRYPTION_KEY` 做认证加密后入库；
+- 响应只返回安全字段，并在保存后立即成为后续 AI 请求的有效配置；
+- 更新必须写审计日志，但审计内容不得包含明文 key。
+
+### `DELETE /api/v1/ai/settings/api-key`
+
+必须提交二次确认字段；清除数据库密钥后回退环境变量。若环境变量也为空，则 `api_key_configured=false`，AI 请求返回结构化 `configuration_error`。
 
 ## 6. 插件 API
 

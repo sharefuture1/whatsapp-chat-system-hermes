@@ -13,6 +13,9 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn>=0.30.0",
   "pydantic>=2.8.0",
+  "SQLAlchemy>=2.0",
+  "Alembic>=1.13.0",
+  "cryptography>=42.0.0",
 ]
 
 [project.scripts]

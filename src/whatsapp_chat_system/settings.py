@@ -12,6 +12,20 @@ DEFAULT_WENDING_AI_TIMEOUT_SECONDS = 90
 DEFAULT_WENDING_AI_MAX_RETRIES = 2
 MAX_WENDING_AI_TIMEOUT_SECONDS = 300
 MAX_WENDING_AI_RETRIES = 5
+DEFAULT_DATABASE_URL = 'sqlite:///./data/whatsapp-chat-system.db'
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseSettings:
+    """独立业务数据库配置，不读取 Hermes profile 或 config。"""
+
+    database_url: str = DEFAULT_DATABASE_URL
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> 'DatabaseSettings':
+        values = environ if env is None else env
+        database_url = (values.get('DATABASE_URL') or '').strip() or DEFAULT_DATABASE_URL
+        return cls(database_url=database_url)
 
 
 @dataclass(frozen=True, slots=True)

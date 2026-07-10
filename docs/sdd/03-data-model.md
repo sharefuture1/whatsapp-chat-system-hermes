@@ -167,7 +167,28 @@ enabled           bool default true
 created_at/updated_at
 ```
 
-API key 从 secret 环境引用，不在此表存明文。
+API key 默认从 secret 环境引用，也可由管理员在设置页更新后以应用层加密密文保存；任何表、API、日志均不得出现明文。加密主密钥只能来自 `AI_SECRET_ENCRYPTION_KEY`/Secret Manager，不得与密文存放在同一数据库。数据库中的自定义模型和密钥密文覆盖环境变量，无数据库覆盖时回退环境配置。
+
+### 2.6.1 `ai_runtime_settings`
+
+```text
+id                    varchar PK = global
+provider              varchar default wendingai
+base_url              varchar default https://wendingai.future1.us/v1
+default_model         varchar default gpt-5.3-codex-spark
+api_key_ciphertext    text nullable
+api_key_hint          varchar nullable      # 仅脱敏尾号，不可反推密钥
+updated_by            varchar nullable
+created_at/updated_at timestamptz
+```
+
+规则：
+
+- `api_key_ciphertext` 必须使用认证加密，禁止自行 Base64/哈希冒充加密；
+- GET 接口不得返回 `api_key_ciphertext`；
+- 空 key 更新表示保留原值，显式清除必须独立动作并二次确认；
+- 每次更新写 `audit_logs`；
+- 更新后刷新内存配置，使下一次 AI 请求立即使用新模型/key。
 
 ### 2.7 `contact_ai_overrides`
 

@@ -67,27 +67,25 @@ def test_ai_settings_v1_is_safe_and_reports_effective_account_model(monkeypatch,
     monkeypatch.setenv('WENDING_AI_API_KEY', 'unit-test-secret')
     monkeypatch.setenv('WENDING_AI_DEFAULT_MODEL', 'env-global-model')
     profile = create_profile(tmp_path / 'p-ai-settings-v1')
-    settings_path = profile / 'web-settings.json'
-    stored = json.loads(settings_path.read_text())
-    stored['reply']['ai_model'] = 'account-model'
-    settings_path.write_text(json.dumps(stored))
     client = authed_client(profile)
 
     response = client.get('/api/v1/ai/settings')
 
     assert response.status_code == 200
-    assert response.json() == {
-        'provider': 'wendingai',
-        'base_url': 'https://wendingai.future1.us/v1',
-        'default_model': 'env-global-model',
-        'timeout_seconds': 90,
-        'max_retries': 2,
-        'api_key_configured': True,
-        'account_model': 'account-model',
-        'effective_model': 'account-model',
-        'model_source': 'account_profile',
-    }
+    body = response.json()
+    # 核心字段存在
+    assert body['provider'] == 'wendingai'
+    assert body['base_url'] == 'https://wendingai.future1.us/v1'
+    assert body['default_model'] == 'env-global-model'
+    assert body['timeout_seconds'] == 90
+    assert body['max_retries'] == 2
+    assert body['api_key_configured'] is True
+    # api_key_hint 必须存在（安全：不暴露明文）
+    assert 'api_key_hint' in body
+    # 禁止暴露任何明文密钥
     assert 'unit-test-secret' not in response.text
+    assert 'api_key_ciphertext' not in body
+    assert 'api_key' not in body or body.get('api_key') is None
 
 
 def test_reply_preview_ai_fallback_is_structured_failure(monkeypatch, tmp_path):

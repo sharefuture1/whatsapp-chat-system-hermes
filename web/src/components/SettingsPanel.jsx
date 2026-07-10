@@ -23,7 +23,7 @@ function commandFor(workspace) {
   return option.command.replace('<profile>', workspace.profile || workspace.id || workspace.platform)
 }
 
-export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving, modelDefault = '' }) {
+export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving, modelDefault = '', apiSettings = {}, onSaveAiSettings }) {
   const { t } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
@@ -33,6 +33,12 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
   const [userOverrides, setUserOverrides] = useState(Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({ user_id, ...(value || {}) })))
   const [password, setPassword] = useState('')
   const [tab, setTab] = useState('reply')
+  // AI runtime settings state
+  const [aiBaseUrl, setAiBaseUrl] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiSaving, setAiSaving] = useState(false)
+  const [aiSaved, setAiSaved] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -45,6 +51,15 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setPassword('')
     setTab(initialTab || 'reply')
   }, [open, channels, settings, initialTab])
+
+  // 当 AI tab 打开时，同步 apiSettings 到本地 state
+  useEffect(() => {
+    if (tab !== 'ai') return
+    setAiBaseUrl(apiSettings.base_url || '')
+    setAiModel(apiSettings.default_model || '')
+    setAiApiKey('')
+    setAiSaved(false)
+  }, [tab, apiSettings])
 
   useEffect(() => {
     if (!open) return
@@ -93,6 +108,23 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setWorkspaces(prev => prev.filter((_, i) => i !== index))
   }
 
+  const saveAiSettings = async () => {
+    if (!onSaveAiSettings) return
+    setAiSaving(true)
+    setAiSaved(false)
+    try {
+      await onSaveAiSettings({
+        base_url: aiBaseUrl || null,
+        default_model: aiModel || null,
+        api_key: aiApiKey || null,
+      })
+      setAiSaved(true)
+      setAiApiKey('')
+    } finally {
+      setAiSaving(false)
+    }
+  }
+
   const save = () => onSave({
     channels: draftChannels,
     web_settings: {
@@ -134,6 +166,10 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
             <button role="tab" aria-selected={tab==='reply'} className={`tab ${tab==='reply' ? 'active' : ''}`} onClick={() => setTab('reply')}>
               <span>{t('replyPolicy')}</span>
               <small>AI / Prompt / 风格</small>
+            </button>
+            <button role="tab" aria-selected={tab==='ai'} className={`tab ${tab==='ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
+              <span>AI {t('settings') || '设置'}</span>
+              <small>模型 / 密钥</small>
             </button>
             <button role="tab" aria-selected={tab==='ui'} className={`tab ${tab==='ui' ? 'active' : ''}`} onClick={() => setTab('ui')}>
               <span>{t('uiBehavior')}</span>
@@ -192,6 +228,73 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+          {tab === 'ai' && (
+            <div className="settings-section">
+              <h3>AI {t('settings') || '设置'}</h3>
+              <p className="subtle" style={{ marginBottom: 16 }}>
+                配置问鼎 AI（Wending AI）模型与密钥。修改后立即生效，无需重启服务。
+              </p>
+              <div className="settings-grid">
+                <label className="full-span">
+                  <span>API 密钥</span>
+                  <input
+                    type="password"
+                    value={aiApiKey}
+                    onChange={e => setAiApiKey(e.target.value)}
+                    placeholder={apiSettings.api_key_configured ? '已配置（填入新值以更新）' : '请输入问鼎 AI API 密钥'}
+                    autoComplete="new-password"
+                  />
+                  {apiSettings.api_key_hint && (
+                    <span className="wx-contact-card-hint" style={{ color: 'var(--wx-text-muted)', fontSize: 12 }}>
+                      当前：{apiSettings.api_key_hint} &nbsp;<button className="ghost-btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setAiApiKey('')}>不修改</button>
+                    </span>
+                  )}
+                </label>
+                <label className="full-span">
+                  <span>模型名称</span>
+                  <input
+                    type="text"
+                    value={aiModel}
+                    onChange={e => setAiModel(e.target.value)}
+                    placeholder={apiSettings.default_model || 'gpt-5.3-codex-spark'}
+                  />
+                  <span className="wx-contact-card-hint" style={{ color: 'var(--wx-text-muted)', fontSize: 12 }}>
+                    当前有效模型：<code>{apiSettings.default_model}</code>
+                  </span>
+                </label>
+                <label className="full-span">
+                  <span>API 地址</span>
+                  <input
+                    type="url"
+                    value={aiBaseUrl}
+                    onChange={e => setAiBaseUrl(e.target.value)}
+                    placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
+                  />
+                </label>
+              </div>
+              {aiSaved && (
+                <div style={{ color: 'var(--wx-brand)', fontSize: 13, marginTop: 8 }}>
+                  ✓ 保存成功，下次 AI 请求自动使用新配置
+                </div>
+              )}
+              <div style={{ marginTop: 16 }}>
+                <button className="wx-primary-btn" onClick={saveAiSettings} disabled={aiSaving}>
+                  {aiSaving ? '保存中…' : '保存 AI 设置'}
+                </button>
+              </div>
+              <div style={{ marginTop: 20, padding: '12px', background: 'var(--wx-bg-secondary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--wx-text-muted)' }}>
+                  <strong style={{ color: 'var(--wx-text)' }}>安全说明</strong>
+                  <ul style={{ margin: '8px 0 0 16px', padding: 0 }}>
+                    <li>API 密钥在传输层加密后存储</li>
+                    <li>密钥不会出现在日志、响应或代码中</li>
+                    <li>仅显示尾号提示（如 <code>***abc123</code>）</li>
+                    <li>留空 API 密钥字段 = 保留原值，不清除</li>
+                  </ul>
+                </div>
               </div>
             </div>
           )}

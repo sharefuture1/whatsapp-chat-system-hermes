@@ -68,6 +68,32 @@ class WendingAIProvider:
         self.settings = settings
         self._injected_session = session
         self.sleep = sleep
+        # 运行时设置管理器（由 setup_ai_runtime_settings 注入）
+        self._runtime_manager: 'RuntimeAISettingsManager | None' = None
+
+    def set_runtime_manager(self, mgr: 'RuntimeAISettingsManager | None') -> None:
+        """由 web_api.py 在启动时注入运行时设置管理器，实现保存后热生效。"""
+        self._runtime_manager = mgr
+
+    def _effective_base_url(self) -> str:
+        if self._runtime_manager:
+            return self._runtime_manager.effective_base_url
+        return self.settings.base_url
+
+    def _effective_api_key(self) -> str:
+        if self._runtime_manager:
+            return self._runtime_manager.effective_api_key
+        return self.settings.api_key
+
+    def _effective_timeout(self) -> int:
+        if self._runtime_manager:
+            return self._runtime_manager.effective_timeout
+        return self.settings.timeout_seconds
+
+    def _effective_retries(self) -> int:
+        if self._runtime_manager:
+            return self._runtime_manager.effective_retries
+        return self.settings.max_retries
 
     def chat(
         self,
@@ -77,13 +103,13 @@ class WendingAIProvider:
         response_format: dict[str, Any] | None = None,
         temperature: float | None = None,
     ) -> AIResult:
-        if not self.settings.api_key.strip():
+        if not self._effective_api_key().strip():
             raise AIProviderError(
                 code='configuration_error',
                 message='Wending AI API key is not configured',
                 retryable=False,
             )
-        if self.settings.timeout_seconds <= 0 or self.settings.max_retries < 0:
+        if self._effective_timeout() <= 0 or self._effective_retries() < 0:
             raise AIProviderError(
                 code='configuration_error',
                 message='Wending AI settings are invalid',
@@ -118,16 +144,20 @@ class WendingAIProvider:
         model: str,
         started: float,
     ) -> AIResult:
-        for attempt in range(self.settings.max_retries + 1):
+        base_url = self._effective_base_url()
+        api_key = self._effective_api_key()
+        timeout = self._effective_timeout()
+        max_retries = self._effective_retries()
+        for attempt in range(max_retries + 1):
             try:
                 response = session.post(
-                    f"{self.settings.base_url.rstrip('/')}/chat/completions",
+                    f"{base_url.rstrip('/')}/chat/completions",
                     headers={
-                        'Authorization': f'Bearer {self.settings.api_key}',
+                        'Authorization': f'Bearer {api_key}',
                         'Content-Type': 'application/json',
                     },
                     json=payload,
-                    timeout=self.settings.timeout_seconds,
+                    timeout=timeout,
                 )
             except requests.Timeout as exc:
                 error = AIProviderError(
@@ -135,7 +165,7 @@ class WendingAIProvider:
                     message='Wending AI request timed out',
                     retryable=True,
                 )
-                if attempt < self.settings.max_retries:
+                if attempt < max_retries:
                     self.sleep(_retry_delay(attempt))
                     continue
                 raise error from exc

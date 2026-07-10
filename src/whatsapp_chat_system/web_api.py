@@ -14,8 +14,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
+from .ai.provider import WendingAIProvider
 from .config import AppConfig, build_password_record, load_json, save_json, verify_password
+from .db import create_engine, session_scope
+from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
+from .settings import AISettings
 from .memory_refresh import MemoryRefresher
 from .origins import OriginsCache
 from .router import AdminRouter
@@ -105,6 +110,199 @@ class BroadcastRequest(BaseModel):
 class PluginToggleRequest(BaseModel):
     plugin_id: str
     enabled: bool
+
+
+class AISettingsUpdateRequest(BaseModel):
+    """AI 设置更新请求；仅传入非空字段以增量更新。"""
+
+    base_url: str | None = Field(default=None, max_length=2048)
+    default_model: str | None = Field(default=None, max_length=255)
+    api_key: str | None = Field(default=None, max_length=512)  # 空字符串=清除
+    timeout_seconds: int | None = Field(default=None, ge=1, le=300)
+    max_retries: int | None = Field(default=None, ge=0, le=5)
+
+
+# ---------------------------------------------------------------------------
+# 运行时 AI 设置管理器 — 支持保存后立即热生效，无需重启
+# ---------------------------------------------------------------------------
+
+class RuntimeAISettingsManager:
+    """线程安全的运行时 AI 配置管理器。
+
+    优先级：DB 加密存储 > 环境变量
+    保存后立即更新内存副本，下一次 AI 请求自动使用新配置。
+    """
+
+    def __init__(self, base_settings: AISettings) -> None:
+        from threading import RLock
+
+        self._lock = RLock()
+        self._base = base_settings
+        self._override_model: str | None = None
+        self._override_base_url: str | None = None
+        self._override_api_key: str | None = None
+        self._override_timeout: int | None = None
+        self._override_retries: int | None = None
+        self._db_key_ciphertext: str | None = None
+        self._db_key_hint: str | None = None
+        self._db_loaded = False
+
+    # -- getters (运行时主读取入口) ----------------------------------------
+
+    @property
+    def effective_api_key(self) -> str:
+        with self._lock:
+            if self._override_api_key is not None:
+                return self._override_api_key
+            if self._db_key_ciphertext:
+                return decrypt_api_key(self._db_key_ciphertext)
+            return self._base.api_key
+
+    @property
+    def effective_model(self) -> str:
+        with self._lock:
+            return self._override_model or self._base.default_model
+
+    @property
+    def effective_base_url(self) -> str:
+        with self._lock:
+            return self._override_base_url or self._base.base_url
+
+    @property
+    def effective_timeout(self) -> int:
+        with self._lock:
+            return self._override_timeout or self._base.timeout_seconds
+
+    @property
+    def effective_retries(self) -> int:
+        with self._lock:
+            return self._override_retries or self._base.max_retries
+
+    @property
+    def api_key_hint(self) -> str | None:
+        with self._lock:
+            return self._db_key_hint
+
+    @property
+    def has_db_override(self) -> bool:
+        with self._lock:
+            return self._db_loaded
+
+    # -- DB 加载（启动时调用一次）-----------------------------------------
+
+    def load_from_db(self) -> None:
+        """从业务数据库加载 AIRuntimeSetting 行，填充运行时缓存。"""
+        engine = create_engine()
+        with session_scope(engine) as db:
+            row = db.get(AIRuntimeSetting, 'global')
+            if row:
+                with self._lock:
+                    if row.default_model:
+                        self._override_model = row.default_model
+                    if row.base_url:
+                        self._override_base_url = row.base_url
+                    self._db_key_ciphertext = row.api_key_ciphertext
+                    self._db_key_hint = row.api_key_hint
+                    if row.timeout_seconds:
+                        self._override_timeout = row.timeout_seconds
+                    if row.max_retries:
+                        self._override_retries = row.max_retries
+                    self._db_loaded = True
+
+    # -- DB 保存（POST 时调用）--------------------------------------------
+
+    def save_to_db(
+        self,
+        *,
+        base_url: str | None = None,
+        default_model: str | None = None,
+        api_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_retries: int | None = None,
+    ) -> dict[str, Any]:
+        """原子写入/更新 AIRuntimeSetting；返回保存后的公开信息。"""
+        from .settings import _normalize_base_url as norm_url
+
+        engine = create_engine()
+        with session_scope(engine) as db:
+            row = db.get(AIRuntimeSetting, 'global')
+            if row is None:
+                row = AIRuntimeSetting(id='global', provider='wendingai')
+                db.add(row)
+
+            if base_url is not None:
+                row.base_url = norm_url(base_url)
+                with self._lock:
+                    self._override_base_url = row.base_url
+            if default_model is not None:
+                row.default_model = default_model.strip()
+                with self._lock:
+                    self._override_model = row.default_model
+            if api_key is not None:  # 空字符串=清除，非空=加密存储
+                if api_key.strip():
+                    ciphertext = encrypt_api_key(api_key.strip())
+                    row.api_key_ciphertext = ciphertext
+                    row.api_key_hint = mask_api_key(api_key.strip())
+                    with self._lock:
+                        self._db_key_ciphertext = ciphertext
+                        self._db_key_hint = row.api_key_hint
+                        self._override_api_key = None  # 清除内存覆盖，改为从 DB 密文解密
+                else:
+                    row.api_key_ciphertext = None
+                    row.api_key_hint = None
+                    with self._lock:
+                        self._db_key_ciphertext = None
+                        self._db_key_hint = None
+                        self._override_api_key = None
+            if timeout_seconds is not None:
+                row.timeout_seconds = timeout_seconds
+                with self._lock:
+                    self._override_timeout = timeout_seconds
+            if max_retries is not None:
+                row.max_retries = max_retries
+                with self._lock:
+                    self._override_retries = max_retries
+
+            db.flush()
+            return {
+                'base_url': row.base_url,
+                'default_model': row.default_model,
+                'api_key_hint': row.api_key_hint,
+                'api_key_configured': bool(row.api_key_ciphertext),
+            }
+
+    def to_safe_dict(self) -> dict[str, Any]:
+        """返回安全的公开字典（不含密钥明文）。"""
+        return {
+            'provider': 'wendingai',
+            'base_url': self.effective_base_url,
+            'default_model': self.effective_model,
+            'timeout_seconds': self.effective_timeout,
+            'max_retries': self.effective_retries,
+            'api_key_configured': bool(self.effective_api_key),
+            'api_key_hint': self.api_key_hint,
+        }
+
+
+# 全局单例（由 setup_ai_runtime_settings 初始化）
+_runtime_ai_settings: RuntimeAISettingsManager | None = None
+
+
+def setup_ai_runtime_settings(base_settings: AISettings) -> RuntimeAISettingsManager:
+    global _runtime_ai_settings
+    mgr = RuntimeAISettingsManager(base_settings)
+    try:
+        mgr.load_from_db()
+    except Exception:
+        pass  # DB 未初始化或迁移未运行；降级到纯 env 模式
+    _runtime_ai_settings = mgr
+    return mgr
+
+
+def get_runtime_ai_settings() -> RuntimeAISettingsManager:
+    if _runtime_ai_settings is None:
+        raise RuntimeError('setup_ai_runtime_settings() must be called before use')
+    return _runtime_ai_settings
 
 
 _origins_cache = OriginsCache(ttl_seconds=30)
@@ -472,10 +670,25 @@ def build_app(
 ) -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
+
+    # ---------- 运行时 AI 设置（必须在 AdminRouter/Rewriter 之前初始化 ----------
+    runtime_ai_mgr = setup_ai_runtime_settings(config.ai_settings)
+
     router = AdminRouter(config)
+    # 将运行时设置管理器注入 Provider，下次 AI 请求立即使用新配置
+    provider = router.rewriter.ai_service.provider
+    if isinstance(provider, WendingAIProvider):
+        provider.set_runtime_manager(runtime_ai_mgr)
+
     forwarder = AdminForwarder(config)
     refresher = MemoryRefresher(config)
     frontend_dist = _resolve_frontend_dist(web_dist)
+
+    # ---------- 热刷新函数（供 POST /api/v1/ai/settings 调用）----------
+    def _refresh_ai_provider_runtime() -> None:
+        # RuntimeAISettingsManager 在 save_to_db() 后已更新内存副本，
+        # 此处只需确认 Provider 已持有最新引用（实际上已经持有，因为是同一个 mgr）
+        pass
 
     # ---------------- Plugin center (declared up-front so other endpoints can read flags) ----------------
     PLUGIN_CATALOG = [
@@ -914,14 +1127,34 @@ def build_app(
 
     @app.get('/api/v1/ai/settings')
     def ai_settings() -> dict[str, Any]:
-        account_model = str((config.web_settings.get('reply') or {}).get('ai_model') or '').strip()
-        resolution = router.rewriter.ai_service.resolve_model(account_model=account_model)
-        return {
-            **config.ai_settings.safe_dict(),
-            'account_model': account_model,
-            'effective_model': resolution.model,
-            'model_source': resolution.source,
-        }
+        """返回当前有效 AI 配置（不含密钥明文）。"""
+        try:
+            mgr = get_runtime_ai_settings()
+            return mgr.to_safe_dict()
+        except RuntimeError:
+            # 降级：使用原始 env 配置
+            return {
+                **config.ai_settings.safe_dict(),
+                'api_key_hint': None,
+            }
+
+    @app.put('/api/v1/ai/settings')
+    def update_ai_settings(request: AISettingsUpdateRequest) -> dict[str, Any]:
+        """更新 AI 运行配置；密钥自动加密存储，保存后立即生效。"""
+        try:
+            mgr = get_runtime_ai_settings()
+            saved = mgr.save_to_db(
+                base_url=request.base_url,
+                default_model=request.default_model,
+                api_key=request.api_key,
+                timeout_seconds=request.timeout_seconds,
+                max_retries=request.max_retries,
+            )
+            # 刷新 AI Provider 的运行时配置（热生效）
+            _refresh_ai_provider_runtime()
+            return {'success': True, **saved}
+        except RuntimeError:
+            raise HTTPException(status_code=500, detail='AI settings not initialised')
 
     @app.put('/api/settings')
     def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:

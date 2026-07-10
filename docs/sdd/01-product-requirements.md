@@ -32,6 +32,9 @@
 - **FR-AI-005 [Approved]**：AI 请求失败必须返回结构化错误，禁止伪装成模型成功。
 - **FR-AI-006 [Approved]**：设置页显示 effective model 及来源层级，但不返回 API key。
 - **FR-AI-007 [Approved]**：记录 request ID、模型、延迟、状态与 usage；日志不得包含密钥和完整敏感消息。
+- **FR-AI-008 [Approved]**：管理员可在设置页自定义问鼎 AI 全局默认模型并立即热生效；空值回退 `gpt-5.3-codex-spark`。
+- **FR-AI-009 [Approved]**：管理员可在设置页新增或替换问鼎 AI API key；密钥必须服务端加密保存，API 只返回 `api_key_configured` 和脱敏提示，不得返回明文。空提交表示保留原密钥，显式清除必须二次确认并写审计日志。
+- **FR-AI-010 [Approved]**：数据库内保存的模型和加密密钥覆盖环境变量；数据库无值时回退 `WENDING_AI_*` 环境变量。密钥更新后新的 AI 请求立即使用新配置，无需重启服务。
 
 ### 3.3 多 WhatsApp 账号
 
