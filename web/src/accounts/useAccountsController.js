@@ -4,6 +4,7 @@ import { normalizeAccount, summarizeAccounts } from './accountState'
 
 export function useAccountsController(active) {
   const [accounts, setAccounts] = useState([])
+  const [selectedAccountId, setSelectedAccountIdState] = useState(() => localStorage.getItem('wa-selected-account') || 'all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const requestRef = useRef(0)
@@ -68,8 +69,16 @@ export function useAccountsController(active) {
     return result
   }, [refresh])
 
+  const setSelectedAccountId = useCallback(accountId => {
+    const value = accountId || 'all'
+    localStorage.setItem('wa-selected-account', value)
+    setSelectedAccountIdState(value)
+  }, [])
+
   return {
     accounts,
+    selectedAccountId,
+    setSelectedAccountId,
     summary: useMemo(() => summarizeAccounts(accounts), [accounts]),
     loading,
     error,

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from .ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
 from .ai.provider import WendingAIProvider
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
+from .api.v1.conversations import create_conversations_router
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
     whatsapp_validation_exception_handler,
@@ -851,6 +852,7 @@ def build_app(
         else:
             resolved_account_bridge = DisabledBridgeClient()
     app.include_router(create_accounts_router(resolved_account_factory, resolved_account_bridge))
+    app.include_router(create_conversations_router(resolved_account_factory))
     resolved_event_token = (
         internal_event_token
         if internal_event_token is not None

@@ -127,7 +127,7 @@ function SwipeRow({ rowId, children, onPin, onDelete, pinned, t, isOpen, onReque
   )
 }
 
-export default function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, onOpenSettings }) {
+export default function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, accounts = [], selectedAccountId = 'all', selectedAccountName = '', onAccountChange, onOpenSettings }) {
   const { t } = useSettings()
   const [openSwipeId, setOpenSwipeId] = useState(null)
   const showPlatformFilter = platformOptions && platformOptions.length > 1
@@ -156,8 +156,16 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
   const pinnedItems = conversations.filter(item => isPinnedFn(item.user_id) || item.pinned)
   const normalItems = conversations.filter(item => !isPinnedFn(item.user_id) && !item.pinned)
 
-  return <aside className="wx-sidebar" onClick={e => { if (e.target.closest('.wx-sidebar-header,.wx-search,.wx-platform-filter')) setOpenSwipeId(null) }}>
+  return <aside className="wx-sidebar" onClick={e => { if (e.target.closest('.wx-sidebar-header,.wx-search,.wx-platform-filter,.wx-account-filter')) setOpenSwipeId(null) }}>
     <div className="wx-sidebar-header"><h1>{t('tabChats')}</h1><div className="wx-sidebar-actions"><button type="button" className="wx-icon-btn" aria-label={t('settings')} onClick={onOpenSettings}><SettingsIcon /></button></div></div>
+    {accounts.length > 0 ? <div className="wx-account-filter">
+      <label htmlFor="wx-account-select">{t('whatsappAccounts')}</label>
+      <select id="wx-account-select" value={selectedAccountId} onChange={e => onAccountChange?.(e.target.value)}>
+        <option value="all">{t('accountAll') || '全部账号'}</option>
+        {accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.status === 'online' ? ' · ●' : ''}</option>)}
+      </select>
+      {selectedAccountId !== 'all' && selectedAccountName ? <span>{selectedAccountName}</span> : null}
+    </div> : null}
     <div className="wx-search"><span className="wx-search-icon" aria-hidden="true"><SearchIcon /></span><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} /></div>
     {showPlatformFilter ? <div className="wx-platform-filter">{platformOptions.map(platform => <button key={platform} type="button" className={`wx-filter-chip ${platformFilter === platform ? 'active' : ''}`} onClick={() => onPlatformFilterChange(platform)}>{platform === 'all' ? 'ALL' : platformLabel(platform)}</button>)}</div> : null}
     <div className="wx-list" onScroll={() => setOpenSwipeId(null)}>

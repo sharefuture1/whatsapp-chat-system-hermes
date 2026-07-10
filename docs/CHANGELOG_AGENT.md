@@ -1,5 +1,18 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：修复第二账号已登录但页面无数据
+
+- 根因：Bridge V2 的事件已成功写入独立业务数据库，但聊天首页仍固定调用 Legacy `/api/conversations` 和 Hermes `state.db`，账号中心也没有把所选账号接入聊天查询。
+- 新增 `/api/v1/conversations` 与会话消息 API，严格按 `account_id` 查询独立数据库，响应携带 `account_id/account_name/conversation_id`。
+- 聊天列表新增“全部账号/单账号”选择器，选择持久化到本地；账号变化会清空旧会话选择并重新加载对应账号数据。
+- ChatPane 对独立数据库会话改用 conversation UUID 读取消息；Legacy 增量链保留用于迁移期旧会话。
+- 回归测试覆盖账号 B 会话可见、账号范围隔离、聚合视图及消息详情；Python 全量 `120 passed`。
+- 部署后真实验证：独立库当前 `1` 个在线 V2 账号、`2` 个会话、`8` 条消息；`/api/v1/conversations?account_id=all` 返回两条真实会话。
+- 当前网页资源：`index-CRFRy-mv.js` / `index-Dewmrv3Z.css`；FastAPI health 200。
+- 注意：当前运行实例实际上只登记了 `1` 个 V2 业务账号；用户所说“第二个账号”是相对 Legacy 旧账号而言，不代表独立 V2 数据库已有两个账号。
+
+---
+
 ## 2026-07-10：修复网页发送成功后消息不同步与感叹号残留
 
 - 根因：`/api/reply` 通过 Legacy Bridge `3000` 发送成功后，只返回 WhatsApp message ID，没有把 outbound assistant 消息写回页面读取的 Hermes `state.db`。

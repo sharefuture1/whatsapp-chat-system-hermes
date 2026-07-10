@@ -87,6 +87,8 @@ function mergeNewMessages(prev, incoming) {
 
 export default function ChatPane({
   userId,
+  conversationId,
+  standalone = false,
   userName,
   contactProfile,
   userOverride,
@@ -163,15 +165,18 @@ export default function ChatPane({
   const fetchPage = async (targetUserId, p, appendOlder = false) => {
     if (!targetUserId) return null
     const request = requestTracker.current.begin(targetUserId)
-    const res = await api.get(`/conversations/${encodeURIComponent(targetUserId)}?page=${p}&page_size=${pageSize}`)
+    const endpoint = standalone && conversationId
+      ? `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${pageSize}`
+      : `/conversations/${encodeURIComponent(targetUserId)}?page=${p}&page_size=${pageSize}`
+    const res = await api.get(endpoint)
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
-    const items = (res.messages || []).slice().reverse()
+    const items = standalone ? (res.messages || []).slice() : (res.messages || []).slice().reverse()
     if (appendOlder) {
       setMessages(prev => [...items, ...prev])
     } else {
       setMessages(prev => mergeFreshMessages(items, prev))
     }
-    setHasMore(Boolean(res.has_more))
+    setHasMore(standalone ? false : Boolean(res.has_more))
     setTotal(res.total_messages || 0)
     setHiddenCount(res.hidden_message_count || 0)
     setPage(p)
@@ -212,9 +217,10 @@ export default function ChatPane({
     return () => {
       requestTracker.current.invalidate()
     }
-  }, [userId, pageSize, uiSettings])
+  }, [userId, conversationId, standalone, pageSize, uiSettings])
 
   useEffect(() => {
+    if (standalone) return
     if (!userId || !refreshTick || fetchedFor.current !== userId) return
     const targetUserId = userId
     const wasAtBottom = lastBottomRef.current
@@ -242,7 +248,7 @@ export default function ChatPane({
     }
     drain().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTick, userId])
+  }, [refreshTick, userId, standalone])
 
   const loadMore = async () => {
     if (loadingMore || !hasMore || !userId) return

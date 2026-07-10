@@ -1,5 +1,17 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-10: V2 账号会话必须从独立业务库按 account_id 展示
+
+**决策**：账号中心中的 V2 账号状态与聊天首页必须使用同一独立业务数据库。聊天列表新增 `all|account_id` 作用域；独立会话详情使用 conversation UUID，不再用 JID 查询 Legacy `state.db`。
+
+- 页面不能因迁移期保留 Legacy API 而隐藏已成功落入独立库的 V2 消息。
+- 聚合视图中每条会话必须携带 `account_id` 和账号名；单账号筛选必须在服务端查询层生效。
+- 账号切换必须清空旧会话选择，避免把 A 账号选中的联系人内容显示在 B 账号上下文。
+- Legacy 消息链暂时保留作为回滚兼容，但不能再作为 V2 账号的显示真源。
+- 当前实例仅有一个 V2 业务账号，因此不能将“两个账号同时在线和隔离”标记为完成。
+
+---
+
 ## 2026-07-10: Legacy 网页直发成功必须同步写回页面消息源
 
 **决策**：迁移期 `/api/reply` 仍通过 Legacy Bridge 发送时，只有底层明确返回成功和真实 WhatsApp message ID 后，FastAPI 才把 outbound assistant 消息写入 Hermes `state.db`。

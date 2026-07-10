@@ -114,24 +114,24 @@ function AppInner() {
   }
 
   const fetchConversationsPage = useCallback(async (page, append = false) => {
-    const res = await api.get(`/conversations?page=${page}&page_size=${PAGE_SIZE}`)
+    const accountId = accountsController.selectedAccountId || 'all'
+    const res = await api.get(`/v1/conversations?account_id=${encodeURIComponent(accountId)}&limit=${PAGE_SIZE}`)
+    const nextItems = res.items || []
     if (append) {
-      setConversations(prev => [...prev, ...(res.items || [])])
+      setConversations(prev => [...prev, ...nextItems.filter(item => !prev.some(old => old.conversation_id === item.conversation_id))])
     } else {
-      setConversations(res.items || [])
+      setConversations(nextItems)
     }
     setConversationsTotal(res.total || 0)
     setConversationsHasMore(Boolean(res.has_more))
-    setConversationsPage(res.page || page)
-    return res
-  }, [])
+    setConversationsPage(page)
+    return { ...res, page, items: nextItems }
+  }, [accountsController.selectedAccountId])
 
   const refreshWorkspace = useCallback(async ({ silent = false } = {}) => {
     try {
-      const [dashboardRes, convRes] = await Promise.all([
-        api.get('/dashboard'),
-        fetchConversationsPage(1, false),
-      ])
+      const convRes = await fetchConversationsPage(1, false)
+      const dashboardRes = await api.get('/dashboard')
       const items = convRes.items || []
       setDashboard(dashboardRes)
       setConversations(items)
@@ -358,6 +358,10 @@ function AppInner() {
     return !!settings.web_settings?.message_ops?.auto_translate
   })()
   const selectedConversation = useMemo(() => conversations.find(c => c.user_id === selectedId) || null, [conversations, selectedId])
+  const selectedAccount = useMemo(
+    () => accountsController.accounts.find(item => item.id === accountsController.selectedAccountId) || null,
+    [accountsController.accounts, accountsController.selectedAccountId],
+  )
   const selectedContactProfile = useMemo(() => {
     if (!selectedConversation?.user_id) return null
     return (settings.web_settings?.contact_profiles || {})[selectedConversation.user_id] || null
@@ -435,10 +439,20 @@ function AppInner() {
               platformFilter={platformFilter}
               platformOptions={platformOptions}
               onPlatformFilterChange={setPlatformFilter}
+              accounts={accountsController.accounts}
+              selectedAccountId={accountsController.selectedAccountId}
+              selectedAccountName={selectedAccount?.name || ''}
+              onAccountChange={accountId => {
+                accountsController.setSelectedAccountId(accountId)
+                setSelectedId('')
+                setSelectedName('')
+              }}
               onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
             />
             <ChatPane
               userId={selectedId}
+              conversationId={selectedConversation?.conversation_id || ''}
+              standalone={Boolean(selectedConversation?.conversation_id)}
               userName={selectedName}
               contactProfile={selectedContactProfile}
               userOverride={selectedUserOverride}

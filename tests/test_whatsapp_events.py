@@ -179,6 +179,43 @@ def test_same_wa_message_id_is_independent_per_account_and_a_cannot_update_b(eve
         ]
 
 
+def test_v1_conversations_are_visible_and_scoped_by_account(events_api):
+    client, _ = events_api
+    assert post(client, envelope(event_id='a', account_id='account-a')).status_code == 200
+    assert post(client, envelope(
+        event_id='b', account_id='account-b',
+        payload=message_payload(
+            wa_message_id='WA-B', remote_jid='85621@s.whatsapp.net',
+            sender_jid='85621@s.whatsapp.net', push_name='Second account customer',
+            text='second account message',
+        ),
+    )).status_code == 200
+
+    login = client.post('/api/login', json={'password': 'test-pass'})
+    client.headers.update({'x-session-token': login.json()['session_token']})
+
+    account_b = client.get('/api/v1/conversations?account_id=account-b&limit=50')
+    assert account_b.status_code == 200
+    assert account_b.json()['total'] == 1
+    item = account_b.json()['items'][0]
+    assert item['account_id'] == 'account-b'
+    assert item['user_name'] == 'Second account customer'
+    assert item['last_message'] == 'second account message'
+
+    messages = client.get(
+        f"/api/v1/conversations/{item['conversation_id']}/messages?limit=50"
+    )
+    assert messages.status_code == 200
+    assert messages.json()['account_id'] == 'account-b'
+    assert [message['content'] for message in messages.json()['messages']] == [
+        'second account message'
+    ]
+
+    all_accounts = client.get('/api/v1/conversations?account_id=all&limit=50')
+    assert all_accounts.status_code == 200
+    assert all_accounts.json()['total'] == 2
+
+
 def test_preview_does_not_go_backwards_and_outbound_does_not_add_unread(events_api):
     client, factory = events_api
     newer = message_payload(wa_message_id='new', timestamp='2026-07-10T02:00:00Z', text='new')
