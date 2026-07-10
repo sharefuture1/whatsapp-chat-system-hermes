@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
-import { createConversationRequestTracker } from '../chatSync'
+import { createConversationRequestTracker, mergeFreshMessages } from '../chatSync'
 
 const QUICK_EMOJIS = ['😊', '😂', '🥺', '❤️', '👍', '🙏', '😌', '😉']
 
@@ -27,29 +27,15 @@ function dayKey(ts) {
   return d.toISOString().slice(0, 10)
 }
 
-function formatDay(ts) {
+function formatDay(ts, t) {
   const d = new Date(ts * 1000)
   const today = new Date()
   const yest = new Date()
   yest.setDate(today.getDate() - 1)
   const same = (a, b) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10)
-  if (same(d, today)) return 'Today'
-  if (same(d, yest)) return 'Yesterday'
+  if (same(d, today)) return t('today')
+  if (same(d, yest)) return t('yesterday')
   return d.toLocaleDateString()
-}
-
-function mergeFreshMessages(serverItems, currentItems) {
-  const serverPlatformIds = new Set(serverItems.map(item => String(item.platform_message_id || '')).filter(Boolean))
-  const serverKeys = new Set(serverItems.map(item => `${item.role}:${item.content}`))
-  const unresolvedLocal = currentItems.filter(item => {
-    const id = String(item.message_id || '')
-    if (!id.startsWith('tmp-') && !item.local_only) return false
-    if (!item.pending && !item.failed && !item.local_only) return false
-    const platformId = String(item.platform_message_id || '')
-    if (platformId && serverPlatformIds.has(platformId)) return false
-    return !serverKeys.has(`${item.role}:${item.content}`)
-  })
-  return [...serverItems, ...unresolvedLocal]
 }
 
 function normalizeRewriteLanguage(language) {
@@ -108,6 +94,8 @@ export default function ChatPane({
   uiSettings,
   onOpenSettings,
   onOpenContactConfig,
+  pinned = false,
+  onTogglePin,
   active,
   health,
   refreshTick,
@@ -143,6 +131,7 @@ export default function ChatPane({
   const composerRef = useRef(null)
   const [newMessageCount, setNewMessageCount] = useState(0)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const defaultMode = uiSettings?.reply?.default_mode || 'smart'
   const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
 
@@ -213,6 +202,7 @@ export default function ChatPane({
     setNewMessageCount(0)
     setMode(defaultMode)
     setToolsOpen(false)
+    setHeaderMenuOpen(false)
     setComposer('')
     setPreview(null)
     setPreviewError(false)
@@ -306,7 +296,7 @@ export default function ChatPane({
 
   const translateOne = async (msg) => {
     const translationId = String(msg?.message_id || '')
-    if (!translationId || msg.translated || msg.lang === 'Chinese' || translatingIdsRef.current.has(translationId)) return
+    if (!translationId || translationId.startsWith('tmp-') || msg.pending || msg.failed || msg.translated || msg.lang === 'Chinese' || translatingIdsRef.current.has(translationId)) return
     translatingIdsRef.current.add(translationId)
     try {
       const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
@@ -327,7 +317,7 @@ export default function ChatPane({
 
   useEffect(() => {
     if (!autoTranslate) return
-    const pending = messages.filter(m => !m.hidden && !m.translated && m.content && m.lang !== 'Chinese')
+    const pending = messages.filter(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese')
     if (pending.length === 0) return
     let cancelled = false
     ;(async () => {
@@ -346,7 +336,7 @@ export default function ChatPane({
       if (data?.success !== true) throw new Error(data?.detail || t('sendFailed'))
       const finalText = data?.rewrite?.message || optimisticText
       const platformId = data?.message_id || data?.messageId || null
-      const finalId = data?.local_message_id || tmpId
+      const finalId = data?.local_message_id || data?.message_id || tmpId
       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
       setMessages(prev => prev.map(m => m.message_id === tmpId ? {
         ...m,
@@ -424,6 +414,12 @@ export default function ChatPane({
     el.style.height = `${Math.min(140, Math.max(40, el.scrollHeight))}px`
   }, [composer])
 
+  const resizeComposer = event => {
+    const el = event.currentTarget
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(140, Math.max(40, el.scrollHeight))}px`
+  }
+
   const scrollToLatest = () => {
     const el = scrollRef.current
     if (!el) return
@@ -471,7 +467,7 @@ export default function ChatPane({
     for (const m of messages) {
       const k = dayKey(m.timestamp)
       if (k !== lastDay) {
-        out.push({ type: 'day', key: k, label: formatDay(m.timestamp) })
+        out.push({ type: 'day', key: k, label: formatDay(m.timestamp, t) })
         lastDay = k
       }
       out.push({ type: 'msg', ...m })
@@ -497,9 +493,19 @@ export default function ChatPane({
           <div className="wx-chat-title">{headerTitle}</div>
           <div className="wx-chat-sub"><span className="wx-online-dot"/><span>{accountLabel || String(platform || 'WA').toUpperCase()} · {accountName}</span></div>
         </div>
-        <button className="wx-icon-btn wx-chat-more-btn" onClick={openContactDrawer} title={t('contactDetails') || '聊天详情'} aria-label={t('contactDetails') || '聊天详情'}>
-          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
-        </button>
+        <div className="wx-chat-header-actions">
+          <button className={`wx-icon-btn wx-chat-pin-btn${pinned ? ' active' : ''}`} onClick={onTogglePin} title={pinned ? t('unpin') : t('pin')} aria-label={pinned ? t('unpin') : t('pin')}>
+            <svg viewBox="0 0 24 24"><path d="M12 17v5M8 3h8l-2 5 4 2-3 4H9l-3-4 4-2-2-5z"/></svg>
+          </button>
+          <button className="wx-icon-btn wx-chat-more-btn" onClick={() => setHeaderMenuOpen(prev => !prev)} title={t('more')} aria-label={t('more')}>
+            <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
+          </button>
+          {headerMenuOpen ? <div className="wx-chat-overflow-menu">
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh')}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails')}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>{t('settings')}</button>
+          </div> : null}
+        </div>
       </div>
 
       {!autoTranslate && autoTranslateState?.blockedReason === 'ai_not_configured' ? (
@@ -542,7 +548,7 @@ export default function ChatPane({
             const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
             return (
               <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${idx}`} onClick={() => setActiveMessageId(item.message_id)}>
-                <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? (t('me') || '我') : userName)}</div>
+                <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? t('operator') : userName)}</div>
                 <div>
                   <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
                     <div className="wx-bubble-content">{effectiveHidden ? t('hiddenPlaceholder') : item.content}</div>
@@ -657,7 +663,7 @@ export default function ChatPane({
           <button type="button" className="wx-composer-icon-btn" aria-label={t('quickEmoji')} onClick={() => setToolsOpen(prev => !prev)}>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8 14c1.1 1.3 2.4 2 4 2s2.9-.7 4-2"/></svg>
           </button>
-          <textarea ref={composerRef} value={composer} onChange={e => setComposer(e.target.value)} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} />
+          <textarea ref={composerRef} value={composer} onChange={e => setComposer(e.target.value)} onInput={resizeComposer} onKeyDown={onKey} placeholder={t('messagePlaceholder')} rows={1} />
           {composer.trim() ? (
             <button type="button" className={`wx-send-btn${sending ? ' sending' : ''}`} onClick={sendMessage} disabled={sending}>
               {sending ? <span className="wx-spinner sm" /> : t('send')}
@@ -670,9 +676,11 @@ export default function ChatPane({
         </div>
         {toolsOpen ? (
           <div className="wx-composer-tools-panel">
-            <button type="button" className={`wx-composer-tool ${mode === 'direct' ? 'active' : ''}`} onClick={() => setMode('direct')}><span><svg viewBox="0 0 24 24"><path d="M4 12h16M14 6l6 6-6 6"/></svg></span>{t('modeDirect')}</button>
-            <button type="button" className={`wx-composer-tool ${mode === 'smart' ? 'active' : ''}`} onClick={() => setMode('smart')}><span><svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4 12h4M16 12h4"/><circle cx="12" cy="12" r="4"/></svg></span>{t('modeSmart')}</button>
-            <button type="button" className={`wx-composer-tool ${mode === 'translate' ? 'active' : ''}`} onClick={() => setMode('translate')}><span><svg viewBox="0 0 24 24"><path d="M4 5h10M9 3v2M6 9c2 3 5 5 8 6M12 5c-1 5-4 8-8 10M15 19l3-8 3 8M16 16h4"/></svg></span>{t('modeTranslate')}</button>
+            <div className="wx-mode-choices" role="radiogroup" aria-label={t('mode')}>
+              <button type="button" role="radio" aria-checked={mode === 'direct'} className={`wx-mode-choice ${mode === 'direct' ? 'active' : ''}`} onClick={() => setMode('direct')}>{t('modeDirect')}</button>
+              <button type="button" role="radio" aria-checked={mode === 'smart'} className={`wx-mode-choice ${mode === 'smart' ? 'active' : ''}`} onClick={() => setMode('smart')}>{t('modeSmart')}</button>
+              <button type="button" role="radio" aria-checked={mode === 'translate'} className={`wx-mode-choice ${mode === 'translate' ? 'active' : ''}`} onClick={() => setMode('translate')}>{t('modeTranslate')}</button>
+            </div>
             <div className="wx-composer-emoji-grid" aria-label={t('quickEmoji')}>
               {QUICK_EMOJIS.map(emoji => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}
             </div>

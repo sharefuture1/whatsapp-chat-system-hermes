@@ -38,6 +38,15 @@
 
 ### P0 — 阻断核心聊天体验
 
+- [x] **完成移动会话两级导航和发送/翻译可靠性修复**
+  - 390px 初始全屏会话列表；进入聊天隐藏 TabBar，返回键清空 `selectedId`
+  - 桌面维持双栏，刷新时不再自动选择首会话
+  - `tmp-*`、pending、failed 消息禁止进入翻译请求，真实 ID 替换乐观 ID
+  - 服务端刷新保留最后一条自己消息的 `sent` 状态
+  - 置顶去重、未读纯红点、HH:MM 和 5 分钟时间合并完成
+  - textarea 根据 `scrollHeight` 增长到 140px；模式改为三选一
+  - Web 35、Python 129、Bridge 63 通过，移动/桌面真实 Chromium 验收通过
+
 - [x] **修复消息页周期性闪烁并收敛为微信聊天布局**
   - 账号轮询在无变化时保留 React 数组引用，Workspace callback 不再随每轮账号刷新重建
   - ChatPane 初始加载仅依赖稳定会话 identity，不再因完整 `uiSettings` 对象变化清空消息
@@ -137,9 +146,9 @@
 
 ### 当前验证结果（2026-07-10）
 
-- `npm run build`：✅ 通过，资源 `index-PRO4Ip4M.js` / `index-BuimO47C.css`
+- `npm run build`：✅ 通过，资源 `index-DRPbZjTf.js` / `index-n1Ei7oEG.css`
 - `pytest -q`：✅ 129 passed
-- `node --test web/tests/*.test.js`：✅ 22 passed
+- `node --test web/tests/*.test.js`：✅ 35 passed
 - `cd bridge && npm test`：✅ 63 passed
 - Bridge lint：✅ 通过
 - Bridge production audit：✅ 0 vulnerabilities

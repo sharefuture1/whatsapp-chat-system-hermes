@@ -7,7 +7,7 @@ function makeUserOverrideEntry() {
 }
 
 
-export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onClose, settings, channels, onSave, saving, modelDefault = '', apiSettings = {}, onSaveAiSettings }) {
+export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onOpenAccounts, onClose, settings, channels, onSave, saving, modelDefault = '', apiSettings = {}, onSaveAiSettings }) {
   const { t } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
@@ -136,10 +136,7 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t('settings')} onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header wx-settings-header">
-          <div>
-            <div className="wx-settings-eyebrow">WeChat Style Settings</div>
-            <h2>{t('settings')}</h2>
-          </div>
+          <div><h2>{t('settings')}</h2></div>
           <button className="wx-icon-btn" aria-label={t('dismiss')} onClick={onClose}>
             <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
@@ -159,8 +156,8 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
               <small>界面 / 自动翻译</small>
             </button>
             <button role="tab" aria-selected={tab==='channels'} className={`tab ${tab==='channels' ? 'active' : ''}`} onClick={() => setTab('channels')}>
-              <span>{t('channels')}</span>
-              <small>投递目标</small>
+              <span>{t('platformAccounts')}</span>
+              <small>{t('platformAccountsHelp')}</small>
             </button>
 
             <button role="tab" aria-selected={tab==='tools'} className={`tab ${tab==='tools' ? 'active' : ''}`} onClick={() => setTab('tools')}>
@@ -303,22 +300,36 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
 
           {tab === 'channels' && (
             <div className="settings-section">
-              <h3>{t('channels')}</h3>
-              <div className="channels-grid">
-                {draftChannels.map((channel, idx) => (
-                  <div className="channel-card" key={channel.id}>
-                    <div className="channel-card-header">
-                      <strong>{channel.name}</strong>
-                      <span className={`pill ${channel.enabled ? 'ok' : 'muted'}`}>{channel.enabled ? t('enabled') : t('disabled')}</span>
-                    </div>
-                    <label><span>{t('settingChannelName')}</span><input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} /></label>
-                    <label><span>{t('settingPlatform')}</span><input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} /></label>
-                    <label><span>{t('settingTarget')}</span><input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} /></label>
-                    <label><span>{t('settingKinds')}</span><input value={(channel.kinds || []).join(', ')} onChange={e => updateKinds(idx, e.target.value)} /></label>
-                    <label className="checkbox"><input type="checkbox" checked={channel.enabled} onChange={e => updateField(idx, 'enabled', e.target.checked)} />{t('settingEnableChannel')}</label>
-                  </div>
-                ))}
+              <div className="platform-toolbar">
+                <div>
+                  <h3>{t('platformAccounts')}</h3>
+                  <p className="subtle">{t('platformAccountsHelp')}</p>
+                </div>
+                <button type="button" className="wx-primary-btn" onClick={onOpenAccounts}>{t('manageAccounts')}</button>
               </div>
+              <div className="wx-settings-account-entry">
+                <strong>{t('whatsappAccounts')}</strong>
+                <span>{t('accountCenterHint')}</span>
+                <button type="button" className="ghost-btn" onClick={onOpenAccounts}>{t('openAccountCenter')}</button>
+              </div>
+              <details className="wx-advanced-disclosure">
+                <summary>{t('advanced')}</summary>
+                <div className="channels-grid">
+                  {draftChannels.map((channel, idx) => (
+                    <div className="channel-card" key={channel.id}>
+                      <div className="channel-card-header">
+                        <strong>{channel.name}</strong>
+                        <span className={`pill ${channel.enabled ? 'ok' : 'muted'}`}>{channel.enabled ? t('enabled') : t('disabled')}</span>
+                      </div>
+                      <label><span>{t('settingChannelName')}</span><input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} /></label>
+                      <label><span>{t('settingPlatform')}</span><input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} /></label>
+                      <label><span>{t('settingTarget')}</span><input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} /></label>
+                      <label><span>{t('settingKinds')}</span><input value={(channel.kinds || []).join(', ')} onChange={e => updateKinds(idx, e.target.value)} /></label>
+                      <label className="checkbox"><input type="checkbox" checked={channel.enabled} onChange={e => updateField(idx, 'enabled', e.target.checked)} />{t('settingEnableChannel')}</label>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </div>
           )}
           {tab === 'security' && (

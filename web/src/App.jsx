@@ -509,6 +509,8 @@ function AppInner() {
               uiSettings={settings.web_settings}
               onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
               onOpenContactConfig={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
+              pinned={selectedConversation ? pinnedSet.has(selectedConversation.user_id) || Boolean(selectedConversation.pinned) : false}
+              onTogglePin={() => selectedConversation?.user_id && togglePin(selectedConversation.user_id)}
               active
               health={health}
               refreshTick={refreshTick}
@@ -556,6 +558,7 @@ function AppInner() {
         open={settingsOpen}
         initialTab={settingsInitialTab}
         selectedConversation={selectedConversation}
+        onOpenAccounts={() => { setSettingsOpen(false); setActiveTab('me'); setAccountCenterOpen(true) }}
         onClose={() => setSettingsOpen(false)}
         settings={settings.web_settings}
         channels={settings.channels || []}

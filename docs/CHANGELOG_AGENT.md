@@ -1,5 +1,21 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-10：微信式移动两级导航与发送状态可靠性修复
+
+- 关联规格：`UX-001`、`UX-005`、`UX-006`、`UX-007`、`FR-MSG-001`、`FR-MSG-002`、`FR-MSG-007`、`FR-MSG-008`。
+- 手机 Chats 改为显式两级导航：无 `selectedId` 显示全屏列表，选中后显示聊天；聊天隐藏 TabBar，返回清空选择；桌面保持双栏。
+- 删除工作区刷新时自动选首会话的行为，确保手机返回列表不会被下一次轮询重新推进聊天。
+- 乐观消息 `tmp-*`、pending、failed 不进入翻译链；回复成功以真实 ID 替换临时 ID，避免 `/api/messages/tmp-*/translate` 422。
+- 抽取 `mergeFreshMessages`，服务端刷新按 `role+content` 保留本地 `sent` 标记，并保留尚未被服务端确认的乐观消息。
+- 置顶项从普通列表排除；未读改第二行纯红点，时间保留第一行；去除未读数字语义和消息总数药丸。
+- 气泡时间统一 HH:MM，同发送方 5 分钟内仅末条显示；相同原文译文不渲染，隐藏翻译操作仅 hover/激活时可见。
+- textarea 使用 `scrollHeight` 自动增高到 140px；回复模式改为直发/智能/翻译三选一；手机头部为返回+标题+置顶+更多，设置弹窗全屏。
+- 平台账号设置入口改为真实账号中心，底层 channel 路径/目标进入高级折叠；操作员头像改为语言无关 SVG。
+- 新增 `web/tests/mobileWechatUx.test.js` 和消息合并单元测试。
+- 浏览器验收：390×844 列表→聊天→返回状态正确、无横向溢出、textarea 高度 140px；1440×900 双栏、左右气泡和置顶去重正确。
+- 验证：Web 35 passed；Python 129 passed；Bridge 63 passed；Bridge lint 通过；Vite build 通过。
+- 生产资源：`index-DRPbZjTf.js` / `index-n1Ei7oEG.css`，本机与公网一致。
+
 ## 2026-07-10：修复聊天页闪烁并重构微信式消息布局
 
 - 关联规格：`FR-MSG-002`、`FR-MSG-007`、`UX-001`、`UX-005`、`UX-008`、`SDD-P1-05`、`SDD-P2-01`、`SDD-P2-06`。

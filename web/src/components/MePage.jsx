@@ -1,13 +1,14 @@
 import { useSettings } from '../settings'
 
 const AccountsIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M10 18h4"/></svg>
+const OperatorIcon = () => <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
 
 export default function MePage({ health, onOpenSettings, onOpenGlobalAi, onOpenAccounts, onLogout, autoTranslate, accountSummary, aiSummary }) {
   const { t, language, setLanguage, languages, theme, toggleTheme } = useSettings()
   return (
     <section className="wx-page wx-me-page">
       <div className="wx-me-hero">
-        <div className="wx-avatar lg" style={{ background: '#07c160' }}>{t('operatorInitial')}</div>
+        <div className="wx-avatar lg wx-operator-avatar" style={{ background: '#07c160' }}><OperatorIcon /></div>
         <div className="wx-me-hero-meta">
           <div className="wx-me-name">{t('operator')}</div>
           <div className="wx-me-sub">{t('operatorRole')}</div>

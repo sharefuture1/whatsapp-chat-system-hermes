@@ -1,8 +1,14 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 15:30 UTC
+> 最后更新：2026-07-10 17:10 UTC
 
 ## 当前结论
+
+- 移动 Chats 已完成微信式两级导航：390×844 初始只显示会话列表，点入聊天后 sidebar/TabBar 隐藏且返回键可见，返回后列表和 TabBar 恢复；桌面 1440×900 保持双栏并隐藏多余底部导航。
+- 乐观发送的 `tmp-*`、pending、failed 消息不会进入翻译 API；真实回复 ID 会替换临时 ID，刷新合并按 `role+content` 保留 `sent` 状态。
+- 置顶会话只渲染一次；时间固定第一行，未读为第二行纯红点；气泡时间为 HH:MM，同发送方 5 分钟内只在末条显示。
+- 输入框按 `scrollHeight` 自动长高并封顶 140px；模式改为直发/智能/翻译三选一；手机设置弹窗全屏。
+- 手机浏览器验收：列表 `flex` / 聊天 `none` / TabBar `flex`；进入聊天后列表 `none` / 聊天 `flex` / TabBar `none` / 返回键 `flex`；无横向溢出，长文本高度 140px。
 
 项目**尚未彻底从 Hermes 分离**，但独立 Bridge V2 的代码链路已进入 `Implemented`：
 
@@ -27,7 +33,7 @@
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-PRO4Ip4M.js` / `index-BuimO47C.css`，本机 FastAPI 与公网 `https://whats.future1.us` 资源哈希一致。
+- 前端：`index-DRPbZjTf.js` / `index-n1Ei7oEG.css`，本机 FastAPI 与公网 `https://whats.future1.us` 资源哈希一致。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2：`127.0.0.1:3100` 当前运行，live/ready 200，内部 token 与 FastAPI 配置一致；当前登记业务账号状态为 offline。
 - 独立会话 API：`/api/v1/conversations` 返回当前 V2 独立库数据，实测全部账号视图 2 条会话。
@@ -64,7 +70,7 @@ pytest -q                          129 passed, 1 warning
 bridge npm test                   63 passed
 bridge npm run lint               PASS
 bridge npm audit --omit=dev       0 vulnerabilities
-web node --test tests/*.test.js     22 passed
+web node --test tests/*.test.js     35 passed
 web npm run build                 PASS
 Alembic upgrade→downgrade→upgrade PASS
 git diff --check                  PASS
