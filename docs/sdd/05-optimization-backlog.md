@@ -30,7 +30,8 @@
 
 ### SDD-P0-02 新业务数据库与账号隔离
 
-- 状态：`Approved`
+- 状态：`In Progress`
+- 实施计划：`docs/plans/2026-07-10-p0-02-account-scoped-database.md`
 - 需求：DATA-001~007、FR-ACC-003、FR-CON-003
 - 验收：
   - 两账号相同 JID 可并存；
