@@ -71,6 +71,14 @@ curl http://127.0.0.1:8792/assets/$(curl -s http://127.0.0.1:8792/ | grep -o 'as
 
 ## 开发规范
 
+新成员初始化开发环境与 Git hooks：
+
+```bash
+./scripts/setup-dev.sh
+```
+
+自动检查说明见 `docs/DEVELOPMENT_CHECKS.md`。
+
 - **CSS 类命名**：`.wx-*` 前缀，所有 WeChat 设计 token 用 CSS 变量
 - **i18n**：所有用户可见字符串必须用 `t('key')`，4个语言块 key 必须完全对齐
 - **构建 gate**：`vite build` 必须通过；`pytest -q` 保持 44+ passed

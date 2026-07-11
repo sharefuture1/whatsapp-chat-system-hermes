@@ -1,0 +1,65 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-json
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+        stages: [pre-commit]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.3
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        stages: [pre-commit]
+      - id: ruff-format
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: bridge-js-syntax
+        name: bridge JavaScript syntax
+        entry: bash scripts/check-bridge-staged.sh
+        language: system
+        pass_filenames: false
+        files: ^bridge/(src|tests)/.*\.js$
+        stages: [pre-commit]
+      - id: git-diff-check
+        name: staged whitespace errors
+        entry: bash scripts/check-staged-diff.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: python-tests
+        name: Python test suite
+        entry: bash scripts/check-pre-push.sh python
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: web-test-build
+        name: Web tests and production build
+        entry: bash scripts/check-pre-push.sh web
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: bridge-test-lint
+        name: Bridge tests and lint
+        entry: bash scripts/check-pre-push.sh bridge
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

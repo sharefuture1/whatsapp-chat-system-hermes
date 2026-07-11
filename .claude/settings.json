@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/claude-post-edit.py\"",
+            "timeout": 30,
+            "statusMessage": "Formatting and checking the modified file"
+          }
+        ]
+      }
+    ]
+  }
+}
