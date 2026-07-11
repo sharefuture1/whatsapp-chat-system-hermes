@@ -57,7 +57,26 @@ export default function ContactsPage({ contacts = [], accounts = [], onSelect })
       <div className="wx-search wx-contact-search"><span className="wx-search-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span><input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchContactsPlaceholder') || '搜索联系人、账号或 ID'} /></div>
     </div>
     <div className="wx-contacts-scroll">
-      {grouped.length === 0 ? <div className="wx-empty-pill">{t('noContacts') || '暂无联系人'}</div> : grouped.map(group => <section className="wx-contact-account-group" key={group.account?.id || group.items[0]?.account_id}>
+      {grouped.length === 0 ? (
+        <div className="wx-empty-state">
+          <div className="wx-empty-illustration">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="28" cy="24" r="10" stroke="currentColor" strokeWidth="2.5" fill="none"/><path d="M10 52c0-9 8-15 18-15s18 6 18 15" stroke="currentColor" strokeWidth="2.5" fill="none" strokeLinecap="round"/><circle cx="50" cy="22" r="8" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M42 40c3-2 8-3 12-1" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>
+          </div>
+          <h3>{t('noContacts') || '暂无联系人'}</h3>
+          <p>{t('contactsEmptyHint') || 'WhatsApp 联系人会在消息往来后自动同步'}</p>
+          <div className="wx-empty-actions">
+            <div className="wx-empty-tip">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+              <span>{t('contactsTipTitle') || '如何添加联系人？'}</span>
+            </div>
+            <ol className="wx-empty-steps">
+              <li>{t('contactsStep1') || '让对方给你发一条 WhatsApp 消息'}</li>
+              <li>{t('contactsStep2') || '或在 WhatsApp 中给对方发消息'}</li>
+              <li>{t('contactsStep3') || '联系人将在消息往来后自动出现在此处'}</li>
+            </ol>
+          </div>
+        </div>
+      ) : grouped.map(group => <section className="wx-contact-account-group" key={group.account?.id || group.items[0]?.account_id}>
         <div className="wx-contact-group-title"><span>{group.account?.label || group.items[0]?.account_label || 'WA'}</span><strong>{group.account?.name || group.items[0]?.account_name}</strong><em>{group.items.length}</em></div>
         <div className="wx-contact-list">{group.items.map(item => <button key={item.contact_key} type="button" className="wx-contact-row" onClick={() => onSelect(item)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
