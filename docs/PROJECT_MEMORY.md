@@ -1,8 +1,13 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-10 17:10 UTC
+> 最后更新：2026-07-11 UTC
 
 ## 当前结论
+
+- 前端性能调度已完成一轮收敛：Workspace 与账号轮询均为 single-flight + completion-scheduled，后台标签不调度常规刷新，恢复可见后只保留一个 loop owner。
+- 自动翻译改为单 worker 串行批处理；切换会话或关闭自动翻译会 Abort 旧请求，并用 generation 阻止旧响应写入新会话；失败消息在同批内不重复请求。
+- 网页发送成功后已移除 450ms 延迟全量重拉，直接采用服务端真实 ID，并由既有增量轮询完成最终对账。
+- 当前生产资源：`index-CPzFRVjQ.js` / `index-n1Ei7oEG.css`；本机与公网资源一致。Web 39、Python 129、Bridge 63 全部通过；390×844 与 1440×900 公网页均无横向溢出或控制台错误。
 
 - 移动 Chats 已完成微信式两级导航：390×844 初始只显示会话列表，点入聊天后 sidebar/TabBar 隐藏且返回键可见，返回后列表和 TabBar 恢复；桌面 1440×900 保持双栏并隐藏多余底部导航。
 - 乐观发送的 `tmp-*`、pending、failed 消息不会进入翻译 API；真实回复 ID 会替换临时 ID，刷新合并按 `role+content` 保留 `sent` 状态。

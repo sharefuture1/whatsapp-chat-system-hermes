@@ -26,7 +26,7 @@ test('temporary pending and failed messages are never submitted for translation'
   assert.match(source, /translationId\.startsWith\('tmp-'\)/)
   assert.match(source, /msg\.pending/)
   assert.match(source, /msg\.failed/)
-  assert.match(source, /messages\.filter\([\s\S]*!String\(m\.message_id[\s\S]*startsWith\('tmp-'\)/)
+  assert.match(source, /messagesRef\.current\.find\([\s\S]*!String\(m\.message_id[\s\S]*startsWith\('tmp-'\)/)
 })
 
 test('successful send replaces optimistic id with a real server id', () => {

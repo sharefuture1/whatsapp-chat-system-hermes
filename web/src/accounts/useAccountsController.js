@@ -14,30 +14,67 @@ export function useAccountsController(active) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const requestRef = useRef(0)
+  const refreshPromiseRef = useRef(null)
 
-  const refresh = useCallback(async ({ silent = false } = {}) => {
+  const refresh = useCallback(({ silent = false } = {}) => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current
     const requestId = ++requestRef.current
     if (!silent) setLoading(true)
-    try {
-      const data = await api.get('/v1/accounts')
-      if (requestId !== requestRef.current) return
-      const next = (data?.items || []).map(normalizeAccount)
-      setAccounts(prev => sameAccounts(prev, next) ? prev : next)
-      setError('')
-    } catch (err) {
-      if (requestId === requestRef.current) setError(err?.message || 'accounts_load_failed')
-      throw err
-    } finally {
-      if (!silent && requestId === requestRef.current) setLoading(false)
-    }
+    const run = (async () => {
+      try {
+        const data = await api.get('/v1/accounts')
+        if (requestId !== requestRef.current) return
+        const next = (data?.items || []).map(normalizeAccount)
+        setAccounts(prev => sameAccounts(prev, next) ? prev : next)
+        setError('')
+      } catch (err) {
+        if (requestId === requestRef.current) setError(err?.message || 'accounts_load_failed')
+        throw err
+      } finally {
+        if (!silent && requestId === requestRef.current) setLoading(false)
+      }
+    })()
+    refreshPromiseRef.current = run
+    run.then(
+      () => { if (refreshPromiseRef.current === run) refreshPromiseRef.current = null },
+      () => { if (refreshPromiseRef.current === run) refreshPromiseRef.current = null },
+    )
+    return run
   }, [])
 
   useEffect(() => {
     if (!active) return undefined
+    let timer = null
+    let stopped = false
+    let running = false
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+    }
+    const schedule = (wait = 3000) => {
+      if (stopped || document.visibilityState !== 'visible') return
+      clearTimer()
+      timer = setTimeout(run, wait)
+    }
+    const run = async () => {
+      timer = null
+      if (stopped || running || document.visibilityState !== 'visible') return
+      running = true
+      await refresh({ silent: true }).catch(() => {})
+      running = false
+      schedule()
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') schedule(0)
+      else clearTimer()
+    }
     refresh().catch(() => {})
-    const timer = setInterval(() => refresh({ silent: true }).catch(() => {}), 3000)
+    schedule()
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
-      clearInterval(timer)
+      stopped = true
+      clearTimer()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       requestRef.current += 1
     }
   }, [active, refresh])

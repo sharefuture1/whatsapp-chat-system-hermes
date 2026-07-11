@@ -85,6 +85,7 @@ function AppInner() {
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
   const accountsRef = useRef([])
+  const workspaceRefreshPromiseRef = useRef(null)
   accountsRef.current = accountsController.accounts
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
@@ -159,41 +160,50 @@ function AppInner() {
     return { items: nextItems, total: nextItems.length, has_more: Boolean(legacyRes.has_more), page }
   }, [])
 
-  const refreshWorkspace = useCallback(async ({ silent = false } = {}) => {
-    try {
-      const convRes = await fetchConversationsPage(1, false)
-      const dashboardRes = await api.get('/dashboard')
-      const items = convRes.items || []
-      setDashboard(dashboardRes)
-      setConversations(items)
-      setConversationsTotal(convRes.total || 0)
-      setConversationsHasMore(Boolean(convRes.has_more))
-      setConversationsPage(convRes.page || 1)
-      setRefreshTick(prev => prev + 1)
-      // Sync pinned set from server-side authoritative flag
-      setPinned(prev => {
-        const next = items.filter(i => i.pinned).map(i => i.user_id)
-        if (next.length === prev.length && next.every((id, idx) => prev[idx] === id)) return prev
-        localStorage.setItem(PIN_KEY, JSON.stringify(next))
-        return next
-      })
+  const refreshWorkspace = useCallback(({ silent = false } = {}) => {
+    if (workspaceRefreshPromiseRef.current) return workspaceRefreshPromiseRef.current
+    const run = (async () => {
+      try {
+        const convRes = await fetchConversationsPage(1, false)
+        const dashboardRes = await api.get('/dashboard')
+        const items = convRes.items || []
+        setDashboard(dashboardRes)
+        setConversations(items)
+        setConversationsTotal(convRes.total || 0)
+        setConversationsHasMore(Boolean(convRes.has_more))
+        setConversationsPage(convRes.page || 1)
+        setRefreshTick(prev => prev + 1)
+        // Sync pinned set from server-side authoritative flag
+        setPinned(prev => {
+          const next = items.filter(i => i.pinned).map(i => i.user_id)
+          if (next.length === prev.length && next.every((id, idx) => prev[idx] === id)) return prev
+          localStorage.setItem(PIN_KEY, JSON.stringify(next))
+          return next
+        })
 
-      setSelectedId(prev => {
-        if (!prev) {
+        setSelectedId(prev => {
+          if (!prev) {
+            setSelectedName('')
+            return ''
+          }
+          const current = items.find(c => c.conversation_key === prev)
+          if (current) {
+            setSelectedName(current.user_name)
+            return prev
+          }
           setSelectedName('')
           return ''
-        }
-        const current = items.find(c => c.conversation_key === prev)
-        if (current) {
-          setSelectedName(current.user_name)
-          return prev
-        }
-        setSelectedName('')
-        return ''
-      })
-    } catch (e) {
-      if (!silent) showError(e)
-    }
+        })
+      } catch (e) {
+        if (!silent) showError(e)
+      }
+    })()
+    workspaceRefreshPromiseRef.current = run
+    run.then(
+      () => { if (workspaceRefreshPromiseRef.current === run) workspaceRefreshPromiseRef.current = null },
+      () => { if (workspaceRefreshPromiseRef.current === run) workspaceRefreshPromiseRef.current = null },
+    )
+    return run
   }, [fetchConversationsPage])
 
   const loadMoreConversations = useCallback(async () => {
@@ -231,9 +241,39 @@ function AppInner() {
 
   const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds) || 0
   useEffect(() => {
-    if (!sessionToken || autoSeconds <= 0) return
-    const interval = setInterval(() => refreshWorkspace({ silent: true }), Math.max(3, autoSeconds) * 1000)
-    return () => clearInterval(interval)
+    if (!sessionToken || autoSeconds <= 0) return undefined
+    let timer = null
+    let stopped = false
+    let running = false
+    const delay = Math.max(3, autoSeconds) * 1000
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer)
+      timer = null
+    }
+    const schedule = (wait = delay) => {
+      if (stopped || document.visibilityState !== 'visible') return
+      clearTimer()
+      timer = setTimeout(run, wait)
+    }
+    const run = async () => {
+      timer = null
+      if (stopped || running || document.visibilityState !== 'visible') return
+      running = true
+      await refreshWorkspace({ silent: true })
+      running = false
+      schedule()
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') schedule(0)
+      else clearTimer()
+    }
+    schedule()
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      stopped = true
+      clearTimer()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [sessionToken, autoSeconds, refreshWorkspace])
 
   const saveSettings = async (payload, done) => {

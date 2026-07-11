@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const src = path.resolve('src')
-const read = file => fs.readFileSync(path.join(src, file), 'utf8')
+const src = new URL('../src/', import.meta.url)
+const read = file => fs.readFileSync(new URL(file, src), 'utf8')
 
 test('auto translate uses one effective gate including plugin and AI availability', () => {
   const app = read('App.jsx')

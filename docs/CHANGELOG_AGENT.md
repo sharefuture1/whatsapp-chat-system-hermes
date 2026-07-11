@@ -1,5 +1,17 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-11：前端轮询、翻译调度与发送对账性能优化
+
+- 关联规格：`NFR-PERF-002`、`NFR-REL-002`、`SDD-P1-05`。
+- Workspace 与账号刷新增加 single-flight，同一数据源已有请求时复用 Promise；清理使用显式成功/失败分支，避免 `finally()` 派生未处理 rejection。
+- 固定 `setInterval` 改为请求结束后 `setTimeout` 调度；hidden tab 清除定时器，visible 后由唯一 loop owner 恢复一次，慢网和频繁切换不再累积并行轮询链。
+- 自动翻译改为单 worker 串行批处理，每批最多 6 条；同批失败消息不立即重复请求，剩余任务主动续批。
+- 会话切换、组件清理或关闭自动翻译时 Abort 当前翻译请求，并以 generation 校验阻止旧响应更新新会话。
+- 发送成功继续使用服务端真实 local/platform ID 就地更新乐观消息，移除 450ms 后额外全量聊天刷新。
+- 新增 `web/tests/performanceScheduling.test.js`，同步更新临时消息与自动翻译源码契约测试。
+- 验证：Web `39 passed`、Python `129 passed`、Bridge `63 passed`、Bridge lint、Vite build、`git diff --check` 全部通过。
+- 公网 Chromium：390×844 与 1440×900 均 HTTP 200、无控制台错误、`scrollWidth === clientWidth`；生产资源为 `index-CPzFRVjQ.js` / `index-n1Ei7oEG.css`。
+
 ## 2026-07-10：微信式移动两级导航与发送状态可靠性修复
 
 - 关联规格：`UX-001`、`UX-005`、`UX-006`、`UX-007`、`FR-MSG-001`、`FR-MSG-002`、`FR-MSG-007`、`FR-MSG-008`。

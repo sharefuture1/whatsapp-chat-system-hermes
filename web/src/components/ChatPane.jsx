@@ -128,12 +128,24 @@ export default function ChatPane({
   const requestTracker = useRef(createConversationRequestTracker())
   const deltaCursorRef = useRef(0)
   const translatingIdsRef = useRef(new Set())
+  const translationWorkerRunningRef = useRef(false)
+  const translationGenerationRef = useRef(0)
+  const translationAbortRef = useRef(null)
+  const messagesRef = useRef([])
+  const translationQueueVersionRef = useRef(0)
+  const [translationWorkerTick, setTranslationWorkerTick] = useState(0)
   const composerRef = useRef(null)
   const [newMessageCount, setNewMessageCount] = useState(0)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
   const defaultMode = uiSettings?.reply?.default_mode || 'smart'
   const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
+  messagesRef.current = messages
+  const translationQueueVersion = messages.reduce((version, message) => {
+    if (message.hidden || message.pending || message.failed || String(message.message_id || '').startsWith('tmp-') || message.translated || !message.content || message.lang === 'Chinese') return version
+    return `${version}|${message.message_id}`
+  }, '')
+  if (translationQueueVersionRef.current !== translationQueueVersion) translationQueueVersionRef.current = translationQueueVersion
 
   useEffect(() => {
     if (mode === 'direct') {
@@ -191,6 +203,10 @@ export default function ChatPane({
       return
     }
     const targetUserId = userId
+    translationGenerationRef.current += 1
+    translationAbortRef.current?.abort()
+    translationAbortRef.current = null
+    translatingIdsRef.current.clear()
     requestTracker.current.activate(targetUserId)
     setMessages([])
     setHasMore(false)
@@ -217,6 +233,9 @@ export default function ChatPane({
         if (requestTracker.current.isActive(targetUserId)) setInitialLoading(false)
       })
     return () => {
+      translationGenerationRef.current += 1
+      translationAbortRef.current?.abort()
+      translationAbortRef.current = null
       requestTracker.current.invalidate()
     }
   }, [conversationKey, defaultMode, pageSize])
@@ -294,40 +313,65 @@ export default function ChatPane({
     if (lastBottomRef.current && newMessageCount) setNewMessageCount(0)
   }
 
-  const translateOne = async (msg) => {
+  const translateOne = async (msg, generation, signal) => {
     const translationId = String(msg?.message_id || '')
-    if (!translationId || translationId.startsWith('tmp-') || msg.pending || msg.failed || msg.translated || msg.lang === 'Chinese' || translatingIdsRef.current.has(translationId)) return
+    if (!translationId || translationId.startsWith('tmp-') || msg.pending || msg.failed || msg.translated || msg.lang === 'Chinese' || translatingIdsRef.current.has(translationId)) return false
     translatingIdsRef.current.add(translationId)
     try {
-      const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content })
+      const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content }, { signal })
+      if (generation !== translationGenerationRef.current || signal.aborted) return false
       if (res?.success === false || !res?.translated) {
         const code = res?.error?.code || 'translation_failed'
         setTranslationError(code === 'configuration_error' ? t('translationAiNotConfigured') : t('translationFailed'))
-        return
+        return false
       }
       setTranslationError('')
       setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, translated: res.translated, lang: res.lang || m.lang } : m))
+      return true
     } catch (error) {
+      if (signal.aborted || generation !== translationGenerationRef.current) return false
       const code = error?.data?.detail?.code || error?.data?.code || error?.code
       setTranslationError(code === 'auto_translate_disabled' ? t('translationDisabled') : t('translationFailed'))
+      return false
     } finally {
       translatingIdsRef.current.delete(translationId)
     }
   }
 
   useEffect(() => {
-    if (!autoTranslate) return
-    const pending = messages.filter(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese')
-    if (pending.length === 0) return
-    let cancelled = false
+    if (!autoTranslate) {
+      translationGenerationRef.current += 1
+      translationAbortRef.current?.abort()
+      translationAbortRef.current = null
+    }
+  }, [autoTranslate])
+
+  useEffect(() => {
+    if (!autoTranslate || !userId || translationWorkerRunningRef.current) return
+    const generation = translationGenerationRef.current
+    const controller = new AbortController()
+    const attempted = new Set()
+    translationAbortRef.current = controller
+    translationWorkerRunningRef.current = true
     ;(async () => {
-      for (const msg of pending.slice(0, 6)) {
-        if (cancelled) break
-        await translateOne(msg)
+      let processed = 0
+      while (!controller.signal.aborted && generation === translationGenerationRef.current && processed < 6) {
+        const msg = messagesRef.current.find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
+        if (!msg) break
+        const id = String(msg.message_id || '')
+        attempted.add(id)
+        processed += 1
+        await translateOne(msg, generation, controller.signal)
       }
-    })()
-    return () => { cancelled = true }
-  }, [messages, autoTranslate, userId])
+    })().finally(() => {
+      if (translationAbortRef.current === controller) translationAbortRef.current = null
+      translationWorkerRunningRef.current = false
+      if (!controller.signal.aborted && generation === translationGenerationRef.current) {
+        const hasMore = messagesRef.current.some(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && !attempted.has(String(m.message_id || '')))
+        if (hasMore) setTranslationWorkerTick(prev => prev + 1)
+      }
+    })
+  }, [translationQueueVersion, autoTranslate, userId, translationWorkerTick])
 
   const deliverMessage = async (tmpId, target, sourceText, sendMode, optimisticText) => {
     setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: true, failed: false, error: '' } : m))
@@ -351,11 +395,6 @@ export default function ChatPane({
         translated: null,
       } : m))
       setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
-      if (target === userId && requestTracker.current.isActive(target)) {
-        setTimeout(() => {
-          if (requestTracker.current.isActive(target)) fetchPage(target, 1, false).catch(() => {})
-        }, 450)
-      }
     } catch (error) {
       setMessages(prev => prev.map(m => m.message_id === tmpId ? {
         ...m,

@@ -1,5 +1,19 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-11: 轮询必须由单一 loop owner 在前台按请求完成时间调度
+
+**决策**：Workspace 与账号状态轮询使用 single-flight 请求和 completion-scheduled `setTimeout`，不得使用可能与慢请求重叠的固定 `setInterval`。页面 hidden 时清除常规定时器，visible 后只恢复一次。
+
+- single-flight 不仅约束 HTTP Promise，也必须保证只有一个 loop owner；visibility 恢复不能衍生第二条定时链。
+- 请求失败后的清理不能制造未观察的 rejected Promise。
+- 自动翻译在前端迁移期只允许一个 worker 串行处理；切换会话或关闭功能必须 abort 当前请求并阻止旧响应回填。
+- 发送成功以真实消息 ID 就地替换乐观消息，不再用裸 `setTimeout` 触发额外全量拉取。
+- 服务端异步翻译队列仍是 `SDD-P1-05` 的最终目标，本决策只治理迁移期前端并发。
+
+**关联规格**：`NFR-PERF-002`、`NFR-REL-002`、`SDD-P1-05`。
+
+---
+
 ## 2026-07-10: 自动翻译可用性必须由插件、消息设置和 Provider 共同决定
 
 **决策**：插件目录显示“已开启”不代表自动翻译可用。运行时唯一有效状态必须同时检查 `plugins.auto_translate`、`message_ops.auto_translate` 和 AI Provider 密钥配置。
