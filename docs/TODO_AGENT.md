@@ -4,6 +4,25 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
+### P0 — AI 关系智能（数据层已实现，Worker/API/UI 待推进）
+
+- [>] **Evidence → Claim → Snapshot 人物画像闭环**
+  - [x] P0 数据层：7 个实体、Alembic `0004`、联系人 revision、Claim/Evidence/Snapshot Repository、CAS/savepoint 原子性
+  - [x] 账号/联系人/会话 scope、人工锁定保护、restricted/过期过滤、精确来源版本
+  - [ ] 单联系人总结/刷新画像 Worker 与任务 claim/lease 执行器
+  - [ ] 画像 API：证据追溯、人工确认/编辑/锁定/拒绝
+  - [ ] 联系人详情：概览/画像/记忆/总结/AI策略五 Tab
+  - [ ] 回复预览只使用当前相关、已接受且未过期的记忆和画像
+  - SDD：`docs/sdd/08-ai-relationship-and-multichannel.md`
+  - 计划：`docs/plans/2026-07-11-ai-relationship-intelligence-p0.md`
+- [ ] **画像插件真实 Worker 接线**
+  - `conversation_summary`、`contact_profile_ai`、`bulk_profile_sync`
+  - Worker readiness、配置 Schema、预算、dry-run、暂停/取消/重试
+- [ ] **多平台账号 Adapter**
+  - P1：Telegram Business Connected Bots / Bot API
+  - P2：Meta Page Messenger / Instagram / WhatsApp Cloud API 与 Policy Gateway
+  - TDLib 仅作为完整用户客户端的高级可选路径
+
 ### P0 — 前端性能与调度可靠性
 
 - [x] **完成轮询 single-flight、后台暂停与翻译并发治理**

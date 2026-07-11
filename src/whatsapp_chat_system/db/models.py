@@ -129,6 +129,7 @@ class Contact(TimestampMixin, Base):
     language: Mapped[str | None] = mapped_column(String(32))
     avatar_url: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any] | None] = mapped_column('metadata', JSON)
+    profile_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class Conversation(TimestampMixin, Base):
@@ -353,14 +354,198 @@ class OutboxMessage(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class ConversationSegment(TimestampMixin, Base):
+    __tablename__ = 'conversation_segments'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'conversation_id', 'start_message_id', 'end_message_id', 'analyzer_version', 'content_hash', name='uq_conversation_segments_scope_range_analyzer_hash'),
+        CheckConstraint("status IN ('pending', 'completed', 'failed', 'stale')", name='conversation_segments_status_valid'),
+        Index('ix_conversation_segments_account_conversation_end_cursor', 'account_id', 'conversation_id', text('end_cursor DESC')),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='SET NULL'))
+    conversation_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False)
+    start_message_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False)
+    end_message_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False)
+    start_cursor: Mapped[str | None] = mapped_column(String(255))
+    end_cursor: Mapped[str | None] = mapped_column(String(255))
+    analyzer_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='pending')
+
+
+class ConversationSummary(TimestampMixin, Base):
+    __tablename__ = 'conversation_summaries'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'conversation_id', 'summary_type', 'analyzer_version', 'input_hash', name='uq_conversation_summaries_scope_type_analyzer_input'),
+        CheckConstraint("summary_type IN ('segment', 'daily', 'weekly', 'rolling')", name='conversation_summaries_type_valid'),
+        CheckConstraint("status IN ('pending', 'completed', 'failed', 'stale', 'superseded')", name='conversation_summaries_status_valid'),
+        CheckConstraint('version >= 1', name='conversation_summaries_version_positive'),
+        Index('ix_conversation_summaries_account_contact_status_updated', 'account_id', 'contact_id', 'status', text('updated_at DESC')),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='SET NULL'))
+    conversation_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False)
+    segment_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversation_segments.id', ondelete='SET NULL'))
+    summary_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    analyzer_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='pending')
+    stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    supersedes_summary_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversation_summaries.id', ondelete='SET NULL'))
+    source_cursor_start: Mapped[str | None] = mapped_column(String(255))
+    source_cursor_end: Mapped[str | None] = mapped_column(String(255))
+
+
+class ProfileClaim(TimestampMixin, Base):
+    __tablename__ = 'profile_claims'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'contact_id', 'claim_key', 'version', name='uq_profile_claims_scope_key_version'),
+        CheckConstraint("source_type IN ('explicit_fact', 'observed_pattern', 'model_inference', 'manual')", name='profile_claims_source_type_valid'),
+        CheckConstraint("status IN ('proposed', 'accepted', 'rejected', 'superseded', 'expired')", name='profile_claims_status_valid'),
+        CheckConstraint("sensitivity IN ('normal', 'private', 'restricted')", name='profile_claims_sensitivity_valid'),
+        CheckConstraint('confidence >= 0 AND confidence <= 1', name='profile_claims_confidence_range'),
+        CheckConstraint('version >= 1', name='profile_claims_version_positive'),
+        Index('ix_profile_claims_account_contact_status_key_updated', 'account_id', 'contact_id', 'status', 'claim_key', text('updated_at DESC')),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='CASCADE'), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='SET NULL'))
+    claim_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    sensitivity: Mapped[str] = mapped_column(String(32), nullable=False, default='normal')
+    manual_lock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    analyzer_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by: Mapped[str | None] = mapped_column(String(255))
+
+
+class ProfileClaimEvidence(Base):
+    __tablename__ = 'profile_claim_evidence'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'claim_id', 'evidence_type', 'evidence_id', name='uq_profile_claim_evidence_scope_claim_type_evidence'),
+        CheckConstraint("evidence_type IN ('message', 'summary', 'manual_note')", name='profile_claim_evidence_type_valid'),
+        Index('ix_profile_claim_evidence_account_contact_claim', 'account_id', 'contact_id', 'claim_id'),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='CASCADE'), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='SET NULL'))
+    claim_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('profile_claims.id', ondelete='CASCADE'), nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    excerpt_hash: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ProfileSnapshot(Base):
+    __tablename__ = 'profile_snapshots'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'contact_id', 'version', name='uq_profile_snapshots_scope_version'),
+        CheckConstraint('version >= 1', name='profile_snapshots_version_positive'),
+        Index('uq_profile_snapshots_one_current', 'account_id', 'contact_id', unique=True, sqlite_where=text('is_current = 1'), postgresql_where=text('is_current IS TRUE')),
+        Index('ix_profile_snapshots_account_contact_current', 'account_id', 'contact_id', 'is_current'),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='CASCADE'), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='SET NULL'))
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_claim_cursor: Mapped[str | None] = mapped_column(String(255))
+    source_claim_versions: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    source_profile_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class MemoryItem(TimestampMixin, Base):
+    __tablename__ = 'memory_items'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'contact_id', 'memory_key', name='uq_memory_items_scope_key'),
+        CheckConstraint("status IN ('active', 'rejected', 'expired', 'deleted')", name='memory_items_status_valid'),
+        CheckConstraint('importance >= 0 AND importance <= 1', name='memory_items_importance_range'),
+        Index('ix_memory_items_account_contact_status_updated', 'account_id', 'contact_id', 'status', text('updated_at DESC')),
+        Index('ix_memory_items_account_contact_status_expires', 'account_id', 'contact_id', 'status', 'expires_at'),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='CASCADE'), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='SET NULL'))
+    memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    search_text: Mapped[str | None] = mapped_column(Text)
+    keywords: Mapped[list[Any] | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='active')
+    importance: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False, default=Decimal('0.5'))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    embedding_ref: Mapped[str | None] = mapped_column(String(255))
+    source_claim_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('profile_claims.id', ondelete='SET NULL'))
+
+
+class AnalysisJob(TimestampMixin, Base):
+    __tablename__ = 'analysis_jobs'
+    __table_args__ = (
+        UniqueConstraint('account_id', 'idempotency_key', name='uq_analysis_jobs_scope_idempotency'),
+        CheckConstraint("status IN ('pending', 'claimed', 'running', 'retry', 'completed', 'failed', 'dead', 'cancelled')", name='analysis_jobs_status_valid'),
+        CheckConstraint('attempts >= 0 AND max_attempts > 0 AND attempts <= max_attempts', name='analysis_jobs_attempts_valid'),
+        CheckConstraint('priority >= 0', name='analysis_jobs_priority_non_negative'),
+        CheckConstraint('progress_total >= 0 AND progress_completed >= 0 AND progress_failed >= 0', name='analysis_jobs_progress_non_negative'),
+        CheckConstraint('budget_tokens >= 0 AND budget_cost >= 0', name='analysis_jobs_budget_non_negative'),
+        CheckConstraint('version >= 1', name='analysis_jobs_version_positive'),
+        Index('ix_analysis_jobs_account_status_priority_available_created', 'account_id', 'status', text('priority DESC'), 'available_at', 'created_at'),
+        Index('ix_analysis_jobs_parent_status', 'parent_job_id', 'status'),
+        Index('ix_analysis_jobs_status_lease_expires', 'status', 'lease_expires_at'),
+    )
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False)
+    contact_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('contacts.id', ondelete='SET NULL'))
+    conversation_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='SET NULL'))
+    parent_job_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('analysis_jobs.id', ondelete='CASCADE'))
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='pending')
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    lease_owner: Mapped[str | None] = mapped_column(String(255))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    budget_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    budget_cost: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal('0'))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 __all__ = [
     'AIProfile',
     'AIRuntimeSetting',
+    'AnalysisJob',
     'Contact',
     'ContactAIOverride',
     'Conversation',
+    'ConversationSegment',
+    'ConversationSummary',
+    'MemoryItem',
     'Message',
     'OutboxMessage',
+    'ProfileClaim',
+    'ProfileClaimEvidence',
+    'ProfileSnapshot',
     'WhatsAppAccount',
     'WhatsAppEvent',
 ]

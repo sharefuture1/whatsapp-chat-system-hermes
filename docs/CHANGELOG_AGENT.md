@@ -1,5 +1,30 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-11：AI 关系智能 P0 数据层完成（Implemented）
+
+- `FR-CON-005..010`、`FR-PLG-005..006` 已批准；多平台 `FR-CHN-*` 仍保持 Draft。
+- 新增 Alembic `0004_ai_relationship_intelligence` 和 7 个核心实体：会话片段、总结、Claim、Evidence、Snapshot、Memory、AnalysisJob。
+- `Contact.profile_revision` 提供联系人级单调修订号；Snapshot 保存精确 `source_claim_versions` 和 `source_profile_revision`，可追溯并阻止陈旧发布。
+- 画像 Repository 强制 account/contact/conversation scope，消息/总结证据必须真实存在且同 scope。
+- Claim 创建、Evidence、revision CAS、状态转换和 Snapshot current 切换均在 savepoint 内原子执行；冲突后外层 Session 仍可安全查询、重试或提交。
+- Worker 不得转换任何人工锁定 Claim；Snapshot 优先人工锁定 accepted Claim，排除 restricted 和已过期内容。
+- AnalysisJob 契约包含幂等键、优先级、lease、重试、预算、父子任务、进度及 lease recovery 索引；PostgreSQL Worker 后续使用 `FOR UPDATE SKIP LOCKED`。
+- 严格 TDD：契约测试先 `6 failed`，模型首次 RED 为缺少模型 ImportError，Repository 首次 RED 为模块不存在；审查发现的原子性、scope、锁和并发问题均增加回归测试后修复。
+- 最终独立规格/质量审查：APPROVED。
+- 验证：Python `155 passed`、Web `39 passed` + Vite build、Bridge `63 passed` + lint、`git diff --check` 全部通过。
+- 当前状态为 **Implemented**：尚未接 Summary/Profile Worker、API 和前端，因此未标记 Verified，生产服务无需切换到新表。
+
+## 2026-07-11：新增 AI 关系智能与多平台账号目标架构
+
+- 新增 `docs/sdd/08-ai-relationship-and-multichannel.md`，定义会话总结、长期记忆、人物画像、拟人回复、插件批处理和多平台 Adapter 架构。
+- 新增 Draft 需求：`FR-CON-005..010`、`FR-PLG-005..006`、`FR-CHN-001..005`；当前仅完成规格设计，不宣称生产实现。
+- 画像采用 Evidence → Claim → Snapshot，区分明确事实、观察、模型推断和人工输入；每条 AI Claim 可追溯证据，人工锁定不可被 Worker 覆盖。
+- 设计 `conversation_summary`、`contact_profile_ai`、`bulk_profile_sync` 三个真实插件，要求配置 Schema、Worker readiness、预算、dry-run、暂停/取消/重试和逐项结果。
+- 联系人详情规划为概览/画像/记忆/总结/AI策略五 Tab；聊天页只保留画像状态、轻量入口和回复解释。
+- Telegram 推荐 Business Connected Bots → Bot API → TDLib 高级可选；Meta 推荐 Facebook Page Messenger、Instagram 专业账号和 WhatsApp Cloud API 官方授权。
+- 明确个人 Facebook Profile Inbox、Cookie/浏览器自动化、Telegram 批量 userbot 不进入正式架构。
+- 新增 P0 实施计划 `docs/plans/2026-07-11-ai-relationship-intelligence-p0.md`。
+
 ## 2026-07-11：前端轮询、翻译调度与发送对账性能优化
 
 - 关联规格：`NFR-PERF-002`、`NFR-REL-002`、`SDD-P1-05`。

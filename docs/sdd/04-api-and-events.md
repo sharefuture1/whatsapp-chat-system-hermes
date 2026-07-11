@@ -262,6 +262,25 @@ Body：
 
 ## 6. 插件 API
 
+### AI 关系智能 P0 API
+
+- `POST /api/v1/conversations/{conversation_id}/summary-jobs`
+- `POST /api/v1/contacts/{contact_id}/profile-jobs`
+- `POST /api/v1/profile-jobs/bulk`
+- `GET /api/v1/analysis-jobs/{job_id}`
+- `GET /api/v1/contacts/{contact_id}/claims?cursor=<opaque>&limit=50`
+- `GET /api/v1/contacts/{contact_id}/memories?cursor=<opaque>&limit=50`
+- `GET /api/v1/contacts/{contact_id}/summaries?cursor=<opaque>&limit=50`
+- `PATCH /api/v1/contacts/{contact_id}/claims/{claim_id}`
+
+触发分析的 POST 必须携带 `Idempotency-Key`，只入队，不同步调用 AI；统一返回 `202` 和 `{ "job_id": "...", "status": "pending" }`。请求必须校验路径资源与 body 中 `account_id/contact_id/conversation_id` scope 一致，禁止跨账号任务。
+
+所有列表使用 opaque keyset cursor；cursor 编码稳定排序键与 scope，禁止 offset/页码分页（offset forbidden）。
+
+Claim PATCH 必须携带 `If-Match: <version>`，服务端以 optimistic version/CAS 更新；版本不匹配、manual lock 冲突或 Worker 提交旧结果均返回 `409 claim_version_conflict`，成功响应返回递增后的 `version`。
+
+批量画像 API 创建 parent `job_id`，由 Worker 拆分 child jobs；配置包含范围、dry-run、empty/stale、账号/租户并发与预算。读取任务返回 progress total/completed/failed；暂停、取消和失败重试均操作任务状态，不在 API 请求事务内调用 AI。
+
 ### `GET /api/v1/plugins`
 
 每个插件必须返回：

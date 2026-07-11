@@ -1,5 +1,35 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-11: AI 画像写入采用联系人 revision + savepoint 原子事务
+
+**决策**：每个联系人维护单调 `profile_revision`。Claim 创建/转换必须通过 revision CAS；Snapshot 发布同时校验 current snapshot version 与 profile revision，并保存精确 Claim ID/版本集合。
+
+- Claim + Evidence + revision、Claim transition、旧/新 Snapshot 切换必须完整位于同一个 savepoint；任何冲突不得留下半成品事务。
+- 所有 Repository 路径强制验证 account/contact/conversation scope，消息和总结证据必须真实存在且属于同一 scope。
+- 任意 `manual_lock=true` Claim 均禁止 Worker transition；冲突只能形成新的待审核建议。
+- 默认 Snapshot 只采用 accepted、有效期内且非 restricted Claim；同 key 人工锁定版本优先。
+- Repository 在 P0 是唯一画像写边界；数据库复合外键和 PostgreSQL 真实并发集成测试列入 P1 加固。
+- AnalysisJob 使用 idempotency key、priority、lease、retry、budget 和父子进度契约；生产 PostgreSQL Worker 使用 `FOR UPDATE SKIP LOCKED`。
+
+**关联规格**：`FR-CON-005..010`、`FR-PLG-005..006`、`docs/sdd/03-data-model.md`、`docs/sdd/04-api-and-events.md`。
+
+---
+
+## 2026-07-11: 人物画像采用 Evidence → Claim → Snapshot，平台接入采用官方 Adapter
+
+**决策**：人物画像不保存为模型反复覆盖的一段文本。聊天消息和总结是 Evidence，结构化事实/观察/推断是 Claim，页面和回复 Prompt 使用可重建 Snapshot。
+
+- 每个 AI Claim 必须有证据、来源类型、置信度、状态、敏感级别和分析版本；人工确认、编辑和锁定优先。
+- 会话总结、记忆抽取、画像聚合和批量刷新由 Worker 异步执行，插件仅在真实 Worker readiness 可用时启用。
+- AI 回复通过 Context Orchestrator 选择当前相关的已接受信息，不把全部历史和画像直接塞入 Prompt。
+- 多平台统一到 Channel Account + Adapter；业务层只消费标准事件和能力声明。
+- Telegram 客服首选 Business Connected Bots，Bot API 用于机器人，TDLib 仅用于用户明确授权的完整客户端场景。
+- Meta 仅采用 Facebook Page Messenger、Instagram 专业账号和 WhatsApp Cloud API 官方授权；个人 Facebook Profile Inbox 和 Cookie/浏览器自动化明确排除。
+
+**关联规格**：`FR-CON-005..010`、`FR-PLG-005..006`、`FR-CHN-001..005`、`docs/sdd/08-ai-relationship-and-multichannel.md`。
+
+---
+
 ## 2026-07-11: 轮询必须由单一 loop owner 在前台按请求完成时间调度
 
 **决策**：Workspace 与账号状态轮询使用 single-flight 请求和 completion-scheduled `setTimeout`，不得使用可能与慢请求重叠的固定 `setInterval`。页面 hidden 时清除常规定时器，visible 后只恢复一次。

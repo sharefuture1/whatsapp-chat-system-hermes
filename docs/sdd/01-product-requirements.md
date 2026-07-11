@@ -47,6 +47,11 @@
 - **FR-ACC-006 [In Progress]**：控制台支持跨平台“全部消息”聚合视图、平台筛选，以及平台下的单账号筛选；例如 `ALL → WA → WA1/WA2/WA3`。
 - **FR-ACC-007 [Approved]**：发送区必须锁定当前会话所属账号，禁止跨账号误发。
 - **FR-ACC-008 [Approved]**：删除账号凭据必须二次确认；普通停用不删除 session。
+- **FR-CHN-001 [Draft]**：账号模型统一支持 WhatsApp、Telegram、Facebook Page Messenger 和 Instagram 专业账号，并以 `platform + connection_type + external_account_id` 标识连接。
+- **FR-CHN-002 [Draft]**：Telegram 首选 Business Connected Bots；Bot API 用于机器人/群组；TDLib 仅作为需要完整用户历史与群组能力的高级可选连接。
+- **FR-CHN-003 [Draft]**：Facebook 仅支持 Page Messenger，Instagram 仅支持 Business/Creator 专业账号；不支持个人 Facebook Profile Inbox 或 Cookie/浏览器自动化方案。
+- **FR-CHN-004 [Draft]**：Meta 账号必须通过 Facebook Login for Business、Business Login for Instagram 或 WhatsApp Embedded Signup 授权；不得收集用户平台密码。
+- **FR-CHN-005 [Draft]**：所有平台发送必须经过账号能力和政策网关，强制检查 24 小时窗口、模板/标签、opt-in、速率限制和授权有效性。
 
 ### 3.4 会话与消息
 
@@ -67,6 +72,12 @@
 - **FR-CON-002 [Approved]**：支持备注、标签、分组、语言、说明和搜索。
 - **FR-CON-003 [Approved]**：同一电话号码或远端 ID 在不同平台/账号下是隔离联系人；UI 必须显示所属平台和账号，避免同名误认。
 - **FR-CON-004 [Approved]**：AI 画像使用结构化字段，Markdown 仅作为展示/导出格式。
+- **FR-CON-005 [Approved]**：画像必须采用 Evidence → Claim → Snapshot 三层结构；事实、观察、模型推断和人工输入分别标识，每个 AI Claim 可追溯到消息或总结证据。
+- **FR-CON-006 [Approved]**：人工确认、修改或锁定的画像字段优先级高于模型；后台任务不得静默覆盖，冲突只能生成待审核建议。
+- **FR-CON-007 [Approved]**：支持联系人级查看、编辑、确认、拒绝、锁定、删除、重新分析和关闭画像/记忆处理。
+- **FR-CON-008 [Approved]**：会话按增量游标生成 segment/daily/weekly/rolling 总结，并提取话题、决定、承诺、待办、偏好和关系事件；重复执行必须幂等。
+- **FR-CON-009 [Approved]**：AI 回复只加载与当前话题相关且允许使用的记忆、画像和总结；不得使用 rejected、expired、越权或低置信信息。
+- **FR-CON-010 [Approved]**：敏感属性默认禁止推断；人格分析只能表达可观察沟通倾向，不得作医学、政治或受保护属性诊断。
 
 ### 3.6 插件
 
@@ -74,6 +85,8 @@
 - **FR-PLG-002 [Approved]**：没有 hook 的插件显示为“不可用/待实现”，不能显示“已启用”。
 - **FR-PLG-003 [Approved]**：插件支持 global/account 两种作用域。
 - **FR-PLG-004 [Approved]**：插件启停写入数据库并产生审计日志。
+- **FR-PLG-005 [Approved]**：画像插件必须提供 global/account 配置 Schema、Worker readiness、调度、预算、保留期、最近任务和错误状态；不可用时禁止启用。
+- **FR-PLG-006 [Approved]**：批量画像同步支持平台/账号/标签范围、dry-run、只处理 empty/stale、并发与每日预算、暂停、取消、失败重试和逐联系人结果。
 
 ### 3.7 定时与群发
 

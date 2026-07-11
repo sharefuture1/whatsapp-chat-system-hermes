@@ -24,6 +24,13 @@ CORE_TABLES = {
     'contact_ai_overrides',
     'whatsapp_events',
     'outbox_messages',
+    'conversation_segments',
+    'conversation_summaries',
+    'profile_claims',
+    'profile_claim_evidence',
+    'profile_snapshots',
+    'memory_items',
+    'analysis_jobs',
 }
 EXPECTED_COLUMNS = {
     'whatsapp_accounts': {
@@ -33,7 +40,7 @@ EXPECTED_COLUMNS = {
     },
     'contacts': {
         'id', 'account_id', 'remote_jid', 'phone_number', 'lid', 'display_name', 'remark',
-        'notes', 'tags', 'language', 'avatar_url', 'metadata', 'created_at', 'updated_at',
+        'notes', 'tags', 'language', 'avatar_url', 'metadata', 'profile_revision', 'created_at', 'updated_at',
     },
     'conversations': {
         'id', 'account_id', 'contact_id', 'remote_jid', 'type', 'title', 'last_message_at',

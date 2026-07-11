@@ -48,10 +48,13 @@
    强制 SDD/TDD 流程、任务模板、代码审查、测试、部署和文档门禁。
 7. [`07-migration-and-rollout.md`](./07-migration-and-rollout.md)  
    从 Hermes 运行时迁移到独立系统的阶段、回滚与上线策略。
+8. [`08-ai-relationship-and-multichannel.md`](./08-ai-relationship-and-multichannel.md)
+   会话总结、长期记忆、人物画像、拟人回复、插件批处理及 Telegram/Meta 多平台账号目标架构。
 
 补充实施计划：
 
 - [`../plans/2026-07-10-standalone-wendingai-multi-account.md`](../plans/2026-07-10-standalone-wendingai-multi-account.md)
+- [`../plans/2026-07-11-ai-relationship-intelligence-p0.md`](../plans/2026-07-11-ai-relationship-intelligence-p0.md)
 
 ## 3. 产品目标
 

@@ -1,1 +1,1 @@
-"""统一 AI Provider 适配层。"""
+"""AI relationship intelligence repositories."""

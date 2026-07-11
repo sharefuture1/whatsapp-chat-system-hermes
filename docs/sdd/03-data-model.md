@@ -2,13 +2,15 @@
 
 ## 1. 通用规则
 
-- **DATA-001**：生产业务数据库推荐 PostgreSQL，开发和单测可使用 SQLite。
+- **DATA-001**：production 必须使用 PostgreSQL；SQLite 仅限 test/开发单机（single-node），不得作为高并发生产数据库。
 - **DATA-002**：所有表使用 UTC 时间；API 使用 ISO 8601。
 - **DATA-003**：所有 WhatsApp 业务实体必须带 `account_id`。
 - **DATA-004**：任何联系人、会话和消息查询都必须进行 account scope 限制。
 - **DATA-005**：JSON 字段只存扩展元数据，不替代可查询的核心列。
 - **DATA-006**：数据库迁移使用 Alembic，不允许生产启动时隐式破坏性建表。
 - **DATA-007**：高频状态更新必须有索引；任务 claim 必须可并发安全。
+- **DATA-008**：关系智能表必须以 `account_id` 为第一隔离边界，并同时保存适用的 `contact_id`、`conversation_id`；所有外键和查询均校验同账号，禁止跨账号关联。
+- **DATA-009**：PostgreSQL 使用 JSONB；pgvector/向量索引是 optional。核心过滤、排序、游标和状态必须是普通列并建索引，hot path 禁止 JSON scan（扫描 JSON/JSONB 才得到过滤键）。
 
 ## 2. 核心表
 
@@ -275,6 +277,113 @@ UNIQUE(plugin_id, scope_type, scope_id)
 id, actor_id, action, resource_type, resource_id, account_id,
 request_id, metadata(redacted), created_at
 ```
+
+### 2.11 `conversation_segments`
+
+```text
+id, account_id, contact_id, conversation_id,
+start_message_id, end_message_id, start_cursor, end_cursor,
+analyzer_version, content_hash, status, created_at, updated_at
+UNIQUE(conversation_id, start_message_id, end_message_id, analyzer_version, content_hash)
+INDEX(account_id, conversation_id, end_cursor DESC)
+```
+
+同一消息区间和分析输入只能生成一个 segment；查询和写入必须同时验证 `account_id/contact_id/conversation_id` 一致。
+
+### 2.12 `conversation_summaries`
+
+```text
+id, account_id, contact_id, conversation_id, segment_id nullable,
+summary_type(segment,daily,weekly,rolling), summary_json,
+analyzer_version, input_hash, status(pending,completed,failed,stale,superseded), stale bool,
+version, supersedes_summary_id nullable, source_cursor_start, source_cursor_end,
+created_at, updated_at
+UNIQUE(conversation_id, summary_type, analyzer_version, input_hash)
+INDEX(account_id, contact_id, status, updated_at DESC)
+```
+
+总结不可原地覆盖；新版本通过 `version` 和 `supersedes_summary_id` 建立版本关系。增量处理以 source cursor 推进；消息编辑/删除将受影响结果标记 `stale`。
+
+### 2.13 `profile_claims`
+
+```text
+id, account_id, contact_id, conversation_id nullable,
+claim_key, value_json, source_type(explicit_fact,observed_pattern,model_inference,manual),
+confidence, status(proposed,accepted,rejected,superseded,expired),
+sensitivity(normal,private,restricted), manual_lock bool,
+analyzer_version, valid_from, valid_until, version, created_by,
+created_at, updated_at
+UNIQUE(account_id, contact_id, claim_key, version)
+INDEX(account_id, contact_id, status, claim_key, updated_at DESC)
+```
+
+`version` 是 optimistic lock version；更新必须比较旧版本，人工锁定后 Worker 只能创建冲突建议，不能覆盖当前值。
+
+### 2.14 `profile_claim_evidence`
+
+```text
+id, account_id, contact_id, conversation_id nullable,
+claim_id, evidence_type(message,summary,manual_note), evidence_id,
+excerpt_hash, created_at
+UNIQUE(account_id, claim_id, evidence_type, evidence_id)
+INDEX(account_id, contact_id, claim_id)
+```
+
+复合唯一键保证 Worker 重试不会重复挂接同一证据。
+
+### 2.15 `profile_snapshots`
+
+```text
+id, account_id, contact_id, conversation_id nullable,
+version, snapshot_json, is_current bool, source_claim_cursor,
+source_claim_versions JSONB(claim_key -> claim_id/version), source_profile_revision, created_at
+UNIQUE(account_id, contact_id, version)
+UNIQUE(account_id, contact_id) WHERE is_current=true
+INDEX(account_id, contact_id, is_current)
+```
+
+每联系人只允许一个当前版本；以 `(account_id, contact_id, is_current=true)` 索引实现当前 Snapshot O(1) 读取，历史版本保持不可变。`contacts.profile_revision` 是联系人级单调版本：真正创建 Claim 或 transition 成功时原子递增，同值幂等 upsert 与 rebuild 不递增。Snapshot 发布必须同时 CAS `expected_current_version` 与 expected profile revision，并保存 `source_profile_revision`；`source_claim_versions` 精确记录每个 claim_key 使用的 claim_id/version，历史可重建。restricted Claim 默认排除，private 可进入（未来 API 再做授权）。
+
+P0 阶段所有画像 Repository 写路径在 Repository transaction boundary 强制校验 Contact/Conversation/Message/Summary 的 account/contact/conversation scope；跨 scope 抛 `ScopeViolation`。为避免本阶段高风险重写 0001 老表，数据库 composite foreign key 作为 P1 migration 补齐。
+
+### 2.16 `memory_items`
+
+```text
+id, account_id, contact_id, conversation_id nullable,
+memory_key, memory_type, value_json, search_text, keywords,
+status(active,rejected,expired,deleted), importance, expires_at,
+last_verified_at, embedding_ref nullable, source_claim_id nullable,
+created_at, updated_at
+UNIQUE(account_id, contact_id, memory_key)
+INDEX(account_id, contact_id, status, updated_at DESC)
+INDEX(account_id, contact_id, status, expires_at)
+```
+
+结构化过滤和关键词检索使用普通列；`embedding_ref` 可指向 pgvector 记录，但向量能力关闭时契约仍可运行。
+
+### 2.17 `analysis_jobs`
+
+```text
+id, account_id, contact_id nullable, conversation_id nullable,
+parent_job_id nullable, job_type,
+status(pending,claimed,running,retry,completed,failed,dead,cancelled),
+priority, available_at, lease_owner nullable, lease_expires_at nullable,
+attempts, max_attempts, idempotency_key, input_hash,
+progress_total, progress_completed, progress_failed,
+budget_tokens, budget_cost, created_at, updated_at
+UNIQUE(account_id, idempotency_key)
+INDEX(account_id, status, priority DESC, available_at, created_at)
+INDEX(parent_job_id, status)
+INDEX(status, lease_expires_at)
+```
+
+队列并发规则：
+
+- PostgreSQL claim 使用 short transaction（短事务）：`SELECT ... FOR UPDATE SKIP LOCKED`，更新为 `claimed` 并提交；AI call 不得占用 DB transaction；
+- Worker 完成外部调用后开启新短事务，以 `id + lease_owner + input_hash + version/status` 做 CAS（compare-and-swap）结果提交；lease 丢失或输入变化时拒绝旧结果；
+- 批量任务由 parent job 拆为逐联系人 child job，父任务只聚合进度；暂停/取消向未运行子任务传播；
+- 调度器必须执行 backpressure，限制队列深度、每 tenant/租户并发、每 account/账号并发和 token/费用 budget；超预算任务延后而非无限 claim；
+- retry 采用退避和 `available_at`，超过 `max_attempts` 进入 `dead`；取消使用 `cancelled`，不得复用完成状态。
 
 ## 3. 状态机
 

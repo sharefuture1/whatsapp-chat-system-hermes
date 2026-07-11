@@ -4,6 +4,11 @@
 
 ## 当前结论
 
+- AI 关系智能 P0 数据层已进入 **Implemented**：Alembic `0004`、7 个核心实体和并发安全 `ProfileRepository` 已落地；Summary/Profile Worker、API 和前端尚未接线，因此未标记 Verified。
+- 画像写路径强制 account/contact/conversation scope；Claim + Evidence + `profile_revision`、Claim transition 和 Snapshot 发布均在 savepoint 内原子执行，CAS 冲突后 Session 可安全恢复。
+- Snapshot 保存精确 Claim ID/版本集合和联系人级 revision；人工锁定优先、Worker 不得覆盖、restricted/过期信息不进入默认 Snapshot。
+- 多平台接入方向已确定：Telegram 客服优先 Business Connected Bots，Meta 只走 Page/Instagram Professional/WhatsApp Cloud 官方 Business API；个人 Facebook Inbox 与非官方浏览器自动化明确排除。
+
 - 前端性能调度已完成一轮收敛：Workspace 与账号轮询均为 single-flight + completion-scheduled，后台标签不调度常规刷新，恢复可见后只保留一个 loop owner。
 - 自动翻译改为单 worker 串行批处理；切换会话或关闭自动翻译会 Abort 旧请求，并用 generation 阻止旧响应写入新会话；失败消息在同批内不重复请求。
 - 网页发送成功后已移除 450ms 延迟全量重拉，直接采用服务端真实 ID，并由既有增量轮询完成最终对账。
