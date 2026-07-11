@@ -140,7 +140,7 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
     const showName = remark ? item.user_name : ''
     const isPinned = item.pinned || isPinnedFn(item.user_id)
     return (
-      <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item.user_id)}>
+      <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item)}>
         <button type="button" className={`wx-list-item${selectedId === item.conversation_key ? ' active' : ''}`} onClick={() => onSelect(item.conversation_key)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(displayName)}</div>
           <div className="wx-list-text">

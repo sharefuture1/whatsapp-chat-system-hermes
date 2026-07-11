@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.db.models import Contact, Conversation, Message, WhatsAppAccount
@@ -209,6 +210,69 @@ def create_conversations_router(
             'available_accounts': available_accounts(session, platform, account_id),
         }
 
+    @router.post('/contacts/{contact_id}/conversation')
+    def ensure_contact_conversation(
+        contact_id: str,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        contact = session.get(Contact, contact_id)
+        if contact is None:
+            raise HTTPException(status_code=404, detail='Contact not found')
+        conversation = session.scalar(
+            select(Conversation).where(
+                Conversation.account_id == contact.account_id,
+                Conversation.remote_jid == contact.remote_jid,
+            )
+        )
+        if conversation is None:
+            try:
+                with session.begin_nested():
+                    conversation = Conversation(
+                        account_id=contact.account_id,
+                        contact_id=contact.id,
+                        remote_jid=contact.remote_jid,
+                        title=contact.remark or contact.display_name,
+                    )
+                    session.add(conversation)
+                    session.flush()
+            except IntegrityError:
+                conversation = session.scalar(
+                    select(Conversation).where(
+                        Conversation.account_id == contact.account_id,
+                        Conversation.remote_jid == contact.remote_jid,
+                    )
+                )
+                if conversation is None:
+                    raise
+        conversation.contact_id = contact.id
+        conversation.deleted_at = None
+        conversation.archived = False
+        session.commit()
+        return {
+            'conversation_id': conversation.id,
+            'contact_id': contact.id,
+            'account_id': contact.account_id,
+            'remote_jid': contact.remote_jid,
+            'restored': True,
+        }
+
+    @router.delete('/conversations/{conversation_id}')
+    def delete_conversation(
+        conversation_id: str,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail='Conversation not found')
+        conversation.deleted_at = datetime.utcnow()
+        session.commit()
+        return {
+            'success': True,
+            'conversation_id': conversation.id,
+            'account_id': conversation.account_id,
+            'deleted_at': _iso(conversation.deleted_at),
+        }
+
     @router.get('/conversations/{conversation_id}/messages')
     def conversation_messages(
         conversation_id: str,
@@ -221,9 +285,10 @@ def create_conversations_router(
         rows = session.scalars(
             select(Message)
             .where(Message.conversation_id == conversation.id)
-            .order_by(Message.occurred_at.asc(), Message.created_at.asc(), Message.id.asc())
+            .order_by(Message.occurred_at.desc(), Message.created_at.desc(), Message.id.desc())
             .limit(limit)
         ).all()
+        rows.reverse()
         messages = [
             {
                 'message_id': message.id,

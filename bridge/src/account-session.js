@@ -3,6 +3,8 @@ import { chmod, mkdir } from 'node:fs/promises';
 import { DisconnectReason } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 
+import { normalizeChat, normalizeContact, occurrenceChunkIdentity } from './sync-normalizer.js';
+
 export const ACCOUNT_STATES = Object.freeze([
   'new',
   'qr_pending',
@@ -56,12 +58,16 @@ function normalizeMessage(message, now) {
     documentMessage: 'document',
   };
   const messageType = typeMap[rawType] ?? 'system';
+  const remoteJid = key.remoteJid;
+  const allowedJid = typeof remoteJid === 'string'
+    && ['@s.whatsapp.net', '@lid', '@g.us'].some(suffix => remoteJid.endsWith(suffix));
+  if (messageType === 'system' || !allowedJid) return null;
   const seconds = Number(message?.messageTimestamp);
   return {
     schema_version: 1,
     wa_message_id: key.id,
-    remote_jid: key.remoteJid,
-    sender_jid: key.fromMe ? null : (key.participant ?? key.remoteJid),
+    remote_jid: remoteJid,
+    sender_jid: key.fromMe ? null : (key.participant ?? remoteJid),
     participant_jid: key.participant ?? null,
     from_me: Boolean(key.fromMe),
     conversation_type: String(key.remoteJid ?? '').endsWith('@g.us') ? 'group' : 'dm',
@@ -221,7 +227,7 @@ export class AccountSession {
             if (generation !== this.generation) return;
             for (const message of update?.messages ?? []) {
               const payload = normalizeMessage(message, this.now);
-              if (typeof payload.wa_message_id !== 'string' || typeof payload.remote_jid !== 'string') continue;
+              if (!payload || typeof payload.wa_message_id !== 'string' || typeof payload.remote_jid !== 'string') continue;
               await this.#emitEvent('message.upsert', payload, `message:${payload.wa_message_id}`);
             }
           })
@@ -247,6 +253,22 @@ export class AccountSession {
             if (generation !== this.generation) return;
             this.#recordEventError(error);
           });
+      });
+      for (const [source, eventType, normalizer] of [
+        ['contacts.upsert', 'contacts.upsert', normalizeContact],
+        ['contacts.update', 'contacts.update', normalizeContact],
+        ['chats.upsert', 'chats.upsert', normalizeChat],
+        ['chats.update', 'chats.update', normalizeChat],
+      ]) {
+        socket.ev.on(source, (items) => this.#queueSyncBatch(
+          generation, randomUUID(), eventType, items, normalizer, 200,
+        ));
+      }
+      socket.ev.on('messaging-history.set', (history) => {
+        const occurrenceId = randomUUID();
+        this.#queueSyncBatch(generation, occurrenceId, 'contacts.upsert', history?.contacts, normalizeContact, 200, 5000);
+        this.#queueSyncBatch(generation, occurrenceId, 'chats.upsert', history?.chats, normalizeChat, 200, 5000);
+        this.#queueHistoryMessages(generation, occurrenceId, history?.messages);
       });
       return this.status();
     })();
@@ -396,6 +418,63 @@ export class AccountSession {
 
   async whenIdle() {
     await this.eventWork;
+  }
+
+  #queueSyncBatch(generation, occurrenceId, eventType, rawItems, normalizer, size, maxItems = Infinity) {
+    this.eventWork = this.eventWork.then(async () => {
+      if (generation !== this.generation) return;
+      let chunk = [];
+      let chunkIndex = 0;
+      let accepted = 0;
+      for (const rawItem of rawItems ?? []) {
+        if (accepted >= maxItems) break;
+        const item = normalizer(rawItem);
+        if (!item) continue;
+        chunk.push(item);
+        accepted += 1;
+        if (chunk.length < size) continue;
+        if (generation !== this.generation) return;
+        await this.#emitEvent(eventType, { schema_version: 1, items: chunk },
+          occurrenceChunkIdentity(occurrenceId, eventType, chunk, chunkIndex++));
+        chunk = [];
+      }
+      if (chunk.length && generation === this.generation) await this.#emitEvent(
+        eventType, { schema_version: 1, items: chunk },
+        occurrenceChunkIdentity(occurrenceId, eventType, chunk, chunkIndex));
+    }).catch((error) => {
+      if (generation === this.generation) this.#recordEventError(error);
+    });
+  }
+
+  #queueHistoryMessages(generation, occurrenceId, rawItems) {
+    const cutoff = this.now() - (90 * 24 * 60 * 60 * 1000);
+    this.eventWork = this.eventWork.then(async () => {
+      const perConversation = new Map();
+      let chunk = [];
+      let chunkIndex = 0;
+      let accepted = 0;
+      for (const rawItem of rawItems ?? []) {
+        if (accepted >= 2000 || generation !== this.generation) break;
+        const seconds = Number(rawItem?.messageTimestamp);
+        if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 < cutoff) continue;
+        const item = normalizeMessage(rawItem, this.now);
+        if (!item) continue;
+        const count = perConversation.get(item.remote_jid) ?? 0;
+        if (count >= 200) continue;
+        perConversation.set(item.remote_jid, count + 1);
+        chunk.push(item);
+        accepted += 1;
+        if (chunk.length < 100) continue;
+        await this.#emitEvent('history.messages.upsert', { schema_version: 1, items: chunk },
+          occurrenceChunkIdentity(occurrenceId, 'history.messages.upsert', chunk, chunkIndex++));
+        chunk = [];
+      }
+      if (chunk.length && generation === this.generation) await this.#emitEvent(
+        'history.messages.upsert', { schema_version: 1, items: chunk },
+        occurrenceChunkIdentity(occurrenceId, 'history.messages.upsert', chunk, chunkIndex));
+    }).catch((error) => {
+      if (generation === this.generation) this.#recordEventError(error);
+    });
   }
 
   async #emitEvent(eventType, payload, stableId = null) {

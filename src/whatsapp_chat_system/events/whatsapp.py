@@ -23,6 +23,8 @@ EventType = Literal[
     'account.qr', 'account.connecting', 'account.connected', 'account.disconnected',
     'account.logged_out', 'account.error', 'message.upsert', 'message.sent',
     'message.delivered', 'message.read', 'message.failed',
+    'contacts.upsert', 'contacts.update', 'chats.upsert', 'chats.update',
+    'history.messages.upsert',
 ]
 
 
@@ -62,6 +64,40 @@ class ReceiptPayload(BaseModel):
     timestamp: datetime
     error_code: str | None = None
     error_message: str | None = None
+
+
+class ContactSyncItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    remote_jid: str
+    display_name: str | None = None
+    phone_number: str | None = None
+    lid: str | None = None
+    avatar_url: str | None = None
+
+
+class ChatSyncItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    remote_jid: str
+    conversation_type: Literal['dm', 'group']
+    title: str | None = None
+    last_message_at: datetime | None = None
+    last_message_preview: str | None = None
+    unread_count: int | None = Field(default=None, ge=0)
+
+
+class ContactBatchPayload(BaseModel):
+    schema_version: Literal[1]
+    items: list[ContactSyncItem] = Field(max_length=200)
+
+
+class ChatBatchPayload(BaseModel):
+    schema_version: Literal[1]
+    items: list[ChatSyncItem] = Field(max_length=200)
+
+
+class HistoryBatchPayload(BaseModel):
+    schema_version: Literal[1]
+    items: list[MessageUpsertPayload] = Field(max_length=100)
 
 
 class EventProcessingError(Exception):
@@ -142,6 +178,15 @@ class WhatsAppEventService:
 
         if envelope.event_type == 'message.upsert':
             self._upsert_message(account, MessageUpsertPayload.model_validate(envelope.payload))
+        elif envelope.event_type in {'contacts.upsert', 'contacts.update'}:
+            self._upsert_contacts(account, ContactBatchPayload.model_validate(envelope.payload))
+        elif envelope.event_type in {'chats.upsert', 'chats.update'}:
+            self._upsert_chats(account, ChatBatchPayload.model_validate(envelope.payload))
+        elif envelope.event_type == 'history.messages.upsert':
+            for item in HistoryBatchPayload.model_validate(envelope.payload).items:
+                self._upsert_message(
+                    account, item, update_contact_name=False, historical=True
+                )
         elif envelope.event_type.startswith('message.'):
             self._apply_receipt(account, envelope.event_type, ReceiptPayload.model_validate(envelope.payload))
         else:
@@ -151,20 +196,64 @@ class WhatsAppEventService:
         event.processed_at = utc_now()
         return False
 
-    def _upsert_message(self, account: WhatsAppAccount, payload: MessageUpsertPayload) -> None:
-        contact = self.session.scalar(select(Contact).where(
-            Contact.account_id == account.id, Contact.remote_jid == payload.remote_jid
-        ))
-        if contact is None:
-            contact = Contact(
-                account_id=account.id,
-                remote_jid=payload.remote_jid,
-                display_name=payload.push_name,
-            )
-            self.session.add(contact)
-            self.session.flush()
-        elif payload.push_name:
-            contact.display_name = payload.push_name
+    def _upsert_contacts(self, account: WhatsAppAccount, payload: ContactBatchPayload) -> None:
+        for item in payload.items:
+            contact = self.session.scalar(select(Contact).where(
+                Contact.account_id == account.id, Contact.remote_jid == item.remote_jid))
+            if contact is None:
+                contact = Contact(account_id=account.id, remote_jid=item.remote_jid)
+                self.session.add(contact)
+            for field in ('display_name', 'phone_number', 'lid', 'avatar_url'):
+                if field in item.model_fields_set:
+                    setattr(contact, field, getattr(item, field))
+
+    def _upsert_chats(self, account: WhatsAppAccount, payload: ChatBatchPayload) -> None:
+        for item in payload.items:
+            contact = None
+            if item.conversation_type == 'dm':
+                contact = self.session.scalar(select(Contact).where(
+                    Contact.account_id == account.id, Contact.remote_jid == item.remote_jid))
+                if contact is None:
+                    contact = Contact(account_id=account.id, remote_jid=item.remote_jid)
+                    self.session.add(contact)
+                    self.session.flush()
+            conversation = self.session.scalar(select(Conversation).where(
+                Conversation.account_id == account.id, Conversation.remote_jid == item.remote_jid))
+            if conversation is None:
+                conversation = Conversation(account_id=account.id, remote_jid=item.remote_jid,
+                    contact_id=contact.id if contact else None, type=item.conversation_type)
+                self.session.add(conversation)
+            elif contact:
+                conversation.contact_id = contact.id
+            if 'title' in item.model_fields_set:
+                conversation.title = item.title
+            if item.last_message_at is not None:
+                occurred_at = _naive_utc(item.last_message_at)
+                if conversation.last_message_at is None or occurred_at >= conversation.last_message_at:
+                    conversation.last_message_at = occurred_at
+                    conversation.last_message_preview = item.last_message_preview
+            if 'unread_count' in item.model_fields_set and item.unread_count is not None:
+                conversation.unread_count = item.unread_count
+
+    def _upsert_message(
+        self, account: WhatsAppAccount, payload: MessageUpsertPayload,
+        *, update_contact_name: bool = True, historical: bool = False,
+    ) -> None:
+        contact = None
+        if payload.conversation_type == 'dm':
+            contact = self.session.scalar(select(Contact).where(
+                Contact.account_id == account.id, Contact.remote_jid == payload.remote_jid
+            ))
+            if contact is None:
+                contact = Contact(
+                    account_id=account.id,
+                    remote_jid=payload.remote_jid,
+                    display_name=payload.push_name,
+                )
+                self.session.add(contact)
+                self.session.flush()
+            elif update_contact_name and payload.push_name:
+                contact.display_name = payload.push_name
 
         conversation = self.session.scalar(select(Conversation).where(
             Conversation.account_id == account.id,
@@ -173,7 +262,7 @@ class WhatsAppEventService:
         if conversation is None:
             conversation = Conversation(
                 account_id=account.id,
-                contact_id=contact.id,
+                contact_id=contact.id if contact else None,
                 remote_jid=payload.remote_jid,
                 type=payload.conversation_type,
                 title=payload.push_name,
@@ -183,7 +272,7 @@ class WhatsAppEventService:
         elif conversation.account_id != account.id:
             raise EventProcessingError('cross-account conversation reference')
         else:
-            conversation.contact_id = contact.id
+            conversation.contact_id = contact.id if contact else None
 
         message = self.session.scalar(select(Message).where(
             Message.account_id == account.id,
@@ -194,7 +283,7 @@ class WhatsAppEventService:
             message = Message(
                 account_id=account.id,
                 conversation_id=conversation.id,
-                contact_id=contact.id,
+                contact_id=contact.id if contact else None,
                 wa_message_id=payload.wa_message_id,
                 direction='outbound' if payload.from_me else 'inbound',
                 status='sent' if payload.from_me else 'received',
@@ -205,7 +294,7 @@ class WhatsAppEventService:
             raise EventProcessingError('cross-account message reference')
 
         message.conversation_id = conversation.id
-        message.contact_id = contact.id
+        message.contact_id = contact.id if contact else None
         message.direction = 'outbound' if payload.from_me else 'inbound'
         message.sender_jid = payload.participant_jid or payload.sender_jid
         message.message_type = payload.message_type
@@ -214,7 +303,7 @@ class WhatsAppEventService:
         occurred_at = _naive_utc(payload.timestamp)
         message.occurred_at = occurred_at
 
-        if is_new and not payload.from_me:
+        if is_new and not payload.from_me and not historical:
             conversation.unread_count += 1
         if conversation.last_message_at is None or occurred_at >= conversation.last_message_at:
             conversation.last_message_at = occurred_at

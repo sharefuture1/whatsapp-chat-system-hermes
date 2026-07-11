@@ -144,7 +144,17 @@ unread=
 
 ### `GET /api/v1/contacts`
 
-参数：`platform=all|...`、`account_id=all|uuid`、`query`、`limit`。每条联系人必须携带平台、账号、远端 ID、展示名/备注及可进入的会话 ID；同一远端 ID 在不同账号下不得合并为一条。
+参数：`platform=all|...`、`account_id=all|uuid`、`query`、`limit`。每条联系人必须携带平台、账号、远端 ID、展示名/备注及可进入的会话 ID；同一远端 ID 在不同账号下不得合并为一条。已软删除会话不得删除联系人，联系人仍返回且 `conversation_id=null`。
+
+### `DELETE /api/v1/conversations/{conversation_id}`
+
+仅设置会话 `deleted_at` 并从会话列表隐藏；不得删除 Contact、Message 或历史数据。会话与账号 scope 必须保持一致。
+
+### `POST /api/v1/contacts/{contact_id}/conversation`
+
+确保联系人拥有可见会话：存在软删除会话时恢复同一会话，完全不存在时创建空会话；必须使用联系人自身 `account_id + remote_jid`，禁止跨账号复用。
+
+Legacy 迁移接口 `GET /api/contacts` 复用 Legacy 摘要，但不应用 `chat_ops.deleted` 过滤，并返回 `conversation_deleted`；`GET /api/conversations` 保持原删除过滤语义。
 
 ### `GET /api/v1/conversations/{conversation_id}/messages`
 
@@ -378,7 +388,7 @@ Envelope：
 
 ```json
 {
-  "event_id": "stable-event-id",
+  "event_id": "occurrence-unique-event-id",
   "event_type": "message.upsert",
   "account_id": "...",
   "occurred_at": "2026-07-10T00:00:00Z",
@@ -389,7 +399,7 @@ Envelope：
 
 Envelope 规则：
 
-- `event_id` 在 `account_id` 范围内稳定唯一；数据库唯一键为 `(account_id, event_id)`；
+- `event_id` 在 `account_id` 范围内标识一次事件 occurrence：每次新的 Baileys 回调必须生成新唯一 ID，即使类型和内容完全相同；同一已落盘 FileSpool envelope 的重放保留原 `event_id` 与 `sequence`；数据库唯一键为 `(account_id, event_id)`；
 - `sequence` 是每个账号连接事件流的单调整数，状态事件不得被较小 sequence 回退；
 - Receiver 保存 canonical payload hash；相同 `(account_id,event_id)` 但 payload/hash 不同返回 `409 event_identity_conflict`；
 - 已 `processed` 的重复事件返回 200/duplicate=true；首次失败若事务回滚则允许同一 event 重试；

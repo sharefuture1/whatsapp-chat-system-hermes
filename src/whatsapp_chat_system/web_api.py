@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 import re
 import os
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
+from .accounts.reconciler import AccountReconciler
 from .ai.provider import WendingAIProvider
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
@@ -393,7 +396,9 @@ def _hidden_message_ids(config: AppConfig) -> set[int]:
     return {int(x) for x in (config.web_settings.get('hidden_message_ids') or []) if str(x).isdigit() or isinstance(x, int)}
 
 
-def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict[str, Any]]:
+def _compute_conversation_summaries(
+    config: AppConfig, db: StateDB, *, include_deleted: bool = False
+) -> list[dict[str, Any]]:
     rows = db.fetch_conversation_summaries(config.admin_ids)
     chat_ops = config.web_settings.get('chat_ops') if isinstance(config.web_settings.get('chat_ops'), dict) else {}
     deleted = set(str(x) for x in (chat_ops or {}).get('deleted', []))
@@ -401,7 +406,7 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
     results: list[dict[str, Any]] = []
     for row in rows:
         user_id = str(row['user_id'] or '')
-        if not user_id or user_id in deleted:
+        if not user_id or (user_id in deleted and not include_deleted):
             continue
         session_ids = [sid for sid in str(row['session_ids'] or '').split(',') if sid]
         user_name = _name_for_user(config, user_id, session_ids, str(row['title'] or ''))
@@ -426,6 +431,7 @@ def _compute_conversation_summaries(config: AppConfig, db: StateDB) -> list[dict
             'last_message_lang': _language_hint_for(last_text),
             'last_message_translated': _maybe_translate_for_user(config, user_id, last_text),
             'pinned': user_id in pinned,
+            'conversation_deleted': user_id in deleted,
         })
     return results
 
@@ -703,6 +709,7 @@ class DisabledBridgeClient:
         )
 
     create_account = _disabled
+    list_accounts = _disabled
     connect = _disabled
     qr = _disabled
     logout = _disabled
@@ -716,6 +723,7 @@ def build_app(
     account_session_factory: sessionmaker[Session] | None = None,
     account_bridge: BridgeProtocol | None = None,
     internal_event_token: str | None = None,
+    account_reconcile_interval_seconds: float = 45.0,
 ) -> FastAPI:
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
@@ -851,15 +859,6 @@ def build_app(
     def _plugin_flag(plugin_id: str) -> bool:
         return bool(_plugin_state().get(plugin_id, True))
 
-    app = FastAPI(title='WhatsApp Chat System API', version='0.5.2')
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=['*'],
-        allow_credentials=False,
-        allow_methods=['*'],
-        allow_headers=['*'],
-    )
-
     resolved_account_factory = account_session_factory or create_session_factory(create_engine())
     if account_bridge is not None:
         resolved_account_bridge = account_bridge
@@ -872,6 +871,37 @@ def build_app(
             )
         else:
             resolved_account_bridge = DisabledBridgeClient()
+
+    reconciler = AccountReconciler(resolved_account_factory, resolved_account_bridge)
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        async def reconcile_loop() -> None:
+            while True:
+                try:
+                    await asyncio.to_thread(reconciler.reconcile_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception('WhatsApp account reconciliation round failed')
+                await asyncio.sleep(account_reconcile_interval_seconds)
+
+        task = asyncio.create_task(reconcile_loop(), name='whatsapp-account-reconciler')
+        app_instance.state.account_reconciler_task = task
+        try:
+            yield
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    app = FastAPI(title='WhatsApp Chat System API', version='0.5.2', lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=['*'],
+        allow_credentials=False,
+        allow_methods=['*'],
+        allow_headers=['*'],
+    )
     app.include_router(create_accounts_router(resolved_account_factory, resolved_account_bridge))
     app.include_router(create_conversations_router(resolved_account_factory, resolved_account_bridge))
     resolved_event_token = (
@@ -953,6 +983,21 @@ def build_app(
         items = all_items[start:end]
         return {
             'items': items,
+            'page': page,
+            'page_size': page_size,
+            'total': len(all_items),
+            'has_more': end < len(all_items),
+        }
+
+    @app.get('/api/contacts')
+    def contacts(page: int = 1, page_size: int = 500) -> dict[str, Any]:
+        page = max(1, page)
+        page_size = max(1, min(500, page_size))
+        all_items = _compute_conversation_summaries(config, db, include_deleted=True)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            'items': all_items[start:end],
             'page': page,
             'page_size': page_size,
             'total': len(all_items),

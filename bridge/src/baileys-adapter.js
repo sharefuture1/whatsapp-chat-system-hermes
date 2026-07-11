@@ -29,7 +29,7 @@ export async function createBaileysSocket({ sessionDir }) {
     logger: silentLogger,
     printQRInTerminal: false,
     markOnlineOnConnect: false,
-    syncFullHistory: false,
+    syncFullHistory: true,
     generateHighQualityLinkPreview: false,
   });
   socket.ev.on('creds.update', saveCreds);

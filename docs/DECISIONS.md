@@ -1,5 +1,26 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-11: 同步事件身份按 occurrence 唯一，重放身份由 FileSpool 保留
+
+**决策**：每次新的 Baileys 同步事件回调创建一次 occurrence nonce；批次 `event_id` 由 occurrence nonce、事件类型、chunk index 和 canonical content hash 共同派生。相同内容在不同回调中必须得到不同 ID，同一回调内各 chunk 也必须唯一。
+
+- 只有已经落盘的 FileSpool envelope 重放保留原 `event_id + sequence`。
+- 不要求跨独立 Baileys occurrences 的内容稳定 ID；否则相同 ID 配合新 sequence/occurred_at 会触发 canonical envelope identity conflict。
+- Receiver 的 `(account_id,event_id)` 幂等与冲突检测保持不变。
+
+**关联规格**：`FR-CON-011`、`API-EVENT`。
+
+## 2026-07-11: 联系人与会话使用独立生命周期
+
+**决策**：删除会话只改变聊天列表可见性，不删除联系人、消息或历史。Legacy 通过独立 `/api/contacts` 暴露被隐藏联系人；Standalone 只设置 `Conversation.deleted_at`，联系人点击通过 ensure/restore 恢复同一会话或创建空会话。
+
+- 联系人身份以 source/account/contact 为边界，会话身份以 `conversation_key` 为前端边界。
+- Legacy 删除接口只接受裸 JID；Standalone 删除接口只接受 conversation UUID。
+- 恢复必须保留原 conversation ID 和历史；完全无会话时才创建。
+- 不修改 Bridge 同步路径。
+
+**关联规格**：`FR-MSG-008`、`FR-CON-001`、`SEC-005`。
+
 ## 2026-07-11: AnalysisJob claim 使用 committed wrapper，配额仅作 P0 负载保护
 
 **决策**：外部 AI Worker 只能通过 `claim_next_committed(session_factory, ...)` 获取不可变 `JobLease`，claim 后立即 commit/close；状态转换各自使用新 session 短事务。

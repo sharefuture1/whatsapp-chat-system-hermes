@@ -27,6 +27,10 @@ class FakeBridge:
         self.calls.append(('create', account_id, session_ref))
         return {'success': True}
 
+    def list_accounts(self):
+        self.calls.append(('list',))
+        return {'items': [], 'total': 0}
+
     def connect(self, account_id):
         self.calls.append(('connect', account_id))
         return {'accepted': True}
@@ -147,6 +151,7 @@ def test_logout_preserves_business_account(api):
 
     assert response.status_code == 200
     assert response.json()['account']['status'] == 'logged_out'
+    assert response.json()['account']['enabled'] is False
     assert client.get('/api/v1/accounts').json()['items'][0]['id'] == account['id']
     assert ('logout', account['id']) in bridge.calls
 
@@ -250,5 +255,41 @@ def test_patch_rejects_null_account_name(api):
     response = client.patch(f"/api/v1/accounts/{account['id']}", json={'name': None})
 
     assert response.status_code == 422
+
+
+def test_lifespan_reconciles_on_startup_and_cancels_background_task(tmp_path, monkeypatch):
+    from whatsapp_chat_system.db.models import WhatsAppAccount
+
+    database = tmp_path / 'startup-reconcile.db'
+    engine = create_engine(f'sqlite:///{database}', connect_args={'check_same_thread': False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+    with factory() as db:
+        db.add(WhatsAppAccount(
+            id='WA2', name='WA2', session_ref='account:WA2', enabled=True, status='offline',
+        ))
+        db.commit()
+    profile = create_profile(tmp_path / 'startup-profile')
+    bridge = FakeBridge()
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{database}')
+    app = build_app(
+        str(profile), account_session_factory=factory, account_bridge=bridge,
+        account_reconcile_interval_seconds=3600,
+    )
+
+    with TestClient(app) as client:
+        assert client.get('/api/health').status_code == 200
+        for _ in range(100):
+            if ('connect', 'WA2') in bridge.calls:
+                break
+            __import__('time').sleep(0.01)
+        assert ('create', 'WA2', 'account:WA2') in bridge.calls
+        assert ('connect', 'WA2') in bridge.calls
+        task = app.state.account_reconciler_task
+        assert task.done() is False
+
+    assert task.done() is True
+    assert task.cancelled() is True
+    engine.dispose()
 
 

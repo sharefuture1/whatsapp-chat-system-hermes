@@ -138,6 +138,11 @@ export function createBridgeServer({
         return sendJson(response, 401, structuredError('unauthorized', 'Invalid internal token', false, requestId));
       }
 
+      if (request.method === 'GET' && url.pathname === '/accounts') {
+        const items = manager.listStatuses();
+        return sendJson(response, 200, { items, total: items.length });
+      }
+
       if (request.method === 'POST' && url.pathname === '/accounts') {
         const body = await readJson(request);
         const session = await manager.createAccount({

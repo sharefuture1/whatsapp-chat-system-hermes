@@ -131,6 +131,20 @@ test('SEC-002: every non-health API requires the exact internal token', async ()
   } finally { await fx.close(); }
 });
 
+test('FR-CON-012: authenticated GET /accounts lists safe manager statuses', async () => {
+  const fx = await fixture();
+  try {
+    fx.manager.createAccount({ account_id: 'A', session_ref: 'account:A' });
+    assert.equal((await request(fx.baseUrl, '/accounts', { auth: false })).status, 401);
+    const response = await request(fx.baseUrl, '/accounts');
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      items: [{ account_id: 'A', state: 'new', has_qr: false, last_error: null }],
+      total: 1,
+    });
+  } finally { await fx.close(); }
+});
+
 test('SEC-002: Host header prevents DNS rebinding and listener rejects non-loopback', async () => {
   const fx = await fixture();
   try {

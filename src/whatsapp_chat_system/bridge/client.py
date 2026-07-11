@@ -94,6 +94,9 @@ class BridgeClient:
     def create_account(self, account_id: str, session_ref: str) -> dict[str, Any]:
         return self._request('POST', '/accounts', json={'account_id': account_id, 'session_ref': session_ref})
 
+    def list_accounts(self) -> dict[str, Any]:
+        return self._request('GET', '/accounts')
+
     def connect(self, account_id: str) -> dict[str, Any]:
         return self._request('POST', f'/accounts/{self._account_path(account_id)}/connect', expected={200, 202})
 

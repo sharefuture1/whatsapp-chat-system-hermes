@@ -1,5 +1,20 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-11：修复同步事件 occurrence 身份冲突
+
+- 同步联系人、聊天和历史批次改为在每次 Baileys handler 调用时生成 occurrence nonce；事件身份包含 occurrence、类型、chunk index 与 canonical content hash。
+- 两次内容完全相同的 `contacts.upsert` 不再复用 `event_id`；同一次 handler 的多个 chunk 保持唯一。
+- 重放语义保持在 FileSpool：已落盘 envelope 原样保留 `event_id + sequence`，Receiver 幂等/identity conflict 保护不变。
+- 删除“跨 occurrence stable replay”的误导测试，新增真实 FileSpool 回归覆盖。
+
+## 2026-07-11：会话删除与通讯录生命周期分离
+
+- Legacy 新增 `/api/contacts`，复用联系人摘要但保留被 `chat_ops.deleted` 隐藏的联系人并返回 `conversation_deleted`；`/api/conversations` 原过滤不变。
+- Standalone 新增会话软删除和联系人 ensure/restore API；只更新 `deleted_at`，Contact、Message 和历史均保留。
+- 前端通讯录独立读取 Legacy contacts；隐藏 Legacy 会话点击时 restore，Standalone 空会话联系人点击时 ensure，再按 `conversation_key` 选中聊天。
+- 删除按 conversation source 分流：Legacy 裸 JID，Standalone conversation UUID；ContactsPage 不再禁用无 conversation_id 联系人。
+- 严格 TDD：保存真实 RED；最终 Python `179 passed`、Web `56 passed`、Vite build 和 `git diff --check` 通过。
+
 ## 2026-07-11：AI 自动回复与翻译网页同步修复
 
 - 根因一：Legacy 同会话增量请求使用 latest-request-wins，慢响应会被下一轮刷新废弃，出现后端 200 但游标和 React 均不推进。

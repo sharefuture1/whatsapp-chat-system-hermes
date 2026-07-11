@@ -250,6 +250,62 @@ def test_preview_does_not_go_backwards_and_outbound_does_not_add_unread(events_a
         assert conversation.unread_count == 2
 
 
+def test_contact_chat_history_batches_preserve_manual_fields_and_group_boundary(events_api):
+    client, factory = events_api
+    contacts = {'schema_version': 1, 'items': [{'remote_jid': 'person@lid',
+        'display_name': 'Remote', 'phone_number': None, 'lid': 'person@lid', 'avatar_url': None}]}
+    assert post(client, envelope('contacts-1', 'contacts.upsert', payload=contacts)).status_code == 200
+    with factory() as db:
+        contact = db.scalar(select(Contact).where(Contact.remote_jid == 'person@lid'))
+        contact.remark, contact.tags, contact.notes, contact.language = 'Mine', ['vip'], 'note', 'lo'
+        db.commit()
+    update = {'schema_version': 1, 'items': [{'remote_jid': 'person@lid', 'display_name': 'New'}]}
+    assert post(client, envelope('contacts-2', 'contacts.update', sequence=2, payload=update)).status_code == 200
+    chats = {'schema_version': 1, 'items': [{'remote_jid': 'group@g.us',
+        'conversation_type': 'group', 'title': 'G', 'last_message_at': None,
+        'last_message_preview': None}]}
+    assert post(client, envelope('chats-1', 'chats.upsert', sequence=3, payload=chats)).status_code == 200
+    history = {'schema_version': 1, 'items': [message_payload(wa_message_id='hist-1',
+        remote_jid='person@lid', sender_jid='person@lid', timestamp='2026-07-09T00:00:00Z',
+        text='history')]}
+    assert post(client, envelope('hist-1', 'history.messages.upsert', sequence=4, payload=history)).status_code == 200
+    assert post(client, envelope('hist-2', 'history.messages.upsert', sequence=5, payload=history)).status_code == 200
+    with factory() as db:
+        contact = db.scalar(select(Contact).where(Contact.remote_jid == 'person@lid'))
+        assert (contact.display_name, contact.remark, contact.tags, contact.notes, contact.language) == (
+            'New', 'Mine', ['vip'], 'note', 'lo')
+        assert db.scalar(select(Contact).where(Contact.remote_jid == 'group@g.us')) is None
+        assert db.scalar(select(Conversation).where(Conversation.remote_jid == 'group@g.us')).type == 'group'
+        assert db.scalar(select(Conversation).where(Conversation.remote_jid == 'person@lid')).unread_count == 0
+
+
+def test_chat_unread_is_authoritative_when_present_and_partial_update_preserves_it(events_api):
+    client, factory = events_api
+    full = {'schema_version': 1, 'items': [{'remote_jid': 'person@lid',
+        'conversation_type': 'dm', 'title': 'P', 'last_message_at': None,
+        'last_message_preview': None, 'unread_count': 7}]}
+    partial = {'schema_version': 1, 'items': [{'remote_jid': 'person@lid',
+        'conversation_type': 'dm', 'title': 'Renamed'}]}
+    assert post(client, envelope('chat-full', 'chats.upsert', payload=full)).status_code == 200
+    assert post(client, envelope('chat-partial', 'chats.update', sequence=2, payload=partial)).status_code == 200
+    with factory() as db:
+        conversation = db.scalar(select(Conversation).where(Conversation.remote_jid == 'person@lid'))
+        assert conversation.unread_count == 7
+
+
+def test_conversation_messages_returns_latest_limit_in_ascending_order(events_api):
+    client, _ = events_api
+    for index in range(5):
+        payload = message_payload(wa_message_id=f'm-{index}', text=str(index),
+                                  timestamp=f'2026-07-10T00:0{index}:00Z')
+        assert post(client, envelope(f'e-{index}', sequence=index + 1, payload=payload)).status_code == 200
+    login = client.post('/api/login', json={'password': 'test-pass'})
+    client.headers.update({'x-session-token': login.json()['session_token']})
+    conversation_id = client.get('/api/v1/conversations').json()['items'][0]['conversation_id']
+    response = client.get(f'/api/v1/conversations/{conversation_id}/messages?limit=3')
+    assert [item['content'] for item in response.json()['messages']] == ['2', '3', '4']
+
+
 def test_account_status_sequence_is_monotonic_and_qr_raw_is_not_persisted(events_api):
     client, factory = events_api
     qr = envelope('qr', 'account.qr', sequence=10, payload={

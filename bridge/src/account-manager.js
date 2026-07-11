@@ -122,6 +122,10 @@ export class AccountManager {
     return this.get(accountId).status();
   }
 
+  listStatuses() {
+    return [...this.sessions.values()].map((session) => session.status());
+  }
+
   qr(accountId) {
     return this.get(accountId).getQr();
   }

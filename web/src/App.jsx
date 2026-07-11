@@ -3,6 +3,8 @@ import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from 
 import { useAccountsController } from './accounts/useAccountsController'
 import { SettingsProvider, useSettings } from './settings'
 import { buildContacts, buildInbox, filterInbox } from './inboxModel'
+import { contactSelectionPlan, conversationDeletePlan } from './conversationLifecycle'
+import { createRefreshCoordinator, mergeConversationPages } from './workspaceRefresh'
 import AccountCenterPage from './components/AccountCenterPage'
 import ChatList from './components/ChatList'
 import ChatPane from './components/ChatPane'
@@ -85,7 +87,7 @@ function AppInner() {
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
   const accountsRef = useRef([])
-  const workspaceRefreshPromiseRef = useRef(null)
+  const refreshCoordinatorRef = useRef(createRefreshCoordinator())
   accountsRef.current = accountsController.accounts
   const [pinned, setPinned] = useState(() => {
     try { return JSON.parse(localStorage.getItem(PIN_KEY) || '[]') } catch { return [] }
@@ -134,9 +136,10 @@ function AppInner() {
     }
   }
 
-  const fetchConversationsPage = useCallback(async (page, append = false) => {
-    const [legacyRes, standaloneRes, contactsRes] = await Promise.all([
+  const fetchConversationsPage = useCallback(async (page) => {
+    const [legacyRes, legacyContactsRes, standaloneRes, contactsRes] = await Promise.all([
       api.get(`/conversations?page=${page}&page_size=${PAGE_SIZE}`),
+      api.get(`/contacts?page=1&page_size=500`),
       api.get(`/v1/conversations?platform=all&account_id=all&limit=200`),
       api.get('/v1/contacts?platform=all&account_id=all&limit=500'),
     ])
@@ -147,31 +150,48 @@ function AppInner() {
     })
     const nextItems = inbox.conversations
     const nextContacts = buildContacts({
-      legacy: legacyRes.items || [],
+      legacy: legacyContactsRes.items || [],
       standalone: contactsRes.items || [],
       accounts: inbox.accounts,
     })
-    setInboxAccounts(inbox.accounts)
-    setContacts(nextContacts)
-    setConversations(nextItems)
-    setConversationsTotal(nextItems.length)
-    setConversationsHasMore(Boolean(legacyRes.has_more))
-    setConversationsPage(page)
-    return { items: nextItems, total: nextItems.length, has_more: Boolean(legacyRes.has_more), page }
+    return {
+      items: nextItems,
+      contacts: nextContacts,
+      accounts: inbox.accounts,
+      legacyTotal: Number(legacyRes.total) || 0,
+      has_more: Boolean(legacyRes.has_more),
+      page,
+    }
   }, [])
 
-  const refreshWorkspace = useCallback(({ silent = false } = {}) => {
-    if (workspaceRefreshPromiseRef.current) return workspaceRefreshPromiseRef.current
-    const run = (async () => {
+  const commitConversationsPage = useCallback((snapshot, append = false) => {
+    setInboxAccounts(snapshot.accounts)
+    setContacts(snapshot.contacts)
+    setConversations(current => {
+      const merged = mergeConversationPages(current, snapshot.items, append)
+      setConversationsTotal(append ? Math.max(snapshot.legacyTotal, merged.length) : merged.length)
+      return merged
+    })
+    setConversationsHasMore(snapshot.has_more)
+    setConversationsPage(snapshot.page)
+  }, [])
+
+  const refreshWorkspace = useCallback(({ silent = false, fresh = false } = {}) => {
+    return refreshCoordinatorRef.current.run(async () => {
       try {
-        const convRes = await fetchConversationsPage(1, false)
+        const convRes = await fetchConversationsPage(1)
         const dashboardRes = await api.get('/dashboard')
-        const items = convRes.items || []
+        return { convRes, dashboardRes }
+      } catch (e) {
+        if (!silent) showError(e)
+        return null
+      }
+    }, result => {
+      if (!result) return
+      const { convRes, dashboardRes } = result
+      const items = convRes.items || []
         setDashboard(dashboardRes)
-        setConversations(items)
-        setConversationsTotal(convRes.total || 0)
-        setConversationsHasMore(Boolean(convRes.has_more))
-        setConversationsPage(convRes.page || 1)
+        commitConversationsPage(convRes)
         setRefreshTick(prev => prev + 1)
         // Sync pinned set from server-side authoritative flag
         setPinned(prev => {
@@ -194,29 +214,21 @@ function AppInner() {
           setSelectedName('')
           return ''
         })
-      } catch (e) {
-        if (!silent) showError(e)
-      }
-    })()
-    workspaceRefreshPromiseRef.current = run
-    run.then(
-      () => { if (workspaceRefreshPromiseRef.current === run) workspaceRefreshPromiseRef.current = null },
-      () => { if (workspaceRefreshPromiseRef.current === run) workspaceRefreshPromiseRef.current = null },
-    )
-    return run
-  }, [fetchConversationsPage])
+    }, { fresh })
+  }, [commitConversationsPage, fetchConversationsPage])
 
   const loadMoreConversations = useCallback(async () => {
     if (loadingMore || !conversationsHasMore) return
     setLoadingMore(true)
     try {
-      await fetchConversationsPage(conversationsPage + 1, true)
+      const snapshot = await fetchConversationsPage(conversationsPage + 1)
+      commitConversationsPage(snapshot, true)
     } catch (e) {
       showError(e)
     } finally {
       setLoadingMore(false)
     }
-  }, [conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
+  }, [commitConversationsPage, conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
 
   const refreshSettings = useCallback(async () => {
     const [settingsData, aiData] = await Promise.all([
@@ -309,7 +321,7 @@ function AppInner() {
         throw error
       }
       setSendingMeta({ mode: data.mode, language: data.rewrite?.language || 'direct' })
-      refreshWorkspace({ silent: true })
+      refreshWorkspace({ silent: true, fresh: true })
       return data
     } catch (e) {
       showError(e)
@@ -336,27 +348,29 @@ function AppInner() {
     })
     try {
       await api.post('/chat/pin', { user_id: userId, pinned: !isPinned })
-      refreshWorkspace({ silent: true })
+      refreshWorkspace({ silent: true, fresh: true })
     } catch {}
   }, [pinned, refreshWorkspace])
 
-  const deleteChat = useCallback(async (userId) => {
-    if (!window.confirm(t('deleteConversationConfirm') || '删除此会话？之后可由新消息重新出现。')) return
-    const wasPinned = pinned.includes(userId)
+  const deleteChat = useCallback(async (conversation) => {
+    if (!conversation || !window.confirm(t('deleteConversationConfirm') || '删除此会话？之后可由新消息重新出现。')) return
+    const plan = conversationDeletePlan(conversation)
+    const wasPinned = pinned.includes(plan.pinKey)
     setPinned(prev => {
-      const updated = prev.filter(p => p !== userId)
+      const updated = prev.filter(p => p !== plan.pinKey)
       localStorage.setItem(PIN_KEY, JSON.stringify(updated))
       return updated
     })
     try {
-      await api.post('/chat/delete', { user_id: userId })
-      if (selectedId === userId) {
+      if (plan.method === 'DELETE') await api.delete(plan.path)
+      else await api.post(plan.path, plan.body)
+      if (selectedId === plan.conversationKey) {
         setSelectedId('')
         setSelectedName('')
       }
-      await refreshWorkspace({ silent: true })
+      await refreshWorkspace({ silent: true, fresh: true })
     } catch (e) {
-      if (wasPinned) setPinned(prev => prev.includes(userId) ? prev : [userId, ...prev])
+      if (wasPinned) setPinned(prev => prev.includes(plan.pinKey) ? prev : [plan.pinKey, ...prev])
       showError(e)
     }
   }, [pinned, refreshWorkspace, selectedId, t])
@@ -562,10 +576,22 @@ function AppInner() {
           <ContactsPage
             contacts={contacts}
             accounts={inboxAccounts}
-            onSelect={(item) => {
-              const conversation = conversations.find(c => c.conversation_key === item.conversation_key)
-              if (conversation) selectConversation(conversation.conversation_key)
-              setActiveTab('chats')
+            onSelect={async (item) => {
+              try {
+                const plan = contactSelectionPlan(item)
+                let conversationKey = plan.conversationKey
+                if (plan.ensure) {
+                  const ensured = await api.post(plan.ensure.path, plan.ensure.body)
+                  await refreshWorkspace({ silent: true, fresh: true })
+                  if (item.source === 'standalone' && ensured?.conversation_id) {
+                    conversationKey = `standalone:${ensured.conversation_id}`
+                  }
+                }
+                if (conversationKey) selectConversation(conversationKey)
+                setActiveTab('chats')
+              } catch (e) {
+                showError(e)
+              }
             }}
           />
         )}

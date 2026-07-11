@@ -6,7 +6,7 @@ const read = path => readFileSync(new URL(`../src/${path}`, import.meta.url), 'u
 
 test('workspace polling is single-flight, completion-scheduled, and visibility aware', () => {
   const source = read('App.jsx')
-  assert.match(source, /workspaceRefreshPromiseRef/)
+  assert.match(source, /refreshCoordinatorRef/)
   assert.match(source, /document\.visibilityState/)
   assert.match(source, /visibilitychange/)
   assert.match(source, /setTimeout\(run/)

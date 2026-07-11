@@ -59,7 +59,7 @@ export default function ContactsPage({ contacts = [], accounts = [], onSelect })
     <div className="wx-contacts-scroll">
       {grouped.length === 0 ? <div className="wx-empty-pill">{t('noContacts') || '暂无联系人'}</div> : grouped.map(group => <section className="wx-contact-account-group" key={group.account?.id || group.items[0]?.account_id}>
         <div className="wx-contact-group-title"><span>{group.account?.label || group.items[0]?.account_label || 'WA'}</span><strong>{group.account?.name || group.items[0]?.account_name}</strong><em>{group.items.length}</em></div>
-        <div className="wx-contact-list">{group.items.map(item => <button key={item.contact_key} type="button" className="wx-contact-row" disabled={!item.conversation_key} onClick={() => onSelect(item)}>
+        <div className="wx-contact-list">{group.items.map(item => <button key={item.contact_key} type="button" className="wx-contact-row" onClick={() => onSelect(item)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
           <div className="wx-contact-meta"><div className="wx-contact-name">{item.user_name}</div><div className="wx-contact-subid"><span>{item.account_label}</span>{item.remote_jid || item.user_id}</div></div>
           <svg className="wx-cell-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>

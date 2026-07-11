@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { AccountSession } from '../src/account-session.js';
+import { FileSpool } from '../src/events/file-spool.js';
 
 function socket(overrides = {}) {
   return {
@@ -454,6 +455,116 @@ test('API-EVENT: duplicate receipt occurrences use distinct event identities and
   assert.notEqual(sink.events[0].event_id, sink.events[1].event_id);
   assert.equal(sink.events[0].payload.wa_message_id, 'WA-1');
   assert.equal(sink.events[1].payload.wa_message_id, 'WA-1');
+});
+
+test('FR-CON-011: batch listeners emit bounded occurrence-unique sync events and ignore stale sockets', async () => {
+  const sink = recordingSink();
+  const oldSocket = socket();
+  const newSocket = socket();
+  let count = 0;
+  const session = await makeSession(async () => (count++ === 0 ? oldSocket : newSocket), { eventSink: sink });
+  await session.connect();
+  sink.events.length = 0;
+  oldSocket.ev.emit('messaging-history.set', {
+    contacts: [{ id: 'person@lid', name: 'Person' }, { id: 'group@g.us', name: 'Group' }],
+    chats: [{ id: 'group@g.us', name: 'Group' }],
+    messages: [{ key: { id: 'H1', remoteJid: 'person@lid', fromMe: false }, message: { conversation: 'hi' } }],
+  });
+  await session.whenIdle();
+  assert.deepEqual(sink.events.map(item => item.event_type), [
+    'contacts.upsert', 'chats.upsert', 'history.messages.upsert',
+  ]);
+  assert.equal(sink.events[0].payload.items.length, 1);
+  const historyOccurrenceId = sink.events[0].event_id;
+  oldSocket.ev.emit('contacts.upsert', [{ id: 'person@lid', name: 'Person' }]);
+  await session.whenIdle();
+  assert.notEqual(sink.events.at(-1).event_id, historyOccurrenceId);
+  await session.stop();
+  await session.connect();
+  oldSocket.ev.emit('contacts.upsert', [{ id: 'late@lid', name: 'Late' }]);
+  newSocket.ev.emit('contacts.upsert', [{ id: 'fresh@lid', name: 'Fresh' }]);
+  await session.whenIdle();
+  assert.equal(JSON.stringify(sink.events).includes('late@lid'), false);
+  assert.equal(JSON.stringify(sink.events).includes('fresh@lid'), true);
+});
+
+test('FR-CON-011: identical sync occurrences and chunks remain unique in a real FileSpool', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'sync-occurrence-spool-'));
+  const spool = new FileSpool({ root, accountId: 'A' });
+  await spool.initialize();
+  const events = [];
+  const sink = {
+    async start() {},
+    async stop() {},
+    async nextSequence() { return spool.nextSequence(); },
+    async enqueue(item) {
+      await spool.append(item);
+      events.push(item);
+    },
+  };
+  const sock = socket();
+  const session = await makeSession(async () => sock, { eventSink: sink });
+  await session.connect();
+  events.length = 0;
+
+  const contacts = Array.from({ length: 201 }, (_, index) => ({ id: `${index}@lid`, name: `Person ${index}` }));
+  sock.ev.emit('contacts.upsert', contacts);
+  await session.whenIdle();
+  sock.ev.emit('contacts.upsert', contacts);
+  await session.whenIdle();
+
+  assert.equal(events.length, 4);
+  assert.equal(new Set(events.map(item => item.event_id)).size, 4);
+  assert.deepEqual(events.map(item => item.payload.items.length), [200, 1, 200, 1]);
+});
+
+test('FR-CON-011: history is bounded, filters unsupported messages, and limits each conversation', async () => {
+  const now = Date.parse('2026-07-11T00:00:00Z');
+  const sink = recordingSink();
+  const sock = socket();
+  const session = await makeSession(async () => sock, { now: () => now, eventSink: sink });
+  await session.connect();
+  sink.events.length = 0;
+  const messages = [];
+  for (let index = 0; index < 230; index += 1) messages.push({
+    key: { id: `A-${index}`, remoteJid: 'a@lid', fromMe: false },
+    messageTimestamp: Math.floor(now / 1000) - index,
+    message: { conversation: `a-${index}` },
+  });
+  messages.push({ key: { id: 'STATUS', remoteJid: 'status@broadcast' }, message: { conversation: 'x' } });
+  messages.push({ key: { id: 'SYSTEM', remoteJid: 'a@lid' }, message: { protocolMessage: {} } });
+  sock.ev.emit('messaging-history.set', {
+    contacts: Array.from({ length: 5100 }, (_, index) => ({ id: `${index}@lid` })),
+    chats: Array.from({ length: 5100 }, (_, index) => ({ id: `${index}@lid` })),
+    messages,
+  });
+  await session.whenIdle();
+  const history = sink.events.filter(item => item.event_type === 'history.messages.upsert')
+    .flatMap(item => item.payload.items);
+  assert.equal(history.length, 200);
+  assert.equal(history.every(item => item.remote_jid === 'a@lid' && item.message_type === 'text'), true);
+  assert.equal(sink.events.filter(item => item.event_type === 'contacts.upsert').flatMap(x => x.payload.items).length, 5000);
+  assert.equal(sink.events.filter(item => item.event_type === 'chats.upsert').flatMap(x => x.payload.items).length, 5000);
+});
+
+test('FR-CON-011: message normalization rejects unknown and system JID servers', async () => {
+  const sink = recordingSink();
+  const sock = socket();
+  const session = await makeSession(async () => sock, { eventSink: sink });
+  await session.connect();
+  sink.events.length = 0;
+  sock.ev.emit('messages.upsert', { messages: [
+    { key: { id: 'DM', remoteJid: 'person@s.whatsapp.net' }, message: { conversation: 'dm' } },
+    { key: { id: 'LID', remoteJid: 'person@lid' }, message: { conversation: 'lid' } },
+    { key: { id: 'GROUP', remoteJid: 'group@g.us' }, message: { conversation: 'group' } },
+    { key: { id: 'UNKNOWN', remoteJid: 'person@unknown.server' }, message: { conversation: 'unknown' } },
+    { key: { id: 'SYSTEM', remoteJid: 'status@broadcast' }, message: { conversation: 'status' } },
+  ] });
+  await session.whenIdle();
+  assert.deepEqual(
+    sink.events.filter(item => item.event_type === 'message.upsert').map(item => item.payload.wa_message_id),
+    ['DM', 'LID', 'GROUP'],
+  );
 });
 
 test('FR-ACC-008: logout and stop do not delete session directory', async () => {

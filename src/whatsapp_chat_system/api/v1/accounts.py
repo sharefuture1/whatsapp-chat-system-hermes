@@ -21,6 +21,9 @@ from whatsapp_chat_system.bridge.client import BridgeError
 
 class BridgeProtocol(Protocol):
     def create_account(self, account_id: str, session_ref: str) -> dict[str, Any]: ...
+
+    def list_accounts(self) -> dict[str, Any]: ...
+
     def connect(self, account_id: str) -> dict[str, Any]: ...
     def qr(self, account_id: str) -> dict[str, Any]: ...
     def logout(self, account_id: str) -> dict[str, Any]: ...
@@ -163,6 +166,7 @@ def create_accounts_router(
         try:
             service.get(account_id)
             bridge.logout(account_id)
+            account = service.update(account_id, enabled=False)
             account = service.update_status(account_id, 'logged_out')
             return {'success': True, 'account': service.serialize(account)}
         except AccountError as exc:

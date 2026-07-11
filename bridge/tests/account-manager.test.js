@@ -67,6 +67,19 @@ test('FR-ACC-003: concurrent connect for one account creates exactly one socket'
   assert.equal(manager.get('account-A').socket.id, 'socket');
 });
 
+test('FR-CON-012: listStatuses returns safe manager status only', async () => {
+  const runtime = await mkdtemp(path.join(os.tmpdir(), 'bridge-list-status-'));
+  const manager = new AccountManager({ ...roots(runtime), socketFactory: async () => fakeSocket() });
+  await manager.initialize();
+  manager.createAccount({ account_id: 'A', session_ref: 'account:A' });
+
+  assert.deepEqual(manager.listStatuses(), [
+    { account_id: 'A', state: 'new', has_qr: false, last_error: null },
+  ]);
+  assert.equal(JSON.stringify(manager.listStatuses()).includes('session'), false);
+  assert.equal(JSON.stringify(manager.listStatuses()).includes(runtime), false);
+});
+
 test('FR-ACC-003/004: A and B use isolated directories and sockets', async () => {
   const runtime = await mkdtemp(path.join(os.tmpdir(), 'bridge-isolation-'));
   const sockets = new Map();
