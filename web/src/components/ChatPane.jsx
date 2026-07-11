@@ -140,6 +140,7 @@ export default function ChatPane({
   const [newMessageCount, setNewMessageCount] = useState(0)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [hideOwnMessages, setHideOwnMessages] = useState(false)
   const defaultMode = uiSettings?.reply?.default_mode || 'smart'
   const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
   useEffect(() => {
@@ -518,6 +519,8 @@ export default function ChatPane({
     const out = []
     let lastDay = ''
     for (const m of messages) {
+      // Skip own (assistant/operator) messages when hideOwnMessages is on
+      if (hideOwnMessages && (m.role === 'assistant' || m.role === 'operator')) continue
       const k = dayKey(m.timestamp)
       if (k !== lastDay) {
         out.push({ type: 'day', key: k, label: formatDay(m.timestamp, t) })
@@ -526,7 +529,7 @@ export default function ChatPane({
       out.push({ type: 'msg', ...m })
     }
     return out
-  }, [messages])
+  }, [messages, hideOwnMessages])
 
   if (!userId) {
     return <section className={`wx-chat empty is-active${active ? '' : ''}`}><div className="wx-empty wx-chat-empty"><svg viewBox="0 0 64 64"><path d="M11 14h42v30H29l-12 8v-8h-6z"/><path d="M21 25h22M21 33h15"/></svg><strong>{t('selectConversation')}</strong><span>{t('hintWorkspace')}</span></div></section>
@@ -557,6 +560,15 @@ export default function ChatPane({
             <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh')}</button>
             <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails')}</button>
             <button type="button" onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>{t('settings')}</button>
+            <div className="wx-menu-divider"/>
+            <button type="button" className={autoTranslate ? 'toggle-on' : ''} onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>
+              <span className="wx-menu-label">{t('showTranslations') || '显示翻译'}</span>
+              <span className={`wx-toggle ${autoTranslate ? 'on' : 'off'}`}>{autoTranslate ? t('on') || '开' : t('off') || '关'}</span>
+            </button>
+            <button type="button" className={hideOwnMessages ? 'toggle-on' : ''} onClick={() => setHideOwnMessages(prev => !prev)}>
+              <span className="wx-menu-label">{t('hideOwnMessages') || '隐藏我方消息'}</span>
+              <span className={`wx-toggle ${hideOwnMessages ? 'on' : 'off'}`}>{hideOwnMessages ? t('on') || '开' : t('off') || '关'}</span>
+            </button>
           </div> : null}
         </div>
       </div>
