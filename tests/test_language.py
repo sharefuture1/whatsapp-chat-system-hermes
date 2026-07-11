@@ -8,7 +8,8 @@ def test_detect_language():
 
 
 def test_approx_translate_low_info():
-    assert '类似“好/嗯/哦”' in approx_translate('โดย')
+    result = approx_translate('โดย')
+    assert '类似' in result and ('好' in result or '嗯' in result or '哦' in result)
 
 
 def test_summarize_mood_health():

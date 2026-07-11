@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 from whatsapp_chat_system.ai.provider import AIProviderError, AIResult
 from whatsapp_chat_system.ai.service import AIService
 from whatsapp_chat_system.rewriter import Rewriter
@@ -15,6 +17,11 @@ class DummyConfig:
             'default_reply_style': '',
         }
     }
+
+    class _Paths:
+        memory_dir = tempfile.mkdtemp()
+
+    paths = _Paths()
 
 
 class RecordingProvider:
