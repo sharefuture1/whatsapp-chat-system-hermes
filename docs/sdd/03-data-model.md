@@ -379,11 +379,12 @@ INDEX(status, lease_expires_at)
 
 队列并发规则：
 
-- PostgreSQL claim 使用 short transaction（短事务）：`SELECT ... FOR UPDATE SKIP LOCKED`，更新为 `claimed` 并提交；AI call 不得占用 DB transaction；
-- Worker 完成外部调用后开启新短事务，以 `id + lease_owner + input_hash + version/status` 做 CAS（compare-and-swap）结果提交；lease 丢失或输入变化时拒绝旧结果；
-- 批量任务由 parent job 拆为逐联系人 child job，父任务只聚合进度；暂停/取消向未运行子任务传播；
-- 调度器必须执行 backpressure，限制队列深度、每 tenant/租户并发、每 account/账号并发和 token/费用 budget；超预算任务延后而非无限 claim；
-- retry 采用退避和 `available_at`，超过 `max_attempts` 进入 `dead`；取消使用 `cancelled`，不得复用完成状态。
+- PostgreSQL claim 必须通过 `claim_next_committed(session_factory, ...)` 使用 short transaction（短事务）：`SELECT ... FOR UPDATE SKIP LOCKED`，更新为 `claimed`、commit 后返回不可变 `JobLease` DTO；普通 `claim_next` 仅为 transaction-scoped internal，AI call 不得占用 DB transaction；
+- PostgreSQL 保留 UTC aware 时间，SQLite 驱动边界转换为 UTC naive；lease 在 `now == lease_expires_at` 时已失效并允许 recovery；
+- Worker 完成外部调用后开启新短事务，以 `account_id + id + lease_owner + input_hash + version/status + parent-not-cancelled` 做原子 CAS（compare-and-swap）结果提交；`input_hash` 是 canonical immutable payload 的 64 位 SHA-256 hex，lease 丢失、父任务取消或输入变化时拒绝旧结果；
+- 批量任务由 parent job 拆为逐联系人 child job，父任务只聚合进度；取消在同一 savepoint 传播到 pending/retry child，不强抢 claimed/running child lease。`cancelled` 表示后续结果拒绝，不保证中断已经开始的外部调用；
+- Repository P0 强制单实例/事务内负载保护：enqueue 限制 account/tenant active queue 深度；claim 在候选选择同一短事务统计 claimed/running 的 global/account 数，并过滤单 job token/cost budget（0 表示未指定/免费）。该配额是近似 backpressure、不是账务强一致；硬防重复 claim 依赖 PostgreSQL 行锁和 CAS。跨实例全局配额 P1 使用 PostgreSQL advisory lock 或 Redis；
+- retry 采用退避和 `available_at`，超过 `max_attempts` 进入 `dead`；recovery PostgreSQL 使用 `FOR UPDATE SKIP LOCKED` 一次加载候选，SQLite 使用有界候选和逐行 CAS，并可按 account_id 公平分片；取消使用 `cancelled`，不得复用完成状态。
 
 ## 3. 状态机
 

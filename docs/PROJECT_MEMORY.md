@@ -4,6 +4,8 @@
 
 ## 当前结论
 
+- AnalysisJobRepository 已进入 **Implemented**：aware PostgreSQL 时间、有界 claim、account/input/lease CAS、parent row lock/cancel、recovery `SKIP LOCKED`、全局/账号 P0 backpressure 和 committed `JobLease` 短事务入口已落地；AI focused 五套 50 passed、全量 Python 171 passed，最终审查 APPROVED，尚未接真实 Worker。
+
 - AI 关系智能 P0 数据层已进入 **Implemented**：Alembic `0004`、7 个核心实体和并发安全 `ProfileRepository` 已落地；Summary/Profile Worker、API 和前端尚未接线，因此未标记 Verified。
 - 画像写路径强制 account/contact/conversation scope；Claim + Evidence + `profile_revision`、Claim transition 和 Snapshot 发布均在 savepoint 内原子执行，CAS 冲突后 Session 可安全恢复。
 - Snapshot 保存精确 Claim ID/版本集合和联系人级 revision；人工锁定优先、Worker 不得覆盖、restricted/过期信息不进入默认 Snapshot。

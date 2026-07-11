@@ -1,5 +1,17 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-11: AnalysisJob claim 使用 committed wrapper，配额仅作 P0 负载保护
+
+**决策**：外部 AI Worker 只能通过 `claim_next_committed(session_factory, ...)` 获取不可变 `JobLease`，claim 后立即 commit/close；状态转换各自使用新 session 短事务。
+
+- PostgreSQL 依靠行锁 + CAS 硬防重复 claim；SQLite 使用有界候选 + CAS。
+- P0 global/account/budget 限制在候选事务内统计；global claim 的 per-account 限制必须进入候选 SQL，以 correlated active count 跳过已满账号，避免高优先级满账号阻塞其他账号。
+- parent generation 不新增 child schema 字段：PostgreSQL cancel parent 与 child start/heartbeat/complete/fail 先锁同一 parent row (`FOR UPDATE`) 再 CAS；父已取消/终态禁止新 child enqueue/claim，过期 leased child recovery 直接 cancelled。
+- 跨实例全局配额列入 P1，采用 PostgreSQL advisory lock 或 Redis。
+- cancel 不保证中断已开始的外部调用，只确保父取消后结果 CAS 被拒绝。
+
+**关联规格**：`DATA-007`、`docs/sdd/03-data-model.md`。
+
 ## 2026-07-11: AI 画像写入采用联系人 revision + savepoint 原子事务
 
 **决策**：每个联系人维护单调 `profile_revision`。Claim 创建/转换必须通过 revision CAS；Snapshot 发布同时校验 current snapshot version 与 profile revision，并保存精确 Claim ID/版本集合。

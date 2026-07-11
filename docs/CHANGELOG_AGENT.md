@@ -1,5 +1,19 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-11：AnalysisJobRepository 高并发审查阻断修复
+
+- PostgreSQL/SQLite 时间边界分离；claim/recovery PostgreSQL 查询均使用 aware UTC 和 `FOR UPDATE SKIP LOCKED`，支持账号及单任务预算过滤。
+- global claim 的 per-account active count 进入候选 SQL，已满账号不再阻塞其他账号；claim 同时排除 cancelled/terminal parent。
+- parent cancel 与 child transition 统一先锁 parent row；取消后禁止 enqueue，过期 leased child recovery 直接 cancelled，且 parent statuses 批量加载避免 N+1。
+- committed wrapper 在 commit 前构造纯 DTO，commit 后直接返回，不再 expunge。
+- claim CAS 冲突改为有界循环；worker start/heartbeat/complete/fail 显式 account scope，complete 将 canonical input hash 放入同一 UPDATE CAS。
+- 补齐所有公开参数、进度和 immutable idempotency identity 校验；增加 enqueue/claim backpressure。
+- parent cancel 同 savepoint 传播 pending/retry child；claimed/running child 不强抢 lease，但 parent cancelled 后 worker 结果拒绝。
+- recovery 消除逐行额外 SELECT；新增 account 分片和精确 expiry 边界。
+- 新增 `claim_next_committed` 短事务入口和不可变 `JobLease` DTO；保存 RED 摘要。
+- 验证：AI focused 五套 `50 passed`；最终独立规格/并发质量审查 **APPROVED**；全量 Python `171 passed`、Web `39 passed` + Vite build、Bridge `63 passed` + lint、`git diff --check` 全部通过。
+- 当前状态为 **Implemented**：Repository 和 committed claim 边界已经可供 Worker 接线，但尚未部署真实 Summary/Profile Worker，因此不标记 Verified。
+
 ## 2026-07-11：AI 关系智能 P0 数据层完成（Implemented）
 
 - `FR-CON-005..010`、`FR-PLG-005..006` 已批准；多平台 `FR-CHN-*` 仍保持 Draft。

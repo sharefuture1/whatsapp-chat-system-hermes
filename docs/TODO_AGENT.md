@@ -9,6 +9,7 @@
 - [>] **Evidence → Claim → Snapshot 人物画像闭环**
   - [x] P0 数据层：7 个实体、Alembic `0004`、联系人 revision、Claim/Evidence/Snapshot Repository、CAS/savepoint 原子性
   - [x] 账号/联系人/会话 scope、人工锁定保护、restricted/过期过滤、精确来源版本
+  - [x] AnalysisJob Repository 高并发边界：committed claim、lease/account/input CAS、parent cancel、recovery、P0 backpressure
   - [ ] 单联系人总结/刷新画像 Worker 与任务 claim/lease 执行器
   - [ ] 画像 API：证据追溯、人工确认/编辑/锁定/拒绝
   - [ ] 联系人详情：概览/画像/记忆/总结/AI策略五 Tab
