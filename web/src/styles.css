@@ -820,6 +820,9 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-contact-meta-row strong { color: var(--wx-text); word-break: break-all; text-align: right; }
 
 /* ================== PC: sidebar vertical tab bar ================== */
+/* Hidden on mobile by default (no media query = mobile-first) */
+.wx-sidebar-nav { display: none; }
+
 @media (min-width: 768px) {
   /* Vertical nav on the left sidebar */
   .wx-shell-content { flex-direction: row; }
@@ -828,7 +831,6 @@ a { color: var(--wx-link); text-decoration: none; }
     width: 64px;
     background: var(--wx-panel);
     border-right: 1px solid var(--wx-divider);
-    display: flex;
     flex-direction: column;
     align-items: center;
     padding: 12px 0;
