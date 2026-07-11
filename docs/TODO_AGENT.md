@@ -4,6 +4,13 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
+### P0 — 消息与翻译同步可靠性
+
+- [x] Legacy AI assistant 消息 delta 同会话 single-flight/coalescing，慢响应不再被后续 tick 丢弃
+- [x] 相同消息 ID upsert、optimistic 状态对账、真实新增消息精确计数
+- [x] Legacy delta cache-only 翻译挂载；V2 刷新保留有效本地译文；翻译失败 30 秒有界重试
+- [ ] 将翻译旁路 JSON 迁移到数据库 revision/event cursor，并提供 SSE/WebSocket `translation.completed` 跨客户端实时同步
+
 ### P0 — AI 关系智能（数据层已实现，Worker/API/UI 待推进）
 
 - [>] **Evidence → Claim → Snapshot 人物画像闭环**

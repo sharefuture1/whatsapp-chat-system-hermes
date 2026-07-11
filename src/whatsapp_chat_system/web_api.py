@@ -527,11 +527,17 @@ def _maybe_translate_for_user(config: AppConfig, user_id: str, text: str) -> str
     return None
 
 
-def _attach_translations(config: AppConfig, user_id: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _attach_translations(
+    config: AppConfig,
+    user_id: str,
+    messages: list[dict[str, Any]],
+    generate_missing: bool = True,
+) -> list[dict[str, Any]]:
     auto = _auto_translate_enabled(config)
     if not auto or not messages:
         return [{**m, 'translated': None, 'lang': _language_hint_for(m.get('content') or '')} for m in messages]
-    _ensure_message_translations(config, user_id, messages)
+    if generate_missing:
+        _ensure_message_translations(config, user_id, messages)
     cached = load_many(
         config.paths.memory_dir,
         user_id,
@@ -1011,7 +1017,7 @@ def build_app(
             }
             for row in rows
         ]
-        messages = _attach_translations(config, user_id, messages)
+        messages = _attach_translations(config, user_id, messages, generate_missing=False)
         return {
             'user_id': user_id,
             'messages': messages,

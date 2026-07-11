@@ -4,7 +4,9 @@
 
 ## 当前结论
 
-- AnalysisJobRepository 已进入 **Implemented**：aware PostgreSQL 时间、有界 claim、account/input/lease CAS、parent row lock/cancel、recovery `SKIP LOCKED`、全局/账号 P0 backpressure 和 committed `JobLease` 短事务入口已落地；AI focused 五套 50 passed、全量 Python 171 passed，最终审查 APPROVED，尚未接真实 Worker。
+- AI 自动回复/翻译网页同步已修复：Legacy delta 同会话改为 single-flight/coalesced，不再由新 tick 废弃慢响应；相同消息 ID 改为 upsert 并精确统计新消息；V2 无有效翻译元数据时保留本地译文；翻译失败 30 秒有界重试。
+- Legacy delta GET 现在只读取已有翻译缓存，不在轮询请求内调用 AI Provider；旁路 JSON 缓存仍为 O(用户翻译历史)，后续应迁移数据库 revision/event cursor 或 SSE/WebSocket `translation.completed`。
+- AnalysisJobRepository 已进入 **Implemented**：aware PostgreSQL 时间、有界 claim、account/input/lease CAS、parent row lock/cancel、recovery `SKIP LOCKED`、全局/账号 P0 backpressure 和 committed `JobLease` 短事务入口已落地；AI focused 五套 50 passed，真实 Worker loop 尚未接线。
 
 - AI 关系智能 P0 数据层已进入 **Implemented**：Alembic `0004`、7 个核心实体和并发安全 `ProfileRepository` 已落地；Summary/Profile Worker、API 和前端尚未接线，因此未标记 Verified。
 - 画像写路径强制 account/contact/conversation scope；Claim + Evidence + `profile_revision`、Claim transition 和 Snapshot 发布均在 savepoint 内原子执行，CAS 冲突后 Session 可安全恢复。

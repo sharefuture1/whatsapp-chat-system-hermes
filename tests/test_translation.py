@@ -61,6 +61,71 @@ def test_auto_translate_off_short_circuits(tmp_path):
     assert detail['messages'][0]['translated'] is None
 
 
+def test_legacy_delta_translation_cache_miss_does_not_call_provider(monkeypatch, tmp_path):
+    from whatsapp_chat_system import web_api
+
+    calls = []
+
+    class ExplodingTranslationWorker:
+        def translate_to_zh_result(self, text, source_lang):
+            calls.append((text, source_lang))
+            raise AssertionError('delta GET must not call the translation provider')
+
+    monkeypatch.setattr(web_api, '_translation_worker', lambda config: ExplodingTranslationWorker())
+    profile = create_profile(tmp_path / 'p-delta-cache-miss')
+    seed_conversation(
+        profile,
+        user_id='delta-miss@lid',
+        user_name='Delta Miss',
+        session_id='s-delta-miss',
+        messages=[('user', 'ສະບາຍດີ', 1700000100.0)],
+    )
+    client = authed_client(profile)
+
+    response = client.get('/api/conversations/delta-miss@lid/messages?after_id=0&limit=10')
+
+    assert response.status_code == 200
+    assert calls == []
+    assert response.json()['messages'][0]['translated'] is None
+
+
+def test_legacy_delta_translation_returns_cached_value_without_provider(monkeypatch, tmp_path):
+    from whatsapp_chat_system import web_api
+    from whatsapp_chat_system.config import AppConfig
+    from whatsapp_chat_system.translations import put_translation
+
+    calls = []
+
+    class ExplodingTranslationWorker:
+        def translate_to_zh_result(self, text, source_lang):
+            calls.append((text, source_lang))
+            raise AssertionError('delta GET must only read the translation cache')
+
+    monkeypatch.setattr(web_api, '_translation_worker', lambda config: ExplodingTranslationWorker())
+    profile = create_profile(tmp_path / 'p-delta-cache-hit')
+    seed_conversation(
+        profile,
+        user_id='delta-hit@lid',
+        user_name='Delta Hit',
+        session_id='s-delta-hit',
+        messages=[('user', 'ສະບາຍດີ', 1700000100.0)],
+    )
+    client = authed_client(profile)
+    config = AppConfig.from_profile(profile)
+    message_id = 1
+    put_translation(config.paths.memory_dir, 'delta-hit@lid', message_id, {
+        'source_lang': 'Lao',
+        'source_text': 'ສະບາຍດີ',
+        'zh': '你好',
+    })
+
+    response = client.get('/api/conversations/delta-hit@lid/messages?after_id=0&limit=10')
+
+    assert response.status_code == 200
+    assert calls == []
+    assert response.json()['messages'][0]['translated'] == '你好'
+
+
 def test_translate_endpoint_accepts_v2_string_message_id(monkeypatch, tmp_path):
     from whatsapp_chat_system.rewriter import RewriteResult
     from whatsapp_chat_system import web_api

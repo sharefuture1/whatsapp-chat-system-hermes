@@ -1,5 +1,18 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-11：AI 自动回复与翻译网页同步修复
+
+- 根因一：Legacy 同会话增量请求使用 latest-request-wins，慢响应会被下一轮刷新废弃，出现后端 200 但游标和 React 均不推进。
+- 根因二：delta GET 同步生成缺失译文，放大慢请求竞态；翻译旁路缓存不改变消息 ID，旧消息字段变更无法由 `after_id` 表达。
+- 前端新增同会话 single-flight/coalesced delta scheduler；会话切换仍拒绝旧响应，补跑消费最新 callback。
+- 消息 merge 改为同 ID upsert，并准确对账 optimistic delivery 状态；新增计数只统计真正插入的唯一 ID。
+- V2 刷新在服务端没有有效翻译元数据或仅返回 `lang=Unknown` 时保留本地译文；有效服务端元数据仍覆盖本地。
+- 翻译失败使用 30 秒有界重试，并同步更新 worker ref，避免 React commit 竞态导致立即热循环。
+- Legacy delta API 改为 cache-only attach，缺失译文不再在 GET 请求内调用 Provider；已有缓存仍正常返回。
+- 严格 TDD：保存后端真实 RED；Web 新增同步、upsert、计数、重试和 scheduler 回归测试。
+- 最终独立审查：**APPROVED**。
+- 验证：Python `173 passed`、Web `52 passed` + Vite build、Bridge `63 passed` + lint、`git diff --check` 全部通过。
+
 ## 2026-07-11：AnalysisJobRepository 高并发审查阻断修复
 
 - PostgreSQL/SQLite 时间边界分离；claim/recovery PostgreSQL 查询均使用 aware UTC 和 `FOR UPDATE SKIP LOCKED`，支持账号及单任务预算过滤。

@@ -124,7 +124,7 @@
 - 状态：`Implemented`
 - 已实现：插件开关、消息设置和 AI Provider 形成统一有效门禁；运行时加密配置热生效；Legacy 整数 ID 与 V2 UUID 均可翻译；失败向 UI 返回可操作错误，不再静默或把原文伪装成译文；前端按 message ID 记录 in-flight 请求，避免轮询和状态更新期间重复翻译；译文内嵌所属气泡以保持稳定布局。
 - 已验证：真实 Provider 老挝语→中文探针成功，Provider 配置与翻译 Worker 使用同一运行时设置。
-- 剩余验收：消息读取仍可能同步触发翻译；需改为独立任务/缓存回填、失败重试和实时更新后才能进入 `Verified`。
+- 剩余验收：消息读取已改为 cache-only，不再同步触发 Provider；本轮已修复单客户端轮询、V2刷新和失败重试。仍需将翻译缓存迁移数据库 revision/event cursor，并提供 SSE/WebSocket 跨客户端实时更新，才能进入 `Verified`。
 
 ### SDD-P1-06 插件完整接线
 
@@ -153,6 +153,7 @@
 
 - 状态：`Implemented`
 - 已修复：Legacy 迁移期网页直发成功后，将 outbound assistant 消息及 WhatsApp message ID 同事务写回 `state.db`；刷新/增量 API 不再让成功气泡消失或误留感叹号。
+- 已修复：Legacy 同会话 delta 使用 single-flight/coalesced 调度，慢响应不会被下一 tick 判旧；相同 ID 用 upsert 对账且只统计真正新增消息，AI assistant 记录可稳定推进游标并进入网页。
 - 剩余阻塞：仍需真实 WhatsApp 断线重连、批量历史、乱序/重复事件和 Bridge V2 多账号数据才能完成端到端 `Verified`。
 - 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap；网页直发成功后刷新仍能看到同一条消息。
 

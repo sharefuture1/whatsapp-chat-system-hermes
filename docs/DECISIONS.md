@@ -12,6 +12,14 @@
 
 **关联规格**：`DATA-007`、`docs/sdd/03-data-model.md`。
 
+## 2026-07-11: 消息新增游标与翻译字段变更必须分离处理
+
+**决策**：Legacy 新消息继续使用严格 `message_id > after_id` 游标，但同会话请求必须 single-flight/coalesced，不能让后续 tick 废弃当前响应。相同消息 ID 的服务端状态使用 upsert 对账。翻译等旧消息可变字段不能假装成新消息；delta GET 只读取缓存，客户端保留有效本地译文并有界重试。
+
+**原因**：消息 ID 游标只能表达 append，无法表达旧消息翻译字段 mutation；在 GET 内同步调用 AI 会扩大竞态并降低吞吐。将新增消息、delivery 对账和翻译状态分别建模，才能避免游标不推进、重复计数和刷新后译文消失。
+
+**后续**：翻译持久化迁移数据库 revision/event cursor，使用 SSE/WebSocket `translation.completed` 实现跨客户端实时同步；当前旁路 JSON 只作为迁移期缓存。
+
 ## 2026-07-11: AI 画像写入采用联系人 revision + savepoint 原子事务
 
 **决策**：每个联系人维护单调 `profile_revision`。Claim 创建/转换必须通过 revision CAS；Snapshot 发布同时校验 current snapshot version 与 profile revision，并保存精确 Claim ID/版本集合。
