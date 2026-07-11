@@ -14,8 +14,7 @@
 from __future__ import annotations
 
 import os
-import secrets
-from base64 import b64encode, b64decode
+from base64 import b64decode
 from pathlib import Path
 
 from cryptography.fernet import Fernet

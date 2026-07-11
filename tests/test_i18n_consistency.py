@@ -1,7 +1,6 @@
 """Test that every i18n key used in components is present in the dictionaries."""
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 

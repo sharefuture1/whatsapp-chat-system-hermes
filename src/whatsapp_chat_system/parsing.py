@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 COMMAND_PATTERNS = [
     r'^\s*发给\s*(?P<target>[^：:]+)\s*[：:]\s*(?P<message>.+?)\s*$',

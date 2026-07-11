@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
 
 from whatsapp_chat_system.storage import StateDB
 from conftest import create_profile, seed_conversation
