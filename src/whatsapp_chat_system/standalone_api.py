@@ -34,9 +34,12 @@ from .api.internal.whatsapp_events import (
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
 from .api.v1.personas import create_personas_router
+from .api.v1.operations import create_operations_router
+from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
+from .outbox import OutboxDispatcher
 from .runtime import StandaloneRuntime, save_runtime_settings
 from .security.internal_auth import InternalAuthError, verify_internal_token
 
@@ -203,6 +206,7 @@ def build_standalone_app(
     account_bridge: BridgeProtocol | None = None,
     internal_event_token: str | None = None,
     account_reconcile_interval_seconds: float = 45.0,
+    outbox_poll_interval_seconds: float = 1.0,
 ) -> FastAPI:
     """Build a standalone API; schema migration is an external Alembic prerequisite."""
     runtime = StandaloneRuntime.from_env(
@@ -214,6 +218,7 @@ def build_standalone_app(
         internal_token=runtime.internal_event_token,
     )
     reconciler = AccountReconciler(factory, bridge)
+    outbox_dispatcher = OutboxDispatcher(factory, bridge)
     login_lock = RLock()
 
     @asynccontextmanager
@@ -235,16 +240,32 @@ def build_standalone_app(
                     logger.exception("WhatsApp account reconciliation round failed")
                 await asyncio.sleep(account_reconcile_interval_seconds)
 
-        task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
-        app.state.account_reconciler_task = task
+        async def outbox_loop() -> None:
+            while True:
+                try:
+                    processed = await asyncio.to_thread(outbox_dispatcher.run_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Outbound message worker round failed")
+                    processed = 0
+                await asyncio.sleep(0 if processed else outbox_poll_interval_seconds)
+
+        reconcile_task = asyncio.create_task(
+            reconcile_loop(), name="whatsapp-account-reconciler"
+        )
+        outbox_task = asyncio.create_task(outbox_loop(), name="whatsapp-outbox-worker")
+        app.state.account_reconciler_task = reconcile_task
+        app.state.outbox_worker_task = outbox_task
         try:
             yield
         finally:
             app.state.ready = False
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            reconcile_task.cancel()
+            outbox_task.cancel()
+            await asyncio.gather(reconcile_task, outbox_task, return_exceptions=True)
 
-    app = FastAPI(title="WhatsApp Chat System API", version="0.5.3", lifespan=lifespan)
+    app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
     app.state.ready = False
     app.add_middleware(
@@ -256,6 +277,7 @@ def build_standalone_app(
             "Content-Type",
             "X-Session-Token",
             "X-Request-ID",
+            "Idempotency-Key",
         ],
         expose_headers=["X-Request-ID"],
         max_age=600,
@@ -266,6 +288,8 @@ def build_standalone_app(
         create_whatsapp_events_router(factory, runtime.internal_event_token)
     )
     app.include_router(create_personas_router(runtime, factory))
+    app.include_router(create_settings_router(runtime, factory))
+    app.include_router(create_operations_router(factory))
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
@@ -336,6 +360,7 @@ def build_standalone_app(
                 "runtime_mode": "standalone",
                 "ts": time.time(),
                 "login_enabled": True,
+                "outbox_worker": "running",
             }
         )
 

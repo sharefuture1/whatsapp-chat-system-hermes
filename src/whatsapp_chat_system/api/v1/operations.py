@@ -45,7 +45,9 @@ def _resolve_conversation(
     direct = session.get(Conversation, cleaned)
     if direct is not None and direct.deleted_at is None:
         if account_id and direct.account_id != account_id:
-            raise HTTPException(status_code=404, detail="Conversation not found in account")
+            raise HTTPException(
+                status_code=404, detail="Conversation not found in account"
+            )
         return direct
 
     statement = select(Conversation).where(
@@ -57,7 +59,9 @@ def _resolve_conversation(
         statement = statement.where(Conversation.account_id == account_id)
     rows = session.scalars(statement.order_by(Conversation.id.asc()).limit(2)).all()
     if not rows:
-        raise HTTPException(status_code=404, detail=f"Conversation not found: {cleaned}")
+        raise HTTPException(
+            status_code=404, detail=f"Conversation not found: {cleaned}"
+        )
     if len(rows) > 1:
         raise HTTPException(
             status_code=409,
@@ -111,7 +115,10 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
             .order_by(OutboxMessage.available_at.asc(), OutboxMessage.id.asc())
             .limit(limit)
         ).all()
-        items = [_schedule_payload(outbox, message, conversation) for outbox, message, conversation in rows]
+        items = [
+            _schedule_payload(outbox, message, conversation)
+            for outbox, message, conversation in rows
+        ]
         return {"items": items, "total": len(items)}
 
     @router.post("/schedule", status_code=202)
@@ -124,8 +131,12 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
         if run_at <= now:
             raise HTTPException(status_code=422, detail="run_at must be in the future")
         if run_at.year > now.year + 5:
-            raise HTTPException(status_code=422, detail="run_at is too far in the future")
-        conversation = _resolve_conversation(session, payload.target, payload.account_id)
+            raise HTTPException(
+                status_code=422, detail="run_at is too far in the future"
+            )
+        conversation = _resolve_conversation(
+            session, payload.target, payload.account_id
+        )
         key = payload.idempotency_key or f"schedule:{uuid4()}"
         if not key.startswith("schedule:"):
             key = f"schedule:{key}"
@@ -152,7 +163,9 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
         if outbox is None or not outbox.idempotency_key.startswith("schedule:"):
             raise HTTPException(status_code=404, detail="Scheduled message not found")
         if outbox.status == "completed":
-            raise HTTPException(status_code=409, detail="Scheduled message was already sent")
+            raise HTTPException(
+                status_code=409, detail="Scheduled message was already sent"
+            )
         message = session.get(Message, outbox.message_id)
         outbox.status = "dead"
         outbox.last_error = "schedule_cancelled"
@@ -178,7 +191,9 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
             .order_by(OutboxMessage.created_at.desc())
             .limit(limit * 500)
         ).all()
-        grouped: dict[str, list[tuple[OutboxMessage, Message, Conversation]]] = defaultdict(list)
+        grouped: dict[str, list[tuple[OutboxMessage, Message, Conversation]]] = (
+            defaultdict(list)
+        )
         for row in rows:
             key = row[0].idempotency_key.split(":", 2)
             batch_id = key[1] if len(key) > 1 else row[0].id
@@ -212,7 +227,11 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
         payload: BroadcastRequest,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
-        targets = list(dict.fromkeys(target.strip() for target in payload.targets if target.strip()))
+        targets = list(
+            dict.fromkeys(
+                target.strip() for target in payload.targets if target.strip()
+            )
+        )
         if not targets:
             raise HTTPException(status_code=422, detail="targets must not be empty")
         batch_id = payload.idempotency_key or uuid4().hex
@@ -220,7 +239,9 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
         rejected: list[dict[str, Any]] = []
         for target in targets:
             try:
-                conversation = _resolve_conversation(session, target, payload.account_id)
+                conversation = _resolve_conversation(
+                    session, target, payload.account_id
+                )
                 message, outbox, created = enqueue_outbox_message(
                     session,
                     conversation,

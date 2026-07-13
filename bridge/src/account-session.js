@@ -4,6 +4,7 @@ import { DisconnectReason } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 
 import { normalizeChat, normalizeContact, occurrenceChunkIdentity } from './sync-normalizer.js';
+import { SendReceiptStore } from './send-receipt-store.js';
 
 export const ACCOUNT_STATES = Object.freeze([
   'new',
@@ -155,10 +156,13 @@ export class AccountSession {
     this.autoReconnect = false;
     this.sinkStarted = false;
     this.qrExpiryTimer = null;
+    this.sendReceiptStore = new SendReceiptStore(spoolDir);
+    this.sendInFlight = new Map();
   }
 
   async initialize() {
     await Promise.all([this.sessionDir, this.spoolDir, this.mediaDir].map(secureDirectory));
+    await this.sendReceiptStore.start();
     if (this.eventSink && !this.sinkStarted) {
       await this.eventSink.start();
       this.sinkStarted = true;
@@ -564,7 +568,23 @@ export class AccountSession {
     }
   }
 
-  async send({ chatId, text }) {
+  async send({ chatId, text, idempotencyKey = null }) {
+    const key = this.sendReceiptStore.validateKey(idempotencyKey);
+    if (key) {
+      const existing = this.sendReceiptStore.get(key);
+      if (existing) return existing;
+      if (this.sendInFlight.has(key)) return this.sendInFlight.get(key);
+    }
+    const operation = this.#sendNow({ chatId, text, idempotencyKey: key });
+    if (key) this.sendInFlight.set(key, operation);
+    try {
+      return await operation;
+    } finally {
+      if (key && this.sendInFlight.get(key) === operation) this.sendInFlight.delete(key);
+    }
+  }
+
+  async #sendNow({ chatId, text, idempotencyKey }) {
     if (this.state !== 'online' || !this.socket) {
       throw new BridgeDomainError('account_offline', 'Account is not online', { status: 409, retryable: true });
     }
@@ -577,6 +597,7 @@ export class AccountSession {
         { status: 502, retryable: true },
       );
     }
+    if (idempotencyKey) await this.sendReceiptStore.put(idempotencyKey, messageId);
     await this.#emitEvent('message.sent', {
       wa_message_id: messageId,
       timestamp: new Date(this.now()).toISOString(),

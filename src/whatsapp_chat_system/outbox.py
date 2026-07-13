@@ -156,7 +156,11 @@ class OutboxDispatcher:
             conversation = (
                 session.get(Conversation, message.conversation_id) if message else None
             )
-            if message is None or conversation is None or conversation.deleted_at is not None:
+            if (
+                message is None
+                or conversation is None
+                or conversation.deleted_at is not None
+            ):
                 self._finalize_failure(
                     outbox_id,
                     code="invalid_outbox_reference",
@@ -192,7 +196,9 @@ class OutboxDispatcher:
             )
             return
         except Exception as exc:  # pragma: no cover - defensive worker boundary
-            logger.exception("Unexpected outbox delivery failure", extra={"outbox_id": outbox_id})
+            logger.exception(
+                "Unexpected outbox delivery failure", extra={"outbox_id": outbox_id}
+            )
             self._finalize_failure(
                 outbox_id,
                 code="outbox_delivery_error",
@@ -244,7 +250,9 @@ class OutboxDispatcher:
             outbound = session.get(Message, outbox.message_id)
             terminal = not retryable or outbox.attempts >= self.max_attempts
             outbox.status = "dead" if terminal else "pending"
-            outbox.available_at = now + timedelta(seconds=self._retry_delay(outbox.attempts))
+            outbox.available_at = now + timedelta(
+                seconds=self._retry_delay(outbox.attempts)
+            )
             outbox.last_error = f"{code}: {message}"[:4000]
             outbox.lease_owner = None
             outbox.lease_expires_at = None

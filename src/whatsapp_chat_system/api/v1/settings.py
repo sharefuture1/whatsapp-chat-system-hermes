@@ -13,7 +13,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from whatsapp_chat_system.ai.crypto import decrypt_api_key, encrypt_api_key, mask_api_key
+from whatsapp_chat_system.ai.crypto import (
+    decrypt_api_key,
+    encrypt_api_key,
+    mask_api_key,
+)
 from whatsapp_chat_system.db.models import (
     AIRuntimeSetting,
     Contact,
@@ -90,25 +94,38 @@ def _write_channels(runtime: StandaloneRuntime, channels: list[dict[str, Any]]) 
     runtime.forwarding_channels = channels
 
 
-def _ai_payload(runtime: StandaloneRuntime, row: AIRuntimeSetting | None) -> dict[str, Any]:
+def _ai_payload(
+    runtime: StandaloneRuntime, row: AIRuntimeSetting | None
+) -> dict[str, Any]:
     ciphertext = row.api_key_ciphertext if row else None
     env_key = runtime.ai_settings.api_key.strip()
     return {
         "provider": "wendingai",
         "base_url": row.base_url if row else runtime.ai_settings.base_url,
-        "default_model": row.default_model if row else runtime.ai_settings.default_model,
-        "timeout_seconds": row.timeout_seconds if row else runtime.ai_settings.timeout_seconds,
+        "default_model": row.default_model
+        if row
+        else runtime.ai_settings.default_model,
+        "timeout_seconds": row.timeout_seconds
+        if row
+        else runtime.ai_settings.timeout_seconds,
         "max_retries": row.max_retries if row else runtime.ai_settings.max_retries,
-        "api_key_configured": bool(ciphertext and decrypt_api_key(ciphertext)) or bool(env_key),
+        "api_key_configured": bool(ciphertext and decrypt_api_key(ciphertext))
+        or bool(env_key),
         "api_key_hint": row.api_key_hint if row else mask_api_key(env_key),
         "auto_translate": {
-            "plugin_enabled": runtime.web_settings.get("plugins", {}).get("auto_translate", True),
-            "setting_enabled": runtime.web_settings.get("message_ops", {}).get("auto_translate", True),
+            "plugin_enabled": runtime.web_settings.get("plugins", {}).get(
+                "auto_translate", True
+            ),
+            "setting_enabled": runtime.web_settings.get("message_ops", {}).get(
+                "auto_translate", True
+            ),
         },
     }
 
 
-def _contact_payload(contact: Contact, override: ContactAIOverride | None) -> dict[str, Any]:
+def _contact_payload(
+    contact: Contact, override: ContactAIOverride | None
+) -> dict[str, Any]:
     return {
         "contact_id": contact.id,
         "account_id": contact.account_id,
@@ -146,9 +163,13 @@ def create_settings_router(
             "web_settings": _safe_web_settings(runtime),
             "model": {
                 "provider": "wendingai",
-                "default": ai_row.default_model if ai_row else runtime.ai_settings.default_model,
+                "default": ai_row.default_model
+                if ai_row
+                else runtime.ai_settings.default_model,
                 "base_url": ai_row.base_url if ai_row else runtime.ai_settings.base_url,
-                "api_key_configured": _ai_payload(runtime, ai_row)["api_key_configured"],
+                "api_key_configured": _ai_payload(runtime, ai_row)[
+                    "api_key_configured"
+                ],
             },
             "plugins": deepcopy(runtime.web_settings.get("plugins") or {}),
             "runtime_mode": "standalone",
@@ -214,7 +235,9 @@ def create_settings_router(
         if payload.default_model is not None:
             model = payload.default_model.strip()
             if not model:
-                raise HTTPException(status_code=422, detail="default_model must not be empty")
+                raise HTTPException(
+                    status_code=422, detail="default_model must not be empty"
+                )
             row.default_model = model
         if payload.api_key is not None:
             key = payload.api_key.strip()
@@ -247,11 +270,14 @@ def create_settings_router(
                 )
                 or 0,
                 "messages": session.scalar(select(func.count(Message.id))) or 0,
-                "unread": session.scalar(select(func.sum(Conversation.unread_count))) or 0,
+                "unread": session.scalar(select(func.sum(Conversation.unread_count)))
+                or 0,
             },
             "recent_conversations": [],
             "plugins_enabled": sum(
-                1 for enabled in (runtime.web_settings.get("plugins") or {}).values() if enabled
+                1
+                for enabled in (runtime.web_settings.get("plugins") or {}).values()
+                if enabled
             ),
         }
 
@@ -304,8 +330,8 @@ def create_settings_router(
                 override.model = (values["ai_model"] or "").strip() or None
             if "custom_system_prompt" in values:
                 override.system_prompt = (
-                    (values["custom_system_prompt"] or "").strip() or None
-                )
+                    values["custom_system_prompt"] or ""
+                ).strip() or None
             if "reply_style" in values:
                 override.reply_style = (values["reply_style"] or "").strip() or None
             if "auto_reply_enabled" in values:

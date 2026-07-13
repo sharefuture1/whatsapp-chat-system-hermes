@@ -14,7 +14,7 @@ export default function BroadcastCenterPage({ onBack }) {
   const refresh = async () => {
     setError(null)
     try {
-      const data = await api.get('/broadcast')
+      const data = await api.get('/v1/broadcast')
       setItems(data.items ?? [])
     } catch (e) {
       setError(e.message || t('error'))
@@ -41,7 +41,7 @@ export default function BroadcastCenterPage({ onBack }) {
     }
     setSubmitting(true)
     try {
-      await api.post('/broadcast', { targets, message, mode: 'direct', use_memory: true })
+      await api.post('/v1/broadcast', { targets, message, mode: 'direct', use_memory: true })
       setDraft({ targets: '', message: '' })
       flash(t('broadcastDone'))
       await refresh()

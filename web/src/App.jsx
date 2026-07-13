@@ -143,26 +143,30 @@ function AppInner() {
   }
 
   const fetchConversationsPage = useCallback(async (page) => {
-    const [legacyRes, legacyContactsRes, standaloneRes, contactsRes] = await Promise.all([
+    const standaloneRes = await api.get(`/v1/conversations?platform=all&account_id=all&limit=200`)
+    const contactsRes = await api.get('/v1/contacts?platform=all&account_id=all&limit=500')
+    const legacyResults = await Promise.allSettled([
       api.get(`/conversations?page=${page}&page_size=${PAGE_SIZE}`),
-      api.get(`/contacts?page=1&page_size=500`),
-      api.get(`/v1/conversations?platform=all&account_id=all&limit=200`),
-      api.get('/v1/contacts?platform=all&account_id=all&limit=500'),
+      api.get('/contacts?page=1&page_size=500'),
     ])
+    const legacyRes = legacyResults[0].status === 'fulfilled'
+      ? legacyResults[0].value
+      : { items: [], total: 0, has_more: false }
+    const legacyContactsRes = legacyResults[1].status === 'fulfilled'
+      ? legacyResults[1].value
+      : { items: [] }
     const inbox = buildInbox({
       legacy: legacyRes.items || [],
       standalone: standaloneRes.items || [],
       standaloneAccounts: standaloneRes.available_accounts || accountsRef.current || [],
     })
-    const nextItems = inbox.conversations
-    const nextContacts = buildContacts({
-      legacy: legacyContactsRes.items || [],
-      standalone: contactsRes.items || [],
-      accounts: inbox.accounts,
-    })
     return {
-      items: nextItems,
-      contacts: nextContacts,
+      items: inbox.conversations,
+      contacts: buildContacts({
+        legacy: legacyContactsRes.items || [],
+        standalone: contactsRes.items || [],
+        accounts: inbox.accounts,
+      }),
       accounts: inbox.accounts,
       legacyTotal: Number(legacyRes.total) || 0,
       has_more: Boolean(legacyRes.has_more),
@@ -185,8 +189,10 @@ function AppInner() {
   const refreshWorkspace = useCallback(({ silent = false, fresh = false } = {}) => {
     return refreshCoordinatorRef.current.run(async () => {
       try {
-        const convRes = await fetchConversationsPage(1)
-        const dashboardRes = await api.get('/dashboard')
+        const [convRes, dashboardRes] = await Promise.all([
+          fetchConversationsPage(1),
+          api.get('/v1/dashboard').catch(() => api.get('/dashboard').catch(() => null)),
+        ])
         return { convRes, dashboardRes }
       } catch (e) {
         if (!silent) showError(e)
@@ -196,12 +202,12 @@ function AppInner() {
       if (!result) return
       const { convRes, dashboardRes } = result
       const items = convRes.items || []
-        setDashboard(dashboardRes)
+        if (dashboardRes) setDashboard(dashboardRes)
         commitConversationsPage(convRes)
         setRefreshTick(prev => prev + 1)
         // Sync pinned set from server-side authoritative flag
         setPinned(prev => {
-          const next = items.filter(i => i.pinned).map(i => i.user_id)
+          const next = items.filter(i => i.pinned).map(i => i.conversation_key || i.user_id)
           if (next.length === prev.length && next.every((id, idx) => prev[idx] === id)) return prev
           localStorage.setItem(PIN_KEY, JSON.stringify(next))
           return next
@@ -217,8 +223,7 @@ function AppInner() {
             setSelectedName(current.user_name)
             return prev
           }
-          setSelectedName('')
-          return ''
+          return prev
         })
     }, { fresh })
   }, [commitConversationsPage, fetchConversationsPage])
@@ -238,7 +243,7 @@ function AppInner() {
 
   const refreshSettings = useCallback(async () => {
     const [settingsData, aiData] = await Promise.all([
-      api.get('/settings'),
+      api.get('/v1/settings').catch(() => api.get('/settings')),
       api.get('/v1/ai/settings').catch(() => ({})),
     ])
     setSettings(settingsData)
@@ -297,7 +302,10 @@ function AppInner() {
   const saveSettings = async (payload, done) => {
     setSaving(true)
     try {
-      await api.put('/settings', payload)
+      await api.put('/v1/settings', {
+        channels: payload.channels || settings.channels || [],
+        web_settings: payload.web_settings || payload,
+      }).catch(() => api.put('/settings', payload))
       await refreshSettings()
       done?.()
     } catch (e) {
@@ -314,14 +322,14 @@ function AppInner() {
     setApiSettings(fresh)
   }
 
-  const sendReply = async (conversation, message, mode, { previewOnly = false } = {}) => {
+  const sendReply = async (conversation, message, mode, { previewOnly = false, idempotencyKey = null } = {}) => {
     setSending(!previewOnly)
     try {
       if (conversation?.source === 'standalone' && conversation?.conversation_id && previewOnly) {
         throw new Error(t('previewFailed') || 'Preview is not available for this conversation yet')
       }
       const data = conversation?.source === 'standalone' && conversation?.conversation_id
-        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message })
+        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey })
         : await api.post('/reply', { target: conversation?.user_id, message, mode, preview_only: previewOnly })
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
@@ -350,17 +358,32 @@ function AppInner() {
     }
   }
 
-  const togglePin = useCallback(async (userId) => {
-    const isPinned = pinned.includes(userId)
+  const togglePin = useCallback(async (conversation) => {
+    if (!conversation) return
+    const pinKey = conversation.conversation_key || conversation.user_id
+    const isPinned = pinned.includes(pinKey) || Boolean(conversation.pinned)
     setPinned(prev => {
-      const updated = isPinned ? prev.filter(p => p !== userId) : [userId, ...prev.filter(p => p !== userId)]
+      const updated = isPinned ? prev.filter(item => item !== pinKey) : [pinKey, ...prev.filter(item => item !== pinKey)]
       localStorage.setItem(PIN_KEY, JSON.stringify(updated))
       return updated
     })
     try {
-      await api.post('/chat/pin', { user_id: userId, pinned: !isPinned })
+      if (conversation.source === 'standalone' && conversation.conversation_id) {
+        await api.patch(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}`, { pinned: !isPinned })
+      } else {
+        await api.post('/chat/pin', { user_id: conversation.user_id, pinned: !isPinned })
+      }
       refreshWorkspace({ silent: true, fresh: true })
-    } catch {}
+    } catch (error) {
+      setPinned(prev => {
+        const rolledBack = isPinned
+          ? [pinKey, ...prev.filter(item => item !== pinKey)]
+          : prev.filter(item => item !== pinKey)
+        localStorage.setItem(PIN_KEY, JSON.stringify(rolledBack))
+        return rolledBack
+      })
+      showError(error)
+    }
   }, [pinned, refreshWorkspace])
 
   const deleteChat = useCallback(async (conversation) => {
@@ -386,13 +409,16 @@ function AppInner() {
     }
   }, [pinned, refreshWorkspace, selectedId, t])
 
-  const markRead = useCallback((userId, ts) => {
+  const markRead = useCallback((userId, ts, conversation = null) => {
     if (!userId) return
     const cur = readTime(userId)
     if (ts > cur) {
       writeTime(userId, ts)
       readMapRef.current = { ...(readMapRef.current || {}), [userId]: ts }
       setReadTick(prev => prev + 1)
+      if (conversation?.source === 'standalone' && conversation?.conversation_id) {
+        api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/read`, {}).catch(() => {})
+      }
     }
   }, [])
 
@@ -401,7 +427,7 @@ function AppInner() {
     const found = conversations.find(c => c.conversation_key === conversationKey)
     if (found) {
       setSelectedName(found.user_name)
-      markRead(conversationKey, found.last_timestamp)
+      markRead(conversationKey, found.last_timestamp, found)
     } else {
       setSelectedName(conversationKey)
     }
@@ -425,7 +451,7 @@ function AppInner() {
   useEffect(() => {
     if (!selectedId) return
     const found = conversations.find(c => c.conversation_key === selectedId)
-    if (found) markRead(found.conversation_key, found.last_timestamp)
+    if (found) markRead(found.conversation_key, found.last_timestamp, found)
   }, [conversations, selectedId, markRead])
 
   const platformOptions = useMemo(() => {
@@ -437,7 +463,7 @@ function AppInner() {
     const q = query.trim().toLowerCase()
     const contactProfiles = settings.web_settings?.contact_profiles || {}
     return filterInbox(conversations, { platform: platformFilter, accountId: accountFilter }).filter(item => {
-      const remark = String(contactProfiles[item.user_id]?.remark || '').toLowerCase()
+      const remark = String(item.contact_profile?.remark || contactProfiles[item.user_id]?.remark || '').toLowerCase()
       if (!q) return true
       return item.user_name?.toLowerCase().includes(q) ||
         item.user_id?.toLowerCase().includes(q) ||
@@ -457,17 +483,23 @@ function AppInner() {
   )
   const selectedContactProfile = useMemo(() => {
     if (!selectedConversation?.user_id) return null
-    return (settings.web_settings?.contact_profiles || {})[selectedConversation.user_id] || null
+    return selectedConversation.contact_profile || (settings.web_settings?.contact_profiles || {})[selectedConversation.user_id] || null
   }, [settings.web_settings?.contact_profiles, selectedConversation])
   const selectedUserOverride = useMemo(() => {
     if (!selectedConversation?.user_id) return null
-    return (settings.web_settings?.reply?.user_overrides || {})[selectedConversation.user_id] || null
+    return selectedConversation.user_override || (settings.web_settings?.reply?.user_overrides || {})[selectedConversation.user_id] || null
   }, [settings.web_settings?.reply?.user_overrides, selectedConversation])
 
   const quickSaveContactConfig = async (userId, patchFields) => {
     if (!userId) return
     setSaving(true)
     try {
+      if (selectedConversation?.source === 'standalone' && selectedConversation?.contact_id) {
+        await api.put(`/v1/contacts/${encodeURIComponent(selectedConversation.contact_id)}/settings`, patchFields)
+        await refreshWorkspace({ silent: true, fresh: true })
+        setBanner(t('saved'))
+        return
+      }
       const currentOverrides = settings.web_settings?.reply?.user_overrides || {}
       const currentProfiles = settings.web_settings?.contact_profiles || {}
       const existing = currentOverrides[userId] || {}
@@ -595,8 +627,8 @@ function AppInner() {
               uiSettings={settings.web_settings}
               onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
               onOpenContactConfig={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
-              pinned={selectedConversation ? pinnedSet.has(selectedConversation.user_id) || Boolean(selectedConversation.pinned) : false}
-              onTogglePin={() => selectedConversation?.user_id && togglePin(selectedConversation.user_id)}
+              pinned={selectedConversation ? pinnedSet.has(selectedConversation.conversation_key) || Boolean(selectedConversation.pinned) : false}
+              onTogglePin={() => selectedConversation && togglePin(selectedConversation)}
               active
               health={health}
               refreshTick={refreshTick}
