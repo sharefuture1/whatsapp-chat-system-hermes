@@ -1,6 +1,6 @@
 # Standalone 可靠性与聊天体验修复计划
 
-日期：2026-07-13  
+日期：2026-07-13
 分支：`fix/standalone-reliability-ux-20260713`
 
 ## 目标
