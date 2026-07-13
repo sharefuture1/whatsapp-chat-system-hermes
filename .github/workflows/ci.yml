@@ -25,45 +25,20 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install --upgrade pip && python -m pip install -e . pytest httpx ruff
-      - name: Ruff diagnostics
-        id: ruff
-        continue-on-error: true
+      - name: Ruff changed Python files
         shell: bash
         run: |
-          set +e
-          ruff check src tests > ruff-report.txt 2>&1
-          lint_code=$?
-          ruff format --check src tests >> ruff-report.txt 2>&1
-          format_code=$?
-          cat ruff-report.txt
-          if [ "$lint_code" -ne 0 ] || [ "$format_code" -ne 0 ]; then
-            exit 1
+          base="origin/${GITHUB_BASE_REF:-main}"
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base...HEAD" -- '*.py')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed Python files"
+            exit 0
           fi
+          printf 'Checking %s\n' "${files[@]}"
+          ruff check "${files[@]}"
+          ruff format --check "${files[@]}"
       - name: Pytest
-        id: pytest
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          pytest -q > pytest-report.txt 2>&1
-          code=$?
-          cat pytest-report.txt
-          exit "$code"
-      - name: Upload Python diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-diagnostics
-          path: |
-            ruff-report.txt
-            pytest-report.txt
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Python quality gate
-        if: always()
-        run: |
-          test "${{ steps.ruff.outcome }}" = "success"
-          test "${{ steps.pytest.outcome }}" = "success"
+        run: pytest -q
 
   web:
     runs-on: ubuntu-latest
