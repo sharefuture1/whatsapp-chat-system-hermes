@@ -217,3 +217,25 @@ def test_provider_maps_invalid_timeout_to_configuration_error():
 
     assert caught.value.code == 'configuration_error'
     assert caught.value.retryable is False
+
+
+def test_provider_uses_runtime_retry_override_for_http_errors():
+    class RuntimeSettings:
+        effective_base_url = 'https://wendingai.future1.us/v1'
+        effective_api_key = 'unit-test-secret'
+        effective_timeout = 2
+        effective_retries = 2
+
+    session = _FakeSession([_FakeResponse(500) for _ in range(3)])
+    provider = WendingAIProvider(
+        AISettings(api_key='unit-test-secret', max_retries=0),
+        session=session,
+        sleep=lambda _: None,
+    )
+    provider.set_runtime_manager(RuntimeSettings())
+
+    with pytest.raises(AIProviderError) as caught:
+        provider.chat(model='m', messages=[])
+
+    assert session.calls == 3
+    assert caught.value.code == 'upstream_error'
