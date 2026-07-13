@@ -210,7 +210,11 @@ class OutboxDispatcher:
         now = utc_now()
         with session_scope(self.session_factory) as session:
             outbox = session.get(OutboxMessage, outbox_id)
-            if outbox is None or outbox.status != "claimed":
+            if (
+                outbox is None
+                or outbox.status != "claimed"
+                or outbox.lease_owner != self.worker_id
+            ):
                 return
             message = session.get(Message, outbox.message_id)
             if message is None:
@@ -245,7 +249,11 @@ class OutboxDispatcher:
         now = utc_now()
         with session_scope(self.session_factory) as session:
             outbox = session.get(OutboxMessage, outbox_id)
-            if outbox is None or outbox.status != "claimed":
+            if (
+                outbox is None
+                or outbox.status != "claimed"
+                or outbox.lease_owner != self.worker_id
+            ):
                 return
             outbound = session.get(Message, outbox.message_id)
             terminal = not retryable or outbox.attempts >= self.max_attempts
