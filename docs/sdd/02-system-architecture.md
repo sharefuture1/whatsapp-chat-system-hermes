@@ -28,7 +28,7 @@ Background Worker
  └─ Retry / dead-letter handling
         │
         ▼
-WhatsApp Bridge Manager :3000 (loopback/internal token)
+WhatsApp Bridge V2 :3100 (loopback/internal token)
  ├─ AccountSession A ─ sessions/A
  ├─ AccountSession B ─ sessions/B
  └─ AccountSession N ─ sessions/N
@@ -245,6 +245,18 @@ whatsapp-chat-worker.service
 ```
 
 数据库和 Redis 可使用托管服务或本机独立服务。API/Bridge/Worker 必须有各自日志、重启策略和健康检查。
+
+### 6.1 Standalone systemd 部署配置合同
+
+`FR-CORE-001`、`FR-CORE-002`、`FR-ACC-003`、`NFR-OPS-001` 的正式 systemd 合同如下；仓库资产是 `deploy/systemd/whatsapp-chat-system.service` 与 `deploy/systemd/whatsapp-bridge-v2.service`。本合同状态为 `Implemented`（仅仓库资产和自动契约测试完成，未做生产安装/真实消息验收），不得标为 `Verified`。
+
+- API 使用 `WorkingDirectory=/opt/whatsapp-chat-system`，以 `/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli serve` 启动并只监听 `127.0.0.1:8792`。`ExecStart` 不得包含 `--profile`，不得出现 Hermes 路径或可执行文件。
+- API 加载可选的 `EnvironmentFile=-/etc/whatsapp-chat-system/api.env`；`CHAT_SYSTEM_RUNTIME_DIR=/var/lib/whatsapp-chat-system/api` 由 unit 固定为独立目录；`DATABASE_URL` 与 `WHATSAPP_BRIDGE_INTERNAL_TOKEN` 必须由该环境文件或受控 systemd 环境提供。`CHAT_SYSTEM_WEB_DIST` 指向部署目录下的 `web/dist`。环境文件仅由主机受控，禁止提交 token、密码或连接串。
+- Bridge V2 使用 `WorkingDirectory=/opt/whatsapp-chat-system/bridge`，以 `/usr/bin/node /opt/whatsapp-chat-system/bridge/src/index.js` 启动，加载可选的 `EnvironmentFile=-/etc/whatsapp-chat-system/bridge.env`。
+- Bridge 必须显式设置 `BRIDGE_HOST=127.0.0.1`、`BRIDGE_PORT=3100` 和 `BRIDGE_RUNTIME_ROOT=/var/lib/whatsapp-chat-system/bridge`。其 session、spool、media 均位于此独立 runtime root；`WHATSAPP_BRIDGE_INTERNAL_TOKEN` 从受控环境文件取得并与 API 一致。
+- API runtime root 与 Bridge runtime root 必须不同；二者都不得指向 Hermes profile、`state.db` 或任何 Hermes 目录。Bridge 不对公网监听，内部事件只发送至 loopback API。
+
+生产安装、重启、端口探测和 legacy 服务停启不属于本 Task；只能在 MIG-8 的受控切换窗口执行。
 
 ## 7. 明确不采用
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -13,6 +14,7 @@ from .language import (
     dedupe_similar_lines,
     detect_preferred_language,
 )
+from .personas import resolve_persona
 from .settings import AISettings
 from .translation_memory import TranslationMemory
 
@@ -23,6 +25,7 @@ class RewriteResult:
     message: str
     used_fallback: bool = False
     error: dict[str, object] | None = None
+    persona: dict[str, str] | None = None
 
 
 class Rewriter:
@@ -49,6 +52,22 @@ class Rewriter:
             self._translation_memory = TranslationMemory(self.config.paths.memory_dir)
         return self._translation_memory
 
+    @property
+    def phrase_dict(self) -> dict[str, str]:
+        """懒加载 LaoTalk 共享短语词典，用于 prompt 注入"""
+        if not hasattr(self, "_phrase_dict"):
+            self._phrase_dict: dict[str, str] = {}
+            dict_path = os.environ.get(
+                "LT_CORPUS_DICT",
+                "/var/www/laotalk-beta/backend/shared_corpus/phrase_dict.json",
+            )
+            try:
+                with open(dict_path, encoding="utf-8") as f:
+                    self._phrase_dict = json.load(f)
+            except Exception:
+                pass
+        return self._phrase_dict
+
     def _account_model(self) -> str | None:
         reply_settings = getattr(self.config, "web_settings", {}).get("reply") or {}
         return str(reply_settings.get("ai_model") or "").strip() or None
@@ -62,6 +81,15 @@ class Rewriter:
         sidecar: dict | None = None,
         reply_overrides: dict | None = None,
     ) -> RewriteResult:
+        persona = resolve_persona(
+            str((reply_overrides or {}).get("persona_id") or ""),
+            enabled=bool(
+                (getattr(self.config, "web_settings", {}).get("plugins") or {}).get(
+                    "persona_styles", True
+                )
+            ),
+        )
+        persona_metadata = persona.ui_metadata() if persona else None
         try:
             language, message = self._rewrite_with_model(
                 target,
@@ -71,7 +99,10 @@ class Rewriter:
                 reply_overrides=reply_overrides,
             )
             return RewriteResult(
-                language=language, message=message, used_fallback=False
+                language=language,
+                message=message,
+                used_fallback=False,
+                persona=persona_metadata,
             )
         except AIProviderError as exc:
             self.logger(
@@ -86,6 +117,7 @@ class Rewriter:
                 message=message,
                 used_fallback=True,
                 error=_provider_error_metadata(exc),
+                persona=persona_metadata,
             )
         except Exception as exc:
             self.logger(
@@ -95,7 +127,12 @@ class Rewriter:
                 text_length=len(zh_text),
             )
             language, message = self._fallback(target, zh_text, memory_md)
-            return RewriteResult(language=language, message=message, used_fallback=True)
+            return RewriteResult(
+                language=language,
+                message=message,
+                used_fallback=True,
+                persona=persona_metadata,
+            )
 
     def translate_only(self, target: dict, text: str, memory_md: str) -> RewriteResult:
         target_name = str(target.get("name") or "")
@@ -173,12 +210,21 @@ class Rewriter:
 
         # 3. AI translate
         try:
+            # 注入 LaoTalk 共享短语词典（最近200条）
+            phrase_dict = self.phrase_dict
+            if phrase_dict:
+                entries = list(phrase_dict.items())[:200]
+                dict_section = "\n".join(f'  "{k}" → "{v}"' for k, v in entries)
+                context_block = f"# 已知正确翻译（LaoTalk 用户反馈数据，共 {len(phrase_dict)} 条）\n{dict_section}\n\n"
+            else:
+                context_block = ""
             prompt = (
                 "你是一个高精度的老挝语/泰语对话翻译。\n"
                 "要求：\n"
                 "1. 把下面聊天消息准确翻译成简体中文。\n"
                 "2. 保持语气、情感、emoji。\n"
-                "3. 老挝语常见词：ເ = 伤心/难过，ເ = 明天，ເ = 要/带（留宿/陪伴），\n"
+                + context_block
+                + "3. 老挝语常见词：ເ = 伤心/难过，ເ = 明天，ເ = 要/带（留宿/陪伴），\n"
                 "   ເ = 没赶上车，à = 起晚/睡懒觉，ໂ = 嗯（语气词）。\n"
                 "4. 泰语常见词：ไม = 不/没（否定），เอ = 要/带走，ค้ = 过夜，รถ = 车，\n"
                 "   ไม = 伤心/难受，ตื่น = 起床，สาย = 迟到/晚了。\n"
@@ -253,6 +299,16 @@ class Rewriter:
             x for x in [default_style, custom_style, structured_style] if x
         ).strip()
         system_content = "你只返回合法 JSON。像真人聊天，短句，不重复。"
+        persona = resolve_persona(
+            str((reply_overrides or {}).get("persona_id") or ""),
+            enabled=bool(
+                (getattr(self.config, "web_settings", {}).get("plugins") or {}).get(
+                    "persona_styles", True
+                )
+            ),
+        )
+        if persona:
+            system_content = f"{system_content}\n{persona.prompt}"
         if custom_prompt:
             system_content = f"{system_content}\n{custom_prompt}".strip()
         prompt = (

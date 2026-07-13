@@ -49,6 +49,20 @@
   - AI 配置已独立从 `WENDING_AI_*` 环境变量加载，不要求 Hermes `config.yaml`
   - 默认 `https://wendingai.future1.us/v1` + `gpt-5.3-codex-spark`
   - Provider 已统一超时、有限重试、结构化错误；AIService 已实现联系人 > 账号 > 全局模型优先级
+- [x] **Standalone API 运行边界（代码已实现，待切流验收）**
+  - `serve` 已切换至独立 API builder；不加载 Hermes profile/state.db/Legacy Web API
+  - runtime、数据库 URL、Bridge internal token、Alembic head 与首启强密码均 fail-closed
+  - 旧 `/api` 在 standalone 下显式 410；V1、内部事件、Request-ID 与 JSON 权限/原子落盘已有回归覆盖
+  - 未完成：独立 unit 安装、Bridge/数据库迁移、前端 V1 单源、历史对账、真实收发和回滚演练
+
+- [x] **受控 AI 人设 P0（代码已实现，待切流验收）**
+  - V1 APIs：`/api/v1/personas`、`/api/v1/personas/{id}/enable`、`/api/v1/contacts/{jid}/persona`
+  - 前端 `DiscoverPage` AI 人设分类 + `ChatPane` 头部 picker 已接 V1
+  - `router.prepare_reply` 与 admin_router 读 `contact_profiles[contact_id].persona_id` 透传到 rewriter
+  - PC 端 `.wx-sidebar-nav` 桌面 768px+ 显示，72px 宽
+  - 9 个 Python 测试 + 4 个 Web 测试 + 静态契约测试 GREEN；Python 222 passed、Web 70 passed
+  - Legacy V1 路径以真实登录后的 200/401 回归锁定；智能/翻译输入工具面板可执行 `preview_only` 预览且不发送消息；Standalone preview API 尚未实现，前端明确不伪装可用
+  - 未完成：生产账号真实 WhatsApp 收发 + AI Provider 探针 + 跨账号隔离
 - [ ] **Phase 2：建立带 `account_id` 的业务数据库**
   - accounts / contacts / conversations / messages / AI profiles / outbox
   - `(account_id, remote_jid)` 隔离，同账号 WhatsApp message ID 幂等
@@ -64,8 +78,11 @@
   - [x] 当前真实数据验证：Legacy 3 条会话 + V2 2 条会话、2 个联系人
   - [ ] 再创建并扫码第二个 V2 业务账号，验证两个账号同时在线
   - [ ] 验证 A 断线、登出、发送不影响 B；相同 JID 数据和 socket 严格隔离
-- [ ] **Phase 5：Outbox、定时与群发 Worker**
-  - 定时任务真实执行，群发支持进度/取消/幂等/逐项结果
+- [>] **Phase 5：Outbox、定时与群发 Worker（SDD-P0-05/06/07）**
+  - [x] UI 已收敛为插件中心二级任务页；未接线能力会显示原因，写接口返回 503，不伪装为已发送
+  - [ ] Outbox 持久化、幂等 key、状态机与 Worker 重启恢复
+  - [ ] 定时到点执行、取消、离线重试与可追踪状态
+  - [ ] 群发分片、账号级限速与抖动、进度、暂停/取消/续跑、逐项结果
 - [>] **Phase 6：前端 WhatsApp 账号中心**
   - [x] 真实账号 API 驱动的列表、详情、状态、高危删除 UI
   - [x] 用户可见设置移除 Hermes profile/path/CLI 入口
@@ -139,6 +156,14 @@
 - [ ] **定时发送入口下线或实现真实 worker**
   - 当前只保存任务，不会在指定时间执行
 
+- [x] **插件中心可观察性与四语言可靠性（SDD-P1-06 / UX-013）**
+  - 插件卡片显示真实 `available / unavailable_reason / status_when_on / hooks`，不可用能力禁用开关、隐藏删除动作
+  - `auto_translate / quick_reply / persona_styles / memory / analytics` 有已接线 gate；定时/群发通过二级任务中心可见，但在 Worker 接通前保持 503
+  - `web/tests/pluginI18nReliability.test.js` 与 `pluginCenterWechat.test.js` 守护四语 key 对齐、状态展示和任务中心入口
+
+- [x] **AnalysisJob Repository 测试时钟稳定性**
+  - 固定历史 `now` 的仓储测试明确设置 `available_at=now`，不修改生产入队时间语义
+
 - [x] **修复 V2 当前聊天不刷新与发送走错数据面**
   - V2 会话随轮询重新加载独立消息 API
   - V2 回复按当前 conversation/account 调用 Bridge，成功后写独立消息库
@@ -171,17 +196,26 @@
 - [ ] 插件开关必须真正控制对应 API 与 worker
 - [x] CORS 预检 OPTIONS 绕过 auth middleware
 
-### P2 — 工程与视觉精修
+### P2 — 微信体验、插件信息架构与视觉精修
 
-- [ ] 清理 `styles.css` 重复规则和旧 `.wx-tabbar*` 类
-- [ ] 补齐 JSX 使用但未定义的 CSS 类
-- [ ] 功能性 emoji/字符图标全部换统一 SVG Icon
-- [ ] 统一 Avatar，支持真实头像与失败回退
-- [ ] 补齐顶部/底部 safe area、focus-visible、dialog focus trap、aria-live
-- [ ] 暗色默认跟随系统，并支持 `prefers-reduced-motion`
-- [x] 补齐四语言 i18n keys
-- [x] 修复 StaticFiles 测试夹具兼容性
-- [ ] 增加移动端 Playwright 主链路回归测试
+- [x] **发现页与设置页微信化 + 定时/群发降级（UX-013）**
+  - 发现页只保留运营概览与受控 AI 人设；插件目录迁到“我 → 插件中心”
+  - 定时/群发从发现与设置移除，写接口在 Worker 接通前明确返回 503
+- [x] **插件中心可观察性 + 任务中心（SDD-P1-06）**
+  - 展示真值 `available / unavailable_reason / status_when_on / hooks`
+  - Scheduler / Broadcast 二级页只作为任务可见性与未来入口，不伪造投递成功
+- [x] **中文文案覆盖 + 联系人显示名优先级（FR-CON-013 / UX-011）**
+  - 中文 locale 已补齐遗留英文文案，并由静态测试阻止未翻译英文回归
+  - 联系人显示固定为人工备注 → WhatsApp 同步名称 → 会话标题 → 远端 ID
+- [x] **中文最高优先级 + 认证 API 可见性**
+  - 语言默认/未知/缺失 key 统一回退中文；升级语言缓存 key，旧英文缓存不再覆盖默认中文
+  - 人设目录使用统一 session API 客户端，401/5xx 显示错误而不是伪装为空人设目录
+  - `tong-jincheng` 显示名为“童锦程·直球关系顾问”，仍为受控通用风格且不冒充真人
+- [ ] **CSS 与无障碍清理（SDD-P2-01/02/04）**
+  - 清理 `styles.css` 重复规则和旧 `.wx-tabbar*` 类；补齐 JSX 使用但未定义的类
+  - 功能性 emoji/字符图标换统一 SVG；补齐 safe area、focus-visible、dialog focus trap、aria-live
+- [ ] **真实计数与可重复浏览器验收（SDD-P1-02 / P2-06）**
+  - 未读迁移为后端真值；把临时 Chromium 审计转为仓库 Playwright 主链路测试
 
 ### 当前验证结果（2026-07-10）
 

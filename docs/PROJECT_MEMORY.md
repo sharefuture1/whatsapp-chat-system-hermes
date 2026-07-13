@@ -1,8 +1,21 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-11 UTC
+> 最后更新：2026-07-13 UTC
 
 ## 当前结论
+
+- 受控 AI 人设 P0（SDD-P0-08 / FR-PLG-007/008 / FR-AI-012）已进入 **Implemented**：V1 API `GET/PUT /api/v1/personas`、`PUT /api/v1/contacts/{contact_id}/persona`；前端 `DiscoverPage` AI 人设分类与 `ChatPane` picker 已接 V1；聊天页头部 `…` 菜单切换人设、预览条同步显示；受控目录仅含 `default / tong-jincheng / professional-service / mature-uncle`，prompt 不下发到客户端，UI 严禁显示任何外部源/仓库信息。
+- 人设切换/卸载/未知/插件关闭任一情况，重写器立即回退默认策略；router 与 admin_router 都读 `contact_profiles[contact_id].persona_id`。Legacy V1 注册与鉴权已由回归测试固定；前端人设目录统一走携带 session token 的 API 客户端，不会再将 401 静默伪装成空目录。“童锦程·直球关系顾问”是审计后的通用关系沟通风格；智能/翻译输入工具面板的预览只执行 `preview_only`，不发送消息，且响应展示当前安全人设元数据。
+- PC 端 `.wx-sidebar-nav` 桌面 768px+ 真正可见（补齐 `display:flex`），宽度 72px，按钮 52×56，深色模式一致。
+
+- Standalone API 运行时已进入 **Implemented**：`serve` 使用独立 `standalone_api.py`，不加载 Hermes profile/state.db/Legacy Web API；独立 runtime 目录、独立数据库和 Bridge internal token 缺失即拒绝启动。业务库必须处于当前 Alembic head 才 ready。
+- standalone 认证仅首启需要至少 12 字符 bootstrap password；已持久化的认证记录可无 bootstrap secret 重启。运行态 JSON 为 0700/0600 原子持久化，配置损坏/认证记录无效会 fail-closed。
+- 这是代码与测试层实现，不是已切流结论：生产仍有 Legacy 服务/数据面，独立 Bridge、历史迁移、前端 V1 单源和真实 WhatsApp 收发验收仍待完成。
+
+- 插件系统遵循“真实接线才可启用”边界：`auto_translate`/`quick_reply` 可用；尚未拥有可靠 Worker/Hook 的定时、群发、TTS、媒体、自动标签、跟进均返回 `available=false`，前后端均拒绝误导性启用。
+- 插件目录（发现页与 Settings→Tools）现显示操作状态、不可用 Worker 原因、busy/error/empty/refresh 状态，并禁用不可用开关和隐藏不真实的删除动作。
+- 中文 locale 已由静态覆盖测试守护：首次访问/未知语言/缺失 key 默认回退中文，中文界面不允许残留未翻译英文（WhatsApp、Hermes、AI、API 等协议/产品专有名词除外）。联系人显示名为“人工备注 → WhatsApp 同步 display_name/push_name → 会话标题 → 远端 ID”，同步名称不得被低优先级聊天标题覆盖。
+- AnalysisJobRepository 的生产语义未改；其测试固定时间已显式传递 `available_at=now`，消除实际日期推进造成的 false negative。
 
 - Bridge 同步事件身份已按 Baileys occurrence 修复：每次新回调生成唯一 nonce，同内容跨 occurrence 不再复用 `event_id`；FileSpool 重放仍原样保留已落盘 `event_id + sequence`。
 
@@ -19,7 +32,7 @@
 - 前端性能调度已完成一轮收敛：Workspace 与账号轮询均为 single-flight + completion-scheduled，后台标签不调度常规刷新，恢复可见后只保留一个 loop owner。
 - 自动翻译改为单 worker 串行批处理；切换会话或关闭自动翻译会 Abort 旧请求，并用 generation 阻止旧响应写入新会话；失败消息在同批内不重复请求。
 - 网页发送成功后已移除 450ms 延迟全量重拉，直接采用服务端真实 ID，并由既有增量轮询完成最终对账。
-- 当前生产资源：`index-CPzFRVjQ.js` / `index-n1Ei7oEG.css`；本机与公网资源一致。Web 39、Python 129、Bridge 63 全部通过；390×844 与 1440×900 公网页均无横向溢出或控制台错误。
+- 设置页遵循 UX-012/UX-013：桌面为侧栏+独立内容滚动，移动端全屏单行横滑导航、独立内容滚动和固定底部操作栏；主题按钮使用显式 `setTheme`，未知语言 setter 统一回退中文。发现页只保留运营概览与受控 AI 人设，插件目录迁到 Me → 插件中心；定时发送、群发在可靠 Worker 落地前从 UI 移除，API 写入端返回 503。插件中心提供 `/api/plugins` 的真实 `available / unavailable_reason / status_when_on / hooks`，并新增 Scheduler / Broadcast 任务中心。当前生产资源：`index-BSMu_Kn5.js` / `index-BU2zSI7R.css`，本机与公网一致。
 
 - 移动 Chats 已完成微信式两级导航：390×844 初始只显示会话列表，点入聊天后 sidebar/TabBar 隐藏且返回键可见，返回后列表和 TabBar 恢复；桌面 1440×900 保持双栏并隐藏多余底部导航。
 - 乐观发送的 `tmp-*`、pending、failed 消息不会进入翻译 API；真实回复 ID 会替换临时 ID，刷新合并按 `role+content` 保留 `sent` 状态。

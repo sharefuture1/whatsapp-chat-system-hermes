@@ -12,6 +12,22 @@
 
 ## 2. 阶段
 
+### MIG-001：独立部署配置合同
+
+- 状态：`In Progress`（systemd/static assets 仅为合同草案；独立 API 运行时已开始实现，但未完成生产安装或切换验收）。
+- API unit 必须从 `/opt/whatsapp-chat-system` 启动 `serve`，不带 `--profile`；运行目录、`DATABASE_URL`、`WHATSAPP_BRIDGE_INTERNAL_TOKEN` 均来自独立 systemd 配置合同。
+- Bridge V2 unit 必须从 `/opt/whatsapp-chat-system/bridge` 启动，固定 loopback `127.0.0.1:3100`，并将 credentials/spool/media 限定在 `/var/lib/whatsapp-chat-system/bridge`。
+- token、密码和数据库连接串仅放入 `/etc/whatsapp-chat-system/{api,bridge}.env` 等受控主机文件，不进入仓库、SDD 或 unit 内容。
+
+退出条件：仓库契约测试通过；生产安装留待 MIG-8，且不得借此 task 触碰现有服务。
+
+### MIG-002：切换与回滚边界
+
+- 状态：`In Progress`。
+- Legacy gateway、Legacy Bridge、Hermes profile 与旧 `state.db` 在历史导入、独立 API/Bridge live+ready、数据库迁移和关键数据面验证完成前保持可回滚，不得因安装新 unit 而停止。
+- 只有完成只读导入报告、Bridge V2 live readiness 和受控切流批准后，才可停止同账号 Legacy 自动处理；停止 legacy 服务不是本 task 的副作用。
+- 任何 readiness、导入、事件积压或关键收发异常均按第 5 节回滚，保留 standalone 数据库和 spool 现场，不删除 profile 归档。
+
 ### MIG-0：基线冻结
 
 - 状态：`Approved`

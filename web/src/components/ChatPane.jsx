@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { fetchPersonaCatalog, assignPersona as assignPersonaApi } from '../personas'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
 import {
@@ -140,6 +141,12 @@ export default function ChatPane({
   const [newMessageCount, setNewMessageCount] = useState(0)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
+  const [personaPickerOpen, setPersonaPickerOpen] = useState(false)
+  const [personaCatalog, setPersonaCatalog] = useState({ items: [], available: false })
+  const [personaLoading, setPersonaLoading] = useState(false)
+  const [personaError, setPersonaError] = useState('')
+  const [personaSaving, setPersonaSaving] = useState(false)
+  const [currentPersona, setCurrentPersona] = useState(null)
   const [hideOwnMessages, setHideOwnMessages] = useState(false)
   const defaultMode = uiSettings?.reply?.default_mode || 'smart'
   const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
@@ -225,6 +232,8 @@ export default function ChatPane({
     setMode(defaultMode)
     setToolsOpen(false)
     setHeaderMenuOpen(false)
+    setPersonaPickerOpen(false)
+    setCurrentPersona(null)
     setComposer('')
     setPreview(null)
     setPreviewError(false)
@@ -388,6 +397,30 @@ export default function ChatPane({
     })
   }, [translationQueueVersion, autoTranslate, userId, translationWorkerTick])
 
+  const previewReply = async () => {
+    const text = composer.trim()
+    const previewMode = mode || 'smart'
+    if (!text || !userId || previewMode === 'direct') return
+    setPreviewLoading(true)
+    setPreviewError(false)
+    try {
+      const data = await onReply(userId, text, previewMode, { previewOnly: true })
+      if (data?.success !== true) throw new Error(data?.detail || t('previewFailed'))
+      setPreview(data?.rewrite ? {
+        mode: previewMode,
+        language: data.rewrite.language,
+        message: data.rewrite.message,
+        used_fallback: data.rewrite.used_fallback,
+        persona: data.rewrite.persona || data.persona || null,
+      } : null)
+      if (data?.rewrite?.persona !== undefined) setCurrentPersona(data.rewrite.persona)
+    } catch {
+      setPreviewError(true)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const deliverMessage = async (tmpId, target, sourceText, sendMode, optimisticText) => {
     setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: true, failed: false, error: '' } : m))
     try {
@@ -409,7 +442,8 @@ export default function ChatPane({
         lang: finalLang,
         translated: null,
       } : m))
-      setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback } : null)
+      if (data?.rewrite?.persona !== undefined) setCurrentPersona(data.rewrite.persona)
+      setPreview(data?.rewrite ? { mode: sendMode, language: data.rewrite.language, message: data.rewrite.message, used_fallback: data.rewrite.used_fallback, persona: data.rewrite.persona } : null)
     } catch (error) {
       setMessages(prev => prev.map(m => m.message_id === tmpId ? {
         ...m,
@@ -503,6 +537,47 @@ export default function ChatPane({
     setContactDrawerOpen(true)
   }
 
+  const openPersonaPicker = async () => {
+    setHeaderMenuOpen(false)
+    setPersonaPickerOpen(true)
+    setPersonaLoading(true)
+    setPersonaError('')
+    try {
+      const catalog = await fetchPersonaCatalog()
+      const existing = catalog.contact_assignments?.[userId]
+      setPersonaCatalog({
+        items: catalog.items,
+        available: catalog.available,
+        plugin_enabled: catalog.plugin_enabled,
+      })
+      if (existing) {
+        const match = catalog.items.find(item => item.id === existing)
+        if (match) setCurrentPersona(match)
+      } else if (currentPersona && !catalog.items.find(item => item.id === currentPersona.id)) {
+        setCurrentPersona(null)
+      }
+    } catch (error) {
+      setPersonaError(error?.message || t('personaLoadFailed'))
+    } finally {
+      setPersonaLoading(false)
+    }
+  }
+
+  const assignPersona = async personaId => {
+    if (!userId || !personaCatalog.available || personaSaving) return
+    setPersonaSaving(true)
+    setPersonaError('')
+    try {
+      await assignPersonaApi(userId, personaId)
+      const match = personaCatalog.items.find(item => item.id === personaId)
+      setCurrentPersona(personaId === 'default' ? null : match || null)
+    } catch (error) {
+      setPersonaError(error?.message || t('error'))
+    } finally {
+      setPersonaSaving(false)
+    }
+  }
+
   const saveContactDrawer = async () => {
     if (!userId || !onSaveContactConfig) return
     setContactSaving(true)
@@ -548,7 +623,8 @@ export default function ChatPane({
         <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
           <div className="wx-chat-title">{headerTitle}</div>
           <div className="wx-chat-sub"><span className="wx-online-dot"/><span>{accountLabel || String(platform || 'WA').toUpperCase()} · {accountName}</span></div>
-        </div>
+          {currentPersona ? <span className="wx-current-persona">{t('personaCurrent')}: {currentPersona.name}</span> : null}
+          </div>
         <div className="wx-chat-header-actions">
           <button className={`wx-icon-btn wx-chat-pin-btn${pinned ? ' active' : ''}`} onClick={onTogglePin} title={pinned ? t('unpin') : t('pin')} aria-label={pinned ? t('unpin') : t('pin')}>
             <svg viewBox="0 0 24 24"><path d="M12 17v5M8 3h8l-2 5 4 2-3 4H9l-3-4 4-2-2-5z"/></svg>
@@ -557,17 +633,14 @@ export default function ChatPane({
             <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
           </button>
           {headerMenuOpen ? <div className="wx-chat-overflow-menu">
-            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh')}</button>
-            <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails')}</button>
-            <button type="button" onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>{t('settings')}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh') || '刷新'}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails') || '聊天详情'}</button>
+            <button type="button" onClick={openPersonaPicker}>{t('personaPicker')}</button>
             <div className="wx-menu-divider"/>
-            <button type="button" className={autoTranslate ? 'toggle-on' : ''} onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>
-              <span className="wx-menu-label">{t('showTranslations') || '显示翻译'}</span>
-              <span className={`wx-toggle ${autoTranslate ? 'on' : 'off'}`}>{autoTranslate ? t('on') || '开' : t('off') || '关'}</span>
-            </button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); onOpenSettings() }}>{t('settings') || '全局设置'}</button>
             <button type="button" className={hideOwnMessages ? 'toggle-on' : ''} onClick={() => setHideOwnMessages(prev => !prev)}>
               <span className="wx-menu-label">{t('hideOwnMessages') || '隐藏我方消息'}</span>
-              <span className={`wx-toggle ${hideOwnMessages ? 'on' : 'off'}`}>{hideOwnMessages ? t('on') || '开' : t('off') || '关'}</span>
+              <span className={`wx-toggle ${hideOwnMessages ? 'on' : 'off'}`}>{hideOwnMessages ? t('on') : t('off')}</span>
             </button>
           </div> : null}
         </div>
@@ -579,6 +652,23 @@ export default function ChatPane({
         </button>
       ) : null}
       {translationError ? <button type="button" className="wx-translation-alert error" onClick={onOpenSettings}>{translationError}</button> : null}
+
+      {personaPickerOpen ? (
+        <div className="wx-drawer-backdrop" onClick={() => setPersonaPickerOpen(false)}>
+          <aside className="wx-persona-picker" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={t('personaPicker')}>
+            <div className="wx-persona-picker-header"><strong>{t('personaPicker')}</strong><button type="button" className="wx-icon-btn" onClick={() => setPersonaPickerOpen(false)} aria-label={t('dismiss')}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            <div className="wx-persona-picker-body">
+              <div className="wx-persona-default"><strong>{t('personaDefault')}</strong><span>{defaultReplyStyle}</span><button type="button" className="ghost-btn" disabled={!personaCatalog.available || personaSaving} onClick={() => assignPersona('default')}>{t('personaUse')}</button></div>
+              {personaLoading ? <div className="wx-empty-pill">{t('personaLoading')}</div> : null}
+              {personaError ? <div className="wx-empty-pill" style={{ color: 'var(--wx-danger)' }}>{personaError}</div> : null}
+              {!personaLoading && !personaError && !personaCatalog.available ? <div className="wx-empty-pill">{t('personaUnavailable')}</div> : null}
+              <div className="wx-persona-grid">
+                {personaCatalog.items.map(persona => <button type="button" key={persona.id} className={`wx-persona-card ${currentPersona?.id === persona.id ? 'active' : ''}`} disabled={!personaCatalog.available || personaSaving} onClick={() => assignPersona(persona.id)}><strong>{persona.name}</strong><span>{persona.description}</span><em>{persona.accent}</em></button>)}
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       <div className="wx-messages" ref={scrollRef} onScroll={onScroll}>
         <div className="wx-messages-inner">
@@ -722,7 +812,7 @@ export default function ChatPane({
       ) : null}
 
       <div className="wx-composer">
-        {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip"><span>{t('preview') || '预览'}:</span><span className="preview-text">{preview.message}</span></div> : null}
+        {preview && preview.message && mode !== 'direct' ? <div className="wx-preview-strip"><span>{t('preview') || '预览'}:</span><span className="preview-text">{preview.message}</span>{preview?.persona ? <span className="wx-current-persona">{t('personaCurrent')}: {preview.persona.name}</span> : null}</div> : null}
         {previewError && mode !== 'direct' ? <div className="wx-preview-strip wx-preview-error">{t('previewFailed') || '预览失败'}</div> : null}
         <div className="wx-composer-input wx-wechat-composer-row">
           <button type="button" className="wx-composer-icon-btn" aria-label={t('quickEmoji')} onClick={() => setToolsOpen(prev => !prev)}>
@@ -745,6 +835,7 @@ export default function ChatPane({
               <button type="button" role="radio" aria-checked={mode === 'direct'} className={`wx-mode-choice ${mode === 'direct' ? 'active' : ''}`} onClick={() => setMode('direct')}>{t('modeDirect')}</button>
               <button type="button" role="radio" aria-checked={mode === 'smart'} className={`wx-mode-choice ${mode === 'smart' ? 'active' : ''}`} onClick={() => setMode('smart')}>{t('modeSmart')}</button>
               <button type="button" role="radio" aria-checked={mode === 'translate'} className={`wx-mode-choice ${mode === 'translate' ? 'active' : ''}`} onClick={() => setMode('translate')}>{t('modeTranslate')}</button>
+              {mode !== 'direct' ? <button type="button" className="wx-mode-choice" onClick={previewReply} disabled={!composer.trim() || previewLoading}>{previewLoading ? t('loading') : (t('preview') || '预览')}</button> : null}
             </div>
             <div className="wx-composer-emoji-grid" aria-label={t('quickEmoji')}>
               {QUICK_EMOJIS.map(emoji => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>{emoji}</button>)}

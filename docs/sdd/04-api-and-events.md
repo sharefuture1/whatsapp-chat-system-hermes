@@ -144,7 +144,7 @@ unread=
 
 ### `GET /api/v1/contacts`
 
-参数：`platform=all|...`、`account_id=all|uuid`、`query`、`limit`。每条联系人必须携带平台、账号、远端 ID、展示名/备注及可进入的会话 ID；同一远端 ID 在不同账号下不得合并为一条。已软删除会话不得删除联系人，联系人仍返回且 `conversation_id=null`。
+参数：`platform=all|...`、`account_id=all|uuid`、`query`、`limit`。每条联系人必须携带平台、账号、远端 ID、展示名/备注及可进入的会话 ID；同一远端 ID 在不同账号下不得合并为一条。显示名固定按 `remark → display_name → conversation.title → remote_jid` 选择，且 `chats.*` 标题更新不得覆盖已经同步的 `Contact.display_name`。已软删除会话不得删除联系人，联系人仍返回且 `conversation_id=null`。
 
 ### `DELETE /api/v1/conversations/{conversation_id}`
 
@@ -307,6 +307,64 @@ Claim PATCH 必须携带 `If-Match: <version>`，服务端以 optimistic version
 ```
 
 `hooks=[]` 时 `available` 必须为 false。
+
+## 7. 受控 AI 人设 API
+
+所有受控人设仅由服务端代码内置，禁止远程下载/执行；UI 不展示任何外部源/仓库信息。
+
+### `GET /api/v1/personas`
+
+返回当前可分配的受控人设元数据与各会话分配状态。响应结构：
+
+```json
+{
+  "items": [
+    {
+      "id": "tong-jincheng",
+      "name": "直球关系顾问",
+      "description": "以坦诚、清晰和尊重边界的方式提供关系沟通建议。",
+      "category": "relationship",
+      "accent": "坦诚直接、尊重边界",
+      "available": true
+    }
+  ],
+  "contact_assignments": {
+    "<contact_id>": "tong-jincheng"
+  },
+  "plugin_enabled": true
+}
+```
+
+- `available=true` 表示人设元数据完整且 prompt 可用；不存在的人设不出现在 `items`。
+- 真实 `prompt` 永不返回给客户端；UI 只展示 `name/description/accent`。
+- `default` 人设不返回；它代表"未选人设"的回退。
+
+### `PUT /api/v1/personas/{persona_id}/enable`
+
+请求体：
+
+```json
+{ "enabled": true }
+```
+
+- 写入 `web_settings.plugins.persona_styles`；返回当前状态 `{ "id": "...", "enabled": true }`。
+- `persona_id` 必须是已知受控人设，否则 `404 persona_not_found`。
+- `persona_id="default"` 不可启用/禁用（人设插件开关仅作用于 default 以外的其他人设），否则 `400 persona_default_immutable`。
+- 关闭后人设插件视为不可用，UI 与重写器均回退默认策略。
+
+### `PUT /api/v1/contacts/{contact_id}/persona`
+
+请求体：
+
+```json
+{ "persona_id": "tong-jincheng" }
+```
+
+- 写入 `web_settings.contact_profiles[contact_id].persona_id`。
+- 同 `(contact_id, persona_id)` 重复写入幂等返回 200。
+- `persona_id` 必须是受控人设或 `"default"`；否则 404 `persona_not_found`。
+- 清空选择可发送 `{ "persona_id": "default" }`，也允许 `null` 表示清除。
+- 校验由 `web_settings.contact_profiles` 的现有 schema 完成；服务必须拒绝非法 JSON。
 
 ### `PUT /api/v1/plugins/{plugin_id}`
 

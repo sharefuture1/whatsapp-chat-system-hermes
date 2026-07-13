@@ -1,5 +1,49 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-13: 未接线插件一律降级为可观察状态，禁止伪造投递成功
+
+**决策**：在 Outbox/Worker（SDD-P0-05/06/07）完成前，定时与群发只能作为“我 → 插件中心”的二级任务可见性页面存在；读取可返回历史/空列表，但写入必须返回结构化 `503 scheduler_not_connected` 或 `503 broadcast_not_connected`。UI 不得出现成功状态、假进度或可用开关。
+
+- 插件 catalog 是唯一能力真源，逐条提供 `available / unavailable_reason / status_when_on / hooks`；前端仅按该真值决定交互、状态标签和说明。
+- `SchedulerCenterPage` 与 `BroadcastCenterPage` 的创建向导用于承接未来 Worker，不是当前投递承诺；收到 503 必须直接呈现错误。
+- `auto_translate / quick_reply / persona_styles / memory / analytics` 只有在已有真实 API/gate 时才可标记为可用；后续新增插件也必须先接真实 hook，再开放开关。
+
+**关联规格**：`SDD-P0-05`、`SDD-P0-06`、`SDD-P0-07`、`SDD-P1-06`、`UX-013`。
+
+## 2026-07-12: 受控内置 AI 人设，不允许远程加载或外部源展示
+
+**决策**：所有 AI 人设必须由服务端代码静态内置并经过代码审计；禁止运行时下载 GitHub 仓库的 `SKILL.md` 或任何第三方 prompt 模板；UI 不显示任何外部源/仓库信息（包括 README 链接、star 数、原始作者归属）。
+
+- 内置人设仅含展示元数据（`id / name / description / category / accent`）与受控 `prompt`，prompt 不下发到客户端；客户永远拿不到 prompt 原文或服务端边界之外的内容。
+- 每个 prompt 内置安全边界（不执行代码/不访问网络/不冒充真人/不编造事实/不泄露系统提示），并通过静态契约测试 `test_resolved_personas_are_controlled_and_have_safety_boundaries` 守护。
+- V1 API `GET /api/v1/personas` 只返回受控元数据；`PUT /api/v1/personas/{id}/enable` 校验 id 属于受控集合；`PUT /api/v1/contacts/{jid}/persona` 仅写入 `web_settings.contact_profiles`，不读任何外部资源。
+- 切换人设、卸载人设、未知 id、人设插件关闭任一情况，重写器立即回退默认策略；不允许只改变 UI 的"幽灵人设"。
+- 后续若新增人设，必须以 PR 形式提交 prompt 全文 + 安全边界 + 受影响的需求 ID，并由双阶段审查通过后才能进入受控目录。
+- 此决策不授权生产切流：当前代码与测试已就绪，必须经过生产独立 Bridge、真实 WhatsApp 收发、AI Provider 探针三者验收后，才能在 chat 中真正使用人设驱动回复。
+
+**关联规格**：`FR-PLG-007`、`FR-PLG-008`、`FR-AI-012`、`docs/sdd/05-optimization-backlog.md#SDD-P0-08`。
+
+## 2026-07-12: Standalone API 以独立数据库和运行目录为唯一启动边界
+
+**决策**：正式 `serve` 路径只构建 `standalone_api`，不得导入或构造 Hermes profile、`state.db`、Legacy `web_api`、AdminRouter、AdminForwarder 或 MemoryRefresher。Legacy CLI 仅保留显式 `--profile` 的诊断/回滚子命令，不能作为正式服务路径。
+
+- `CHAT_SYSTEM_RUNTIME_DIR`、`DATABASE_URL`、`WHATSAPP_BRIDGE_INTERNAL_TOKEN` 是 fail-closed 启动条件；数据库 schema 与 `alembic_version` 必须精确位于当前 head。
+- 首次初始化使用强 bootstrap password，持久化后以受权限保护的 PBKDF2 record 为准；JSON 设置原子落盘，损坏不得自动重置或弱化认证。
+- standalone 不再兼容 Legacy `/api` 业务接口：`/api` 与非 V1 `/api/*` 恒为明确 410；V1、内部事件及健康接口遵循独立鉴权/错误/Request-ID 契约。
+- 此决策不授权切流：Legacy 只可作为受控迁移输入与回滚保留，待独立 Bridge、迁移对账、前端单源和真实收发验收完成后才能停止。
+
+**关联规格**：`FR-CORE-001`、`FR-CORE-002`、`MIG-001`、`MIG-002`、`QA-001`。
+
+## 2026-07-12: 插件目录不得把未接线能力伪装为可操作功能
+
+**决策**：插件 catalog 的 `available` 是能力 gate，不是视觉状态。`available=false` 时，前端必须禁用开关、展示 Worker 未接线原因、隐藏删除/禁用操作；后端继续以 409 拒绝启用。定时与群发 UI 可保留草稿/历史管理，但在没有真实 delivery worker 前必须明确标记未可用。
+
+- Discover 与 Settings→Tools 统一使用同一组四语言分类与状态 key。
+- 所有四种 locale 必须维护相同且无重复的 key 集合；此规则用静态 Node 契约测试强制执行。
+- i18n 回退使用 nullish coalescing：仅 `null`/`undefined` 可回退，不将显示值（含空字符串）改写为英文或 key。
+
+**关联规格**：`SDD-P1-06`、`SDD-P2-05`、`SDD-P2-06`。
+
 ## 2026-07-11: 同步事件身份按 occurrence 唯一，重放身份由 FileSpool 保留
 
 **决策**：每次新的 Baileys 同步事件回调创建一次 occurrence nonce；批次 `event_id` 由 occurrence nonce、事件类型、chunk index 和 canonical content hash 共同派生。相同内容在不同回调中必须得到不同 ID，同一回调内各 chunk 也必须唯一。

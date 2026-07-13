@@ -28,6 +28,24 @@
   - API/log 不泄露 key；
   - 没有 Hermes config 时 AI 配置仍能加载。
 
+### SDD-P0-01A Standalone systemd 部署合同
+
+- 状态：`In Progress`（独立 API runtime/TDD 已落地；systemd/static assets 仍仅为合同草案，尚未完成生产安装或切换验收）。
+- 需求：FR-CORE-001、FR-CORE-002、FR-ACC-003、MIG-001、MIG-002、QA-001。
+- 当前进度：仓库内 API unit 已改为 `/opt/whatsapp-chat-system` 的无 profile `serve` 启动；新增 Bridge V2 unit，固定 loopback `127.0.0.1:3100` 与独立 `/var/lib/whatsapp-chat-system/bridge` runtime root。两个 unit 都只引用受控 `/etc/whatsapp-chat-system/*.env`，不包含真实秘密或 Hermes 路径。
+- 验收：
+  - 静态契约测试确认 API `ExecStart` 没有 `--profile`，API/Bridge units 不包含 Hermes runtime 路径；
+  - API 经 `CHAT_SYSTEM_RUNTIME_DIR`、`DATABASE_URL`、`WHATSAPP_BRIDGE_INTERNAL_TOKEN` 取得独立运行配置；
+  - Bridge 经独立 runtime root、loopback host/port 和同一内部 token 启动；
+  - 生产切换前完成 unit 安装、live/ready、日志无 Hermes runtime 路径和真实 WhatsApp 收发验证。
+- 未完成：不触碰真实生产 unit；MIG-8 安装/切流和真实 WhatsApp 验收完成前不得标记 `Verified`。
+
+### QA-001 独立运行切换质量门禁
+
+- 状态：`In Progress`
+- 每项独立化变更先有失败自动测试，再以 focused tests、`git diff --check` 和适用的构建/健康检查验证。
+- 任何未执行生产安装、真实 QR/收发或回滚演练的切换工作只能为 `Implemented` 或 `In Progress`，不得以静态资产替代生产 `Verified`。
+
 ### SDD-P0-02 新业务数据库与账号隔离
 
 - 状态：`In Progress`
@@ -64,6 +82,7 @@
 
 - 状态：`Approved`
 - 需求：FR-MSG-004~006
+- 已完成边界：Legacy UI 已移除伪发送入口；Scheduler / Broadcast 仅在“我 → 插件中心”提供任务可见性二级页。无 Worker 时写接口返回结构化 503，插件 catalog `available=false`，不会报告已发送。
 - 验收：
   - API 返回 queued，而非提前 sent；
   - Worker 重启后继续 pending 任务；
@@ -73,7 +92,7 @@
 ### SDD-P0-06 定时任务真实 Worker
 
 - 状态：`Approved`
-- 当前缺陷：现有 `/api/schedule` 只保存配置，不执行。
+- 当前状态：`GET /api/schedule` 保持安全空列表/历史读取；`POST` 和 `DELETE` 在 Worker 未部署前返回 `503 scheduler_not_connected`。前端仅在插件中心的 Scheduler 二级页展示任务与创建向导，明确提示不会提交为已执行。
 - 验收：
   - 到点真实发送；
   - 多 Worker 不重复；
@@ -83,12 +102,30 @@
 ### SDD-P0-07 群发后台任务
 
 - 状态：`Approved`
-- 当前缺陷：现有 HTTP handler 同步循环发送。
+- 当前状态：`GET /api/broadcast` 保持安全空列表/历史读取；`POST` 在 Worker 未部署前返回 `503 broadcast_not_connected`。前端仅在插件中心的 Broadcast 二级页展示任务与创建向导，明确提示不会投递。
 - 验收：
   - 后台分片执行；
   - 账号级限速和抖动；
   - 进度、暂停、取消、续跑、逐项结果；
   - 重试不重复发送已成功目标。
+
+### SDD-P0-08 受控内置 AI 人设
+
+- 状态：`In Progress`（代码与 API 已落地，但未做真实部署切流；待生产验收后再标记 `Verified`）。
+- 需求：`FR-PLG-007`、`FR-PLG-008`、`FR-AI-012`。
+- 当前进度：
+  - 受控人设库 `src/whatsapp_chat_system/personas.py` 内置 `default / tong-jincheng / professional-service / mature-uncle`，每条人设仅含审计过的 prompt 与展示元数据。
+  - Rewriter 已接收 `reply_overrides.persona_id`，`rewrite.persona` 字段返回当前人设元数据。
+  - V1 API：`GET /api/v1/personas`、`PUT /api/v1/personas/{id}/enable`、`PUT /api/v1/contacts/{contact_id}/persona`。
+  - 前端聊天页 `…` 菜单 → 人设 picker；头部 `personaCurrent` 实时反映；预览条同步显示当前人设。
+  - 前端发现页"AI 人设"分类展示内置人设卡片，禁显任何外部源/仓库信息。
+  - 四语 i18n key 同步、`t()` 使用 `??`，未知 key 不被吞掉。
+- 验收：
+  - 真实调用 V1 列表/启停/分配人设接口，回归 200/401/404/422。
+  - 重写器在选中/卸载/未知/插件关闭任一情况下都不注入未授权 prompt。
+  - 真实老挝语→中文 AI 探针：选择 `tong-jincheng` 后回复风格被该 prompt 影响。
+  - 默认策略（不选人设）走 `default` 且不引入额外延迟。
+- 未完成：未在生产启用；未与真实 WhatsApp 账号联动验收。
 
 ## 3. P1：产品可用性
 
@@ -113,11 +150,11 @@
 ### SDD-P1-04 微信式信息架构收敛
 
 - 状态：`Implemented`
-- 本轮进展：聊天、通讯录、发现、我、账号中心已统一使用独立页面壳、滚动容器和移动端安全区；全局 AI 配置保持在“我”页；聊天头部仅保留返回、联系人名称/状态和“…”；Emoji、直发、AI 智能、翻译模式进入输入区折叠面板；双方使用微信式方形头像和左右镜像气泡。
+- 已实现：聊天、通讯录、发现、我、账号中心已统一使用独立页面壳、滚动容器和移动端安全区；全局 AI 配置保持在“我”页；聊天头部仅保留返回、联系人名称/状态和“…”；Emoji、直发、AI 智能、翻译模式进入输入区折叠面板；双方使用微信式方形头像和左右镜像气泡。发现页收敛为运营概览 + 受控 AI 人设；插件目录迁入“我 → 插件中心”；定时/群发仅在插件中心二级任务页露出。
 - 剩余内容：
-  - “发现”改“工作台”；
-  - “我”页进一步只保留操作员和全局设置；
-  - 设置移动端全屏分级。
+  - 把“发现”正式更名为“工作台”（若产品确认命名）；
+  - “我”页继续只保留操作员和全局设置；
+  - 账户中心在 Bridge V2 实时 QR/状态链完成后验收。
 
 ### SDD-P1-05 翻译异步化
 
@@ -129,9 +166,13 @@
 ### SDD-P1-06 插件完整接线
 
 - 状态：`In Progress`
-- 已实现：`auto_translate` 同时控制读取时翻译和手动翻译 API；`quick_reply` 控制 AI 预览；插件目录显示 hook 和运行状态；无可靠 Worker/Hook 的定时、群发、TTS、媒体、自动标签和跟进插件返回 `available=false`，前端禁用开关且后端拒绝启用。
-- 剩余缺陷：完成定时和群发可靠 Worker 后，再逐项开放对应插件。
-- 验收：每个 available 插件有真实 API/worker gate；无 hook 时 `available=false`。
+- 已实现：`auto_translate` 同时控制读取时翻译和手动翻译 API；`quick_reply` 控制 AI 预览；`persona_styles` 控制受控人设目录与联系人分配；`memory`、`analytics` 有对应读取 API。插件中心按后端真值显示 `available / unavailable_reason / status_when_on / hooks`；不可用插件禁用开关且隐藏删除动作；刷新、筛选、加载、错误和空状态可见。`SchedulerCenterPage`、`BroadcastCenterPage` 只显示历史/状态及未来入口，不会将 503 当成成功。
+- 未接线能力：定时、群发、TTS、媒体、自动标签、跟进均为 `available=false`；原因随条目返回。
+- 验收：
+  - 每个 `available=true` 插件有真实 API/worker gate 且开关会影响该 gate；
+  - 无 hook 或无 Worker 时 `available=false`，写操作不可被 UI 伪装为成功；
+  - 四语言 key 集合相同且无重复；`t()` 仅对 `null`/`undefined` 回退，不吞掉空字符串显示值；
+  - 定时/群发完成 SDD-P0-05/06/07 后再把对应条目改为可用。
 
 ### SDD-P1-07 认证升级
 

@@ -1,23 +1,40 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../settings'
-import ToolsPanel from './ToolsPanel'
+import { SUPPORTED_LANGUAGES } from '../i18n'
 
 function makeUserOverrideEntry() {
   return { user_id: '', ai_model: '', custom_system_prompt: '', reply_style: '' }
 }
 
-
-export default function SettingsPanel({ open, initialTab = 'reply', selectedConversation = null, onOpenAccounts, onClose, settings, channels, onSave, saving, modelDefault = '', apiSettings = {}, onSaveAiSettings }) {
-  const { t } = useSettings()
+export default function SettingsPanel({
+  open,
+  initialTab = 'reply',
+  selectedConversation = null,
+  onOpenAccounts,
+  onClose,
+  settings,
+  channels,
+  onSave,
+  saving,
+  modelDefault = '',
+  apiSettings = {},
+  onSaveAiSettings,
+}) {
+  const { t, language, setLanguage, theme, setTheme } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
   const [reply, setReply] = useState(settings?.reply || {})
   const [ui, setUi] = useState(settings?.ui || {})
   const [messageOps, setMessageOps] = useState(settings?.message_ops || { auto_translate: true })
 
-  const [userOverrides, setUserOverrides] = useState(Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({ user_id, ...(value || {}) })))
+  const [userOverrides, setUserOverrides] = useState(
+    Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({
+      user_id,
+      ...(value || {}),
+    })),
+  )
   const [password, setPassword] = useState('')
   const [tab, setTab] = useState('reply')
-  // AI runtime settings state
+
   const [aiBaseUrl, setAiBaseUrl] = useState('')
   const [aiModel, setAiModel] = useState('')
   const [aiApiKey, setAiApiKey] = useState('')
@@ -30,13 +47,16 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     setReply(settings?.reply || {})
     setUi(settings?.ui || {})
     setMessageOps(settings?.message_ops || { auto_translate: true })
-
-    setUserOverrides(Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({ user_id, ...(value || {}) })))
+    setUserOverrides(
+      Object.entries(settings?.reply?.user_overrides || {}).map(([user_id, value]) => ({
+        user_id,
+        ...(value || {}),
+      })),
+    )
     setPassword('')
     setTab(initialTab || 'reply')
   }, [open, channels, settings, initialTab])
 
-  // 当 AI tab 打开时，同步 apiSettings 到本地 state
   useEffect(() => {
     if (tab !== 'ai') return
     setAiBaseUrl(apiSettings.base_url || '')
@@ -47,7 +67,9 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
 
   useEffect(() => {
     if (!open) return
-    const onKey = e => { if (e.key === 'Escape') onClose() }
+    const onKey = e => {
+      if (e.key === 'Escape') onClose()
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
@@ -61,26 +83,23 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
   }, [open, selectedConversation, initialTab])
 
   const updateField = (index, key, value) => {
-    setDraftChannels(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
+    setDraftChannels(prev => prev.map((item, i) => (i === index ? { ...item, [key]: value } : item)))
   }
 
   const updateKinds = (index, value) => {
-    setDraftChannels(prev => prev.map((item, i) => i === index ? { ...item, kinds: value.split(',').map(s => s.trim()).filter(Boolean) } : item))
+    setDraftChannels(prev =>
+      prev.map((item, i) =>
+        i === index ? { ...item, kinds: value.split(',').map(s => s.trim()).filter(Boolean) } : item,
+      ),
+    )
   }
-
 
   const updateUserOverride = (index, key, value) => {
-    setUserOverrides(prev => prev.map((item, i) => i === index ? { ...item, [key]: value } : item))
+    setUserOverrides(prev => prev.map((item, i) => (i === index ? { ...item, [key]: value } : item)))
   }
 
-  const addUserOverride = () => {
-    setUserOverrides(prev => [...prev, makeUserOverrideEntry()])
-  }
-
-  const removeUserOverride = (index) => {
-    setUserOverrides(prev => prev.filter((_, i) => i !== index))
-  }
-
+  const addUserOverride = () => setUserOverrides(prev => [...prev, makeUserOverrideEntry()])
+  const removeUserOverride = index => setUserOverrides(prev => prev.filter((_, i) => i !== index))
 
   const saveAiSettings = async () => {
     if (!onSaveAiSettings) return
@@ -92,15 +111,6 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
         default_model: aiModel || null,
         api_key: aiApiKey || null,
       })
-      await onSave({
-        channels: draftChannels,
-        web_settings: {
-          reply: { ...reply, user_overrides: Object.fromEntries(userOverrides.filter(item => String(item.user_id || '').trim()).map(item => [String(item.user_id).trim(), { ai_model: String(item.ai_model || '').trim(), custom_system_prompt: String(item.custom_system_prompt || '').trim(), reply_style: String(item.reply_style || '').trim() }])) },
-          ui,
-          message_ops: messageOps,
-        },
-        password: null,
-      })
       setAiSaved(true)
       setAiApiKey('')
     } finally {
@@ -108,246 +118,438 @@ export default function SettingsPanel({ open, initialTab = 'reply', selectedConv
     }
   }
 
-  const save = () => onSave({
-    channels: draftChannels,
-    web_settings: {
-      reply: {
-        ...reply,
-        user_overrides: Object.fromEntries(
-          userOverrides
-            .filter(item => String(item.user_id || '').trim())
-            .map(item => [String(item.user_id).trim(), {
-              ai_model: String(item.ai_model || '').trim(),
-              custom_system_prompt: String(item.custom_system_prompt || '').trim(),
-              reply_style: String(item.reply_style || '').trim(),
-            }])
-        ),
+  const save = () =>
+    onSave(
+      {
+        channels: draftChannels,
+        web_settings: {
+          reply: {
+            ...reply,
+            user_overrides: Object.fromEntries(
+              userOverrides
+                .filter(item => String(item.user_id || '').trim())
+                .map(item => [
+                  String(item.user_id).trim(),
+                  {
+                    ai_model: String(item.ai_model || '').trim(),
+                    custom_system_prompt: String(item.custom_system_prompt || '').trim(),
+                    reply_style: String(item.reply_style || '').trim(),
+                  },
+                ]),
+            ),
+          },
+          ui,
+          message_ops: messageOps,
+        },
+        password: password || null,
       },
-      ui,
-      message_ops: messageOps,
-
-    },
-    password: password || null,
-  }, () => setPassword(''))
+      () => setPassword(''),
+    )
 
   if (!open) return null
 
+  const tabs = [
+    { id: 'reply', label: t('replyPolicy'), hint: t('ai') },
+    { id: 'ai', label: t('globalAi'), hint: t('model') },
+    { id: 'ui', label: t('uiBehavior'), hint: t('translation') },
+    { id: 'accounts', label: t('platformAccounts'), hint: t('whatsappAccounts') },
+    { id: 'security', label: t('security'), hint: t('newPassword') },
+  ]
+
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t('settings')} onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header wx-settings-header">
+      <div className="modal wx-settings-modal" onClick={e => e.stopPropagation()}>
+        <header className="modal-header wx-settings-header">
           <div><h2>{t('settings')}</h2></div>
           <button className="wx-icon-btn" aria-label={t('dismiss')} onClick={onClose}>
-            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
-        </div>
+        </header>
         <div className="wx-settings-layout">
-          <div className="modal-tabs wx-settings-nav" role="tablist">
-            <button role="tab" aria-selected={tab==='reply'} className={`tab ${tab==='reply' ? 'active' : ''}`} onClick={() => setTab('reply')}>
-              <span>{t('replyPolicy')}</span>
-              <small>AI / Prompt / 风格</small>
-            </button>
-            <button role="tab" aria-selected={tab==='ai'} className={`tab ${tab==='ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
-              <span>AI {t('settings') || '设置'}</span>
-              <small>模型 / 密钥</small>
-            </button>
-            <button role="tab" aria-selected={tab==='ui'} className={`tab ${tab==='ui' ? 'active' : ''}`} onClick={() => setTab('ui')}>
-              <span>{t('uiBehavior')}</span>
-              <small>界面 / 自动翻译</small>
-            </button>
-            <button role="tab" aria-selected={tab==='channels'} className={`tab ${tab==='channels' ? 'active' : ''}`} onClick={() => setTab('channels')}>
-              <span>{t('platformAccounts')}</span>
-              <small>{t('platformAccountsHelp')}</small>
-            </button>
-
-            <button role="tab" aria-selected={tab==='tools'} className={`tab ${tab==='tools' ? 'active' : ''}`} onClick={() => setTab('tools')}>
-              <span>{t('tools') || '工具'}</span>
-              <small>定时 / 群发 / 插件</small>
-            </button>
-            <button role="tab" aria-selected={tab==='security'} className={`tab ${tab==='security' ? 'active' : ''}`} onClick={() => setTab('security')}>
-              <span>{t('security')}</span>
-              <small>密码</small>
-            </button>
+          <div className="wx-settings-nav" role="tablist" aria-label={t('settings')}>
+            {tabs.map(item => (
+              <button
+                key={item.id}
+                role="tab"
+                aria-selected={tab === item.id}
+                className={`tab ${tab === item.id ? 'active' : ''}`}
+                onClick={() => setTab(item.id)}
+              >
+                <span>{item.label}</span>
+                <small>{item.hint}</small>
+              </button>
+            ))}
           </div>
           <div className="modal-body wx-settings-body">
-          {tab === 'reply' && (
-            <div className="settings-section">
-              <h3>{t('replyPolicy')}</h3>
-              <div className="settings-grid">
-                <label><span>{t('settingSmartMax')}</span><input type="number" value={reply.smart_max_length || 40} onChange={e => setReply(prev => ({ ...prev, smart_max_length: Number(e.target.value) || 40 }))} /></label>
-                <label><span>{t('settingTranslateMax')}</span><input type="number" value={reply.translate_max_length || 60} onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))} /></label>
-                <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={reply.ai_model || ''} onChange={e => setReply(prev => ({ ...prev, ai_model: e.target.value }))} placeholder={modelDefault || t('settingAiModelPlaceholder') || '服务端默认模型'} />{modelDefault ? <span className="wx-contact-card-hint">{t('settingAiModelInherit') || '留空则继承服务端默认'}：<code>{modelDefault}</code></span> : null}</label>
-                <label><span>{t('settingPreviewDebounce')}</span><input type="number" value={reply.preview_debounce_ms || 320} onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))} /></label>
-                <label className="full-span"><span>{t('settingCustomSystemPrompt') || '默认系统提示词'}</span><textarea rows="4" value={reply.custom_system_prompt || ''} onChange={e => setReply(prev => ({ ...prev, custom_system_prompt: e.target.value }))} placeholder={t('settingCustomSystemPromptHelp') || '全局 AI 提示词，会追加到系统指令中'} /></label>
-                <label className="full-span"><span>{t('settingDefaultReplyStyle') || '默认回复风格'}</span><textarea rows="3" value={reply.default_reply_style || ''} onChange={e => setReply(prev => ({ ...prev, default_reply_style: e.target.value }))} placeholder={t('settingDefaultReplyStyleHelp') || '例如：像熟人聊天、短句、温柔一点、少模板感'} /></label>
-                <label className="checkbox"><input type="checkbox" checked={!!reply.allow_fallback} onChange={e => setReply(prev => ({ ...prev, allow_fallback: e.target.checked }))} />{t('settingAllowFallback')}</label>
-                <label className="checkbox"><input type="checkbox" checked={!!reply.prefer_detected_language} onChange={e => setReply(prev => ({ ...prev, prefer_detected_language: e.target.checked }))} />{t('settingPreferDetectedLanguage')}</label>
-              </div>
-              <div className="settings-section nested">
-                <div className="platform-toolbar">
-                  <div>
-                    <h3>{t('perContactReplyConfig') || '按联系人自定义 AI'}</h3>
-                    <p className="subtle">{t('perContactReplyConfigHelp') || '可为单个聊天对象指定模型、提示词和回复风格，优先级高于全局默认设置。'}</p>
-                  </div>
-                  <button className="ghost-btn" onClick={addUserOverride}>+ {t('addContactRule') || '添加联系人规则'}</button>
+            {tab === 'reply' && (
+              <section className="settings-section">
+                <h3>{t('replyPolicy')}</h3>
+                <div className="settings-grid">
+                  <label>
+                    <span>{t('settingSmartMax')}</span>
+                    <input
+                      type="number"
+                      value={reply.smart_max_length || 40}
+                      onChange={e => setReply(prev => ({ ...prev, smart_max_length: Number(e.target.value) || 40 }))}
+                    />
+                  </label>
+                  <label>
+                    <span>{t('settingTranslateMax')}</span>
+                    <input
+                      type="number"
+                      value={reply.translate_max_length || 60}
+                      onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))}
+                    />
+                  </label>
+                  <label className="full-span">
+                    <span>{t('settingAiModel')}</span>
+                    <input
+                      value={reply.ai_model || ''}
+                      onChange={e => setReply(prev => ({ ...prev, ai_model: e.target.value }))}
+                      placeholder={modelDefault || t('settingAiModelPlaceholder')}
+                    />
+                    {modelDefault ? (
+                      <span className="wx-contact-card-hint">
+                        {t('settingAiModelInherit')}：<code>{modelDefault}</code>
+                      </span>
+                    ) : null}
+                  </label>
+                  <label>
+                    <span>{t('settingPreviewDebounce')}</span>
+                    <input
+                      type="number"
+                      value={reply.preview_debounce_ms || 320}
+                      onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))}
+                    />
+                  </label>
+                  <label className="full-span">
+                    <span>{t('settingCustomSystemPrompt')}</span>
+                    <textarea
+                      rows={4}
+                      value={reply.custom_system_prompt || ''}
+                      onChange={e => setReply(prev => ({ ...prev, custom_system_prompt: e.target.value }))}
+                      placeholder={t('settingCustomSystemPromptHelp')}
+                    />
+                  </label>
+                  <label className="full-span">
+                    <span>{t('settingDefaultReplyStyle')}</span>
+                    <textarea
+                      rows={3}
+                      value={reply.default_reply_style || ''}
+                      onChange={e => setReply(prev => ({ ...prev, default_reply_style: e.target.value }))}
+                      placeholder={t('settingDefaultReplyStyleHelp')}
+                    />
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!reply.allow_fallback}
+                      onChange={e => setReply(prev => ({ ...prev, allow_fallback: e.target.checked }))}
+                    />
+                    {t('settingAllowFallback')}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!reply.prefer_detected_language}
+                      onChange={e => setReply(prev => ({ ...prev, prefer_detected_language: e.target.checked }))}
+                    />
+                    {t('settingPreferDetectedLanguage')}
+                  </label>
                 </div>
-                {userOverrides.length === 0 ? <div className="subtle platform-empty">{t('noContactRules') || '暂无联系人规则'}</div> : null}
-                {userOverrides.map((item, idx) => (
-                  <div className="platform-card" key={`${item.user_id || 'new'}-${idx}`}>
-                    <div className="settings-grid">
-                      <label><span>{t('contactId') || '联系人ID'}</span><input value={item.user_id || ''} onChange={e => updateUserOverride(idx, 'user_id', e.target.value)} placeholder="如 123456@lid" /></label>
-                      <label><span>{t('settingAiModel') || 'AI 模型'}</span><input value={item.ai_model || ''} onChange={e => updateUserOverride(idx, 'ai_model', e.target.value)} placeholder={modelDefault || t('settingAiModelInherit') || '留空则继承全局'} />{modelDefault ? <span className="wx-contact-card-hint">{t('settingAiModelInherit') || '留空则继承全局'}：<code>{modelDefault}</code></span> : null}</label>
-                      <label className="full-span"><span>{t('settingCustomSystemPrompt') || '系统提示词'}</span><textarea rows="3" value={item.custom_system_prompt || ''} onChange={e => updateUserOverride(idx, 'custom_system_prompt', e.target.value)} placeholder={t('contactPromptHelp') || '例如：这个用户比较敏感，回复时要更温柔、更口语化'} /></label>
-                      <label className="full-span"><span>{t('settingDefaultReplyStyle') || '回复风格'}</span><textarea rows="2" value={item.reply_style || ''} onChange={e => updateUserOverride(idx, 'reply_style', e.target.value)} placeholder={t('contactStyleHelp') || '例如：像熟悉朋友聊天，短句，先共情再回答'} /></label>
+                <div className="settings-section nested">
+                  <div className="platform-toolbar">
+                    <div>
+                      <h3>{t('perContactReplyConfig')}</h3>
+                      <p className="subtle">{t('perContactReplyConfigHelp')}</p>
                     </div>
-                    <div className="platform-actions">
-                      <button className="ghost-btn danger" onClick={() => removeUserOverride(idx)}>{t('delete')}</button>
-                    </div>
+                    <button className="ghost-btn" type="button" onClick={addUserOverride}>+ {t('addContactRule')}</button>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {tab === 'ai' && (
-            <div className="settings-section">
-              <h3>AI {t('settings') || '设置'}</h3>
-              <p className="subtle" style={{ marginBottom: 16 }}>
-                配置全局问鼎 AI、默认模型和自动翻译。联系人与账号可在此基础上覆盖。
-              </p>
-              <div className="wx-ai-status-strip">
-                <span className={`pill ${apiSettings.api_key_configured ? 'ok' : 'muted'}`}>{apiSettings.api_key_configured ? 'Provider 已连接' : 'Provider 未配置'}</span>
-                <span>{apiSettings.default_model || 'gpt-5.3-codex-spark'}</span>
-              </div>
-              <div className="settings-grid">
-                <label className="full-span">
-                  <span>API 密钥</span>
-                  <input
-                    type="password"
-                    value={aiApiKey}
-                    onChange={e => setAiApiKey(e.target.value)}
-                    placeholder={apiSettings.api_key_configured ? '已配置（填入新值以更新）' : '请输入问鼎 AI API 密钥'}
-                    autoComplete="new-password"
-                  />
-                  {apiSettings.api_key_hint && (
-                    <span className="wx-contact-card-hint" style={{ color: 'var(--wx-text-muted)', fontSize: 12 }}>
-                      当前：{apiSettings.api_key_hint} &nbsp;<button className="ghost-btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setAiApiKey('')}>不修改</button>
-                    </span>
-                  )}
-                </label>
-                <label className="full-span">
-                  <span>模型名称</span>
-                  <input
-                    type="text"
-                    value={aiModel}
-                    onChange={e => setAiModel(e.target.value)}
-                    placeholder={apiSettings.default_model || 'gpt-5.3-codex-spark'}
-                  />
-                  <span className="wx-contact-card-hint" style={{ color: 'var(--wx-text-muted)', fontSize: 12 }}>
-                    当前有效模型：<code>{apiSettings.default_model}</code>
-                  </span>
-                </label>
-                <label className="full-span">
-                  <span>API 地址</span>
-                  <input
-                    type="url"
-                    value={aiBaseUrl}
-                    onChange={e => setAiBaseUrl(e.target.value)}
-                    placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
-                  />
-                </label>
-                <label className="checkbox full-span"><input type="checkbox" checked={!!messageOps.auto_translate} onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))} />全局自动翻译外语消息为中文</label>
-                <label className="full-span"><span>{t('settingCustomSystemPrompt') || '全局系统提示词'}</span><textarea rows="4" value={reply.custom_system_prompt || ''} onChange={e => setReply(prev => ({ ...prev, custom_system_prompt: e.target.value }))} placeholder="所有账号和联系人默认继承，可在联系人设置中覆盖" /></label>
-                <label className="full-span"><span>{t('settingDefaultReplyStyle') || '全局回复风格'}</span><textarea rows="3" value={reply.default_reply_style || ''} onChange={e => setReply(prev => ({ ...prev, default_reply_style: e.target.value }))} placeholder="例如：短句、自然、像真人客服、先理解再回答" /></label>
-              </div>
-              {aiSaved && (
-                <div style={{ color: 'var(--wx-brand)', fontSize: 13, marginTop: 8 }}>
-                  ✓ 保存成功，下次 AI 请求自动使用新配置
-                </div>
-              )}
-              <div style={{ marginTop: 16 }}>
-                <button className="wx-primary-btn" onClick={saveAiSettings} disabled={aiSaving}>
-                  {aiSaving ? '保存中…' : '保存 AI 设置'}
-                </button>
-              </div>
-              <div style={{ marginTop: 20, padding: '12px', background: 'var(--wx-bg-secondary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--wx-text-muted)' }}>
-                  <strong style={{ color: 'var(--wx-text)' }}>安全说明</strong>
-                  <ul style={{ margin: '8px 0 0 16px', padding: 0 }}>
-                    <li>API 密钥在传输层加密后存储</li>
-                    <li>密钥不会出现在日志、响应或代码中</li>
-                    <li>仅显示尾号提示（如 <code>***abc123</code>）</li>
-                    <li>留空 API 密钥字段 = 保留原值，不清除</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-          {tab === 'ui' && (
-            <div className="settings-section">
-              <h3>{t('uiBehavior')}</h3>
-              <div className="settings-grid">
-                <label><span>{t('settingAutoRefresh')}</span><input type="number" value={ui.auto_refresh_seconds || 10} onChange={e => setUi(prev => ({ ...prev, auto_refresh_seconds: Number(e.target.value) || 10 }))} /></label>
-                <label className="checkbox"><input type="checkbox" checked={!!ui.show_preview_before_send} onChange={e => setUi(prev => ({ ...prev, show_preview_before_send: e.target.checked }))} />{t('settingPreviewBeforeSend')}</label>
-              </div>
-              <h3 style={{ marginTop: 18 }}>{t('messageOps') || 'Messages'}</h3>
-              <div className="settings-grid">
-                <label className="checkbox"><input type="checkbox" checked={!!messageOps.auto_translate} onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))} />{t('autoTranslate')}</label>
-                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_local_hide_delete} onChange={e => setMessageOps(prev => ({ ...prev, allow_local_hide_delete: e.target.checked }))} />{t('settingAllowLocalHide')}</label>
-                <label className="checkbox"><input type="checkbox" checked={!!messageOps.allow_bulk_local_hide} onChange={e => setMessageOps(prev => ({ ...prev, allow_bulk_local_hide: e.target.checked }))} />{t('settingAllowBulkHide')}</label>
-              </div>
-            </div>
-          )}
-
-          {tab === 'channels' && (
-            <div className="settings-section">
-              <div className="platform-toolbar">
-                <div>
-                  <h3>{t('platformAccounts')}</h3>
-                  <p className="subtle">{t('platformAccountsHelp')}</p>
-                </div>
-                <button type="button" className="wx-primary-btn" onClick={onOpenAccounts}>{t('manageAccounts')}</button>
-              </div>
-              <div className="wx-settings-account-entry">
-                <strong>{t('whatsappAccounts')}</strong>
-                <span>{t('accountCenterHint')}</span>
-                <button type="button" className="ghost-btn" onClick={onOpenAccounts}>{t('openAccountCenter')}</button>
-              </div>
-              <details className="wx-advanced-disclosure">
-                <summary>{t('advanced')}</summary>
-                <div className="channels-grid">
-                  {draftChannels.map((channel, idx) => (
-                    <div className="channel-card" key={channel.id}>
-                      <div className="channel-card-header">
-                        <strong>{channel.name}</strong>
-                        <span className={`pill ${channel.enabled ? 'ok' : 'muted'}`}>{channel.enabled ? t('enabled') : t('disabled')}</span>
+                  {userOverrides.length === 0 ? (
+                    <div className="subtle platform-empty">{t('noContactRules')}</div>
+                  ) : null}
+                  {userOverrides.map((item, idx) => (
+                    <div className="platform-card" key={`${item.user_id || 'new'}-${idx}`}>
+                      <div className="settings-grid">
+                        <label>
+                          <span>{t('contactId')}</span>
+                          <input
+                            value={item.user_id || ''}
+                            onChange={e => updateUserOverride(idx, 'user_id', e.target.value)}
+                            placeholder="123456@lid"
+                          />
+                        </label>
+                        <label>
+                          <span>{t('settingAiModel')}</span>
+                          <input
+                            value={item.ai_model || ''}
+                            onChange={e => updateUserOverride(idx, 'ai_model', e.target.value)}
+                            placeholder={modelDefault || t('settingAiModelInherit')}
+                          />
+                          {modelDefault ? (
+                            <span className="wx-contact-card-hint">
+                              {t('settingAiModelInherit')}：<code>{modelDefault}</code>
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="full-span">
+                          <span>{t('settingCustomSystemPrompt')}</span>
+                          <textarea
+                            rows={3}
+                            value={item.custom_system_prompt || ''}
+                            onChange={e => updateUserOverride(idx, 'custom_system_prompt', e.target.value)}
+                            placeholder={t('contactPromptHelp')}
+                          />
+                        </label>
+                        <label className="full-span">
+                          <span>{t('settingDefaultReplyStyle')}</span>
+                          <textarea
+                            rows={2}
+                            value={item.reply_style || ''}
+                            onChange={e => updateUserOverride(idx, 'reply_style', e.target.value)}
+                            placeholder={t('contactStyleHelp')}
+                          />
+                        </label>
                       </div>
-                      <label><span>{t('settingChannelName')}</span><input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} /></label>
-                      <label><span>{t('settingPlatform')}</span><input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} /></label>
-                      <label><span>{t('settingTarget')}</span><input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} /></label>
-                      <label><span>{t('settingKinds')}</span><input value={(channel.kinds || []).join(', ')} onChange={e => updateKinds(idx, e.target.value)} /></label>
-                      <label className="checkbox"><input type="checkbox" checked={channel.enabled} onChange={e => updateField(idx, 'enabled', e.target.checked)} />{t('settingEnableChannel')}</label>
+                      <div className="platform-actions">
+                        <button className="ghost-btn danger" type="button" onClick={() => removeUserOverride(idx)}>
+                          {t('delete')}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </details>
-            </div>
-          )}
-          {tab === 'security' && (
-            <div className="settings-section">
-              <h3>{t('security')}</h3>
-              <div className="settings-grid">
-                <label><span>{t('newPassword')}</span><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" /></label>
-              </div>
-              <p className="subtle">{t('newPasswordHelp')}</p>
-            </div>
-          )}
-          {tab === 'tools' && <ToolsPanel />}
+              </section>
+            )}
+
+            {tab === 'ai' && (
+              <section className="settings-section">
+                <h3>{t('globalAi')}</h3>
+                <p className="subtle">{t('globalAiSettings')}</p>
+                <div className="wx-ai-status-strip">
+                  <span className={`pill ${apiSettings.api_key_configured ? 'ok' : 'muted'}`}>
+                    {apiSettings.api_key_configured ? t('serviceOnline') : t('notConfigured')}
+                  </span>
+                  <span>{apiSettings.default_model || t('notConfigured')}</span>
+                </div>
+                <div className="settings-grid">
+                  <label className="full-span">
+                    <span>{t('apiKey')}</span>
+                    <input
+                      type="password"
+                      value={aiApiKey}
+                      onChange={e => setAiApiKey(e.target.value)}
+                      placeholder={apiSettings.api_key_configured ? t('apiKeyKeep') : t('apiKeyInput')}
+                      autoComplete="new-password"
+                    />
+                    {apiSettings.api_key_hint ? (
+                      <span className="wx-contact-card-hint">
+                        {t('apiKeyCurrent')}：{apiSettings.api_key_hint}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className="full-span">
+                    <span>{t('settingAiModel')}</span>
+                    <input
+                      type="text"
+                      value={aiModel}
+                      onChange={e => setAiModel(e.target.value)}
+                      placeholder={apiSettings.default_model || t('settingAiModelPlaceholder')}
+                    />
+                  </label>
+                  <label className="full-span">
+                    <span>{t('apiBase')}</span>
+                    <input
+                      type="url"
+                      value={aiBaseUrl}
+                      onChange={e => setAiBaseUrl(e.target.value)}
+                      placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
+                    />
+                  </label>
+                  <label className="checkbox full-span">
+                    <input
+                      type="checkbox"
+                      checked={!!messageOps.auto_translate}
+                      onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))}
+                    />
+                    {t('autoTranslate')}
+                  </label>
+                </div>
+                {aiSaved ? <div className="wx-ai-saved">{t('saved')}</div> : null}
+                <div className="wx-ai-actions">
+                  <button className="wx-primary-btn" type="button" onClick={saveAiSettings} disabled={aiSaving}>
+                    {aiSaving ? t('saving') : t('save')}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {tab === 'ui' && (
+              <section className="settings-section">
+                <h3>{t('uiBehavior')}</h3>
+                <div className="settings-grid">
+                  <label>
+                    <span>{t('settingAutoRefresh')}</span>
+                    <input
+                      type="number"
+                      value={ui.auto_refresh_seconds || 10}
+                      onChange={e => setUi(prev => ({ ...prev, auto_refresh_seconds: Number(e.target.value) || 10 }))}
+                    />
+                  </label>
+                  <label>
+                    <span>{t('language')}</span>
+                    <select value={language} onChange={e => setLanguage(e.target.value)}>
+                      {SUPPORTED_LANGUAGES.map(l => (
+                        <option key={l.code} value={l.code}>{l.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>{t('theme')}</span>
+                    <div className="wx-theme-choice" role="group" aria-label={t('theme')}>
+                      <button
+                        type="button"
+                        className={`ghost-btn ${theme === 'light' ? 'active' : ''}`}
+                        onClick={() => setTheme('light')}
+                      >
+                        {t('themeLight')}
+                      </button>
+                      <button
+                        type="button"
+                        className={`ghost-btn ${theme === 'dark' ? 'active' : ''}`}
+                        onClick={() => setTheme('dark')}
+                      >
+                        {t('themeDark')}
+                      </button>
+                    </div>
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!ui.show_preview_before_send}
+                      onChange={e => setUi(prev => ({ ...prev, show_preview_before_send: e.target.checked }))}
+                    />
+                    {t('settingPreviewBeforeSend')}
+                  </label>
+                </div>
+                <h3 className="wx-section-subtitle">{t('messageOps')}</h3>
+                <div className="settings-grid">
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!messageOps.auto_translate}
+                      onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))}
+                    />
+                    {t('autoTranslate')}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!messageOps.allow_local_hide_delete}
+                      onChange={e => setMessageOps(prev => ({ ...prev, allow_local_hide_delete: e.target.checked }))}
+                    />
+                    {t('settingAllowLocalHide')}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!!messageOps.allow_bulk_local_hide}
+                      onChange={e => setMessageOps(prev => ({ ...prev, allow_bulk_local_hide: e.target.checked }))}
+                    />
+                    {t('settingAllowBulkHide')}
+                  </label>
+                </div>
+              </section>
+            )}
+
+            {tab === 'accounts' && (
+              <section className="settings-section">
+                <div className="platform-toolbar">
+                  <div>
+                    <h3>{t('platformAccounts')}</h3>
+                    <p className="subtle">{t('platformAccountsHelp')}</p>
+                  </div>
+                  <button className="wx-primary-btn" type="button" onClick={onOpenAccounts}>
+                    {t('manageAccounts')}
+                  </button>
+                </div>
+                <div className="wx-settings-account-entry">
+                  <strong>{t('whatsappAccounts')}</strong>
+                  <span>{t('accountCenterHint')}</span>
+                  <button className="ghost-btn" type="button" onClick={onOpenAccounts}>
+                    {t('openAccountCenter')}
+                  </button>
+                </div>
+                <details className="wx-advanced-disclosure">
+                  <summary>{t('advanced')}</summary>
+                  <div className="channels-grid">
+                    {draftChannels.map((channel, idx) => (
+                      <div className="channel-card" key={channel.id}>
+                        <div className="channel-card-header">
+                          <strong>{channel.name}</strong>
+                          <span className={`pill ${channel.enabled ? 'ok' : 'muted'}`}>
+                            {channel.enabled ? t('enabled') : t('disabled')}
+                          </span>
+                        </div>
+                        <label>
+                          <span>{t('settingChannelName')}</span>
+                          <input value={channel.name} onChange={e => updateField(idx, 'name', e.target.value)} />
+                        </label>
+                        <label>
+                          <span>{t('settingPlatform')}</span>
+                          <input value={channel.platform} onChange={e => updateField(idx, 'platform', e.target.value)} />
+                        </label>
+                        <label>
+                          <span>{t('settingTarget')}</span>
+                          <input value={channel.target} onChange={e => updateField(idx, 'target', e.target.value)} />
+                        </label>
+                        <label>
+                          <span>{t('settingKinds')}</span>
+                          <input
+                            value={(channel.kinds || []).join(', ')}
+                            onChange={e => updateKinds(idx, e.target.value)}
+                          />
+                        </label>
+                        <label className="checkbox">
+                          <input
+                            type="checkbox"
+                            checked={channel.enabled}
+                            onChange={e => updateField(idx, 'enabled', e.target.checked)}
+                          />
+                          {t('settingEnableChannel')}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </section>
+            )}
+
+            {tab === 'security' && (
+              <section className="settings-section">
+                <h3>{t('security')}</h3>
+                <div className="settings-grid">
+                  <label>
+                    <span>{t('newPassword')}</span>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </label>
+                </div>
+                <p className="subtle">{t('newPasswordHelp')}</p>
+              </section>
+            )}
+          </div>
         </div>
-        </div>
-        <div className="modal-footer">
-          <button className="ghost-btn" onClick={onClose}>{t('back')}</button>
-          <button className="wx-primary-btn" onClick={save} disabled={saving}>{saving ? t('saving') : t('save')}</button>
-        </div>
+        <footer className="modal-footer wx-settings-footer">
+          <button className="ghost-btn" type="button" onClick={onClose}>{t('back')}</button>
+          <button className="wx-primary-btn" type="button" onClick={save} disabled={saving}>
+            {saving ? t('saving') : t('save')}
+          </button>
+        </footer>
       </div>
     </div>
   )

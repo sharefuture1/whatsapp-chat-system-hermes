@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+const DEFAULT_API_BASE = import.meta.env?.VITE_API_BASE?.replace(/\/$/, '') || '/api'
 
 let sessionToken = ''
 let onUnauthorized = null

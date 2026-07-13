@@ -171,8 +171,47 @@ def apply_corrections(entries: list[dict], corrections: dict[int, str]) -> int:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             files_updated += 1
             print(f"  ✓ {user_id}: 更新 {len(items)} 条 → {json_file}")
+            _push_to_laotalk(user_id, items)
 
     return files_updated
+
+
+def _push_to_laotalk(user_id: str, items: list) -> None:
+    """将纠正的翻译推送到 LaoTalk shared_corpus"""
+    import os
+    import urllib.request
+
+    secret = os.environ.get("LT_CORPUS_SECRET", "").strip()
+    url = os.environ.get(
+        "LT_CORPUS_PUSH_URL", "http://localhost:3020/api/corpus/push"
+    ).strip()
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers["X-Corpus-Secret"] = secret
+    count = 0
+    for _, e, new_zh in items:
+        src_lang = e.get("source_lang", "lo")
+        entry = {
+            "source_lang": src_lang,
+            "src": e.get("source_text", ""),
+            "tgt": new_zh,
+            "corrected_by": "human",
+            "source": "whatsapp",
+            "user_id": user_id,
+            "created_at": time.time(),
+        }
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(entry).encode(), headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    count += 1
+        except Exception:
+            pass
+    if count:
+        print(f"  → 推送 {count} 条到 LaoTalk 语料库")
+    return count
 
 
 def export_csv(entries: list[dict], path: Path) -> None:

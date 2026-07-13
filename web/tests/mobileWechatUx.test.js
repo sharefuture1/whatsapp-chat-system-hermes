@@ -74,10 +74,23 @@ test('composer measures scrollHeight and exposes three direct mode choices', () 
   assert.match(source, /setMode\('translate'\)/)
 })
 
-test('settings modal becomes a full screen page on mobile', () => {
+test('settings modal becomes a full screen page on mobile with scrollable content and a horizontal tab bar [UX-012]', () => {
   const css = read('styles.css')
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.modal-backdrop \{[^}]*padding: 0/)
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.modal \{[^}]*width: 100vw[^}]*height: 100dvh[^}]*border-radius: 0/)
+  assert.match(css, /\.wx-settings-layout \{[^}]*overflow: hidden/)
+  assert.match(css, /\.modal-body \{[^}]*min-height: 0[^}]*overflow: auto/)
+  assert.match(css, /\.wx-settings-nav \{[^}]*overflow-x: auto[^}]*overflow-y: hidden/)
+  assert.match(css, /\.wx-settings-nav \.tab \{[^}]*flex: 0 0 auto/)
+  assert.match(css, /\.modal-footer \{[^}]*flex: 0 0 auto/)
+})
+
+test('settings theme buttons explicitly select their target theme [UX-012]', () => {
+  const source = read('components/SettingsPanel.jsx')
+  assert.match(source, /const \{ t, language, setLanguage, theme, setTheme \} = useSettings\(\)/)
+  assert.match(source, /onClick=\{\(\) => setTheme\('light'\)\}/)
+  assert.match(source, /onClick=\{\(\) => setTheme\('dark'\)\}/)
+  assert.doesNotMatch(source, /toggleTheme\('light'\)|toggleTheme\('dark'\)/)
 })
 
 test('operator avatar is language independent', () => {

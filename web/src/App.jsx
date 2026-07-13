@@ -6,12 +6,15 @@ import { buildContacts, buildInbox, filterInbox } from './inboxModel'
 import { contactSelectionPlan, conversationDeletePlan } from './conversationLifecycle'
 import { createRefreshCoordinator, mergeConversationPages } from './workspaceRefresh'
 import AccountCenterPage from './components/AccountCenterPage'
+import BroadcastCenterPage from './components/BroadcastCenterPage'
 import ChatList from './components/ChatList'
 import ChatPane from './components/ChatPane'
 import ContactsPage from './components/ContactsPage'
 import DiscoverPage from './components/DiscoverPage'
 import LoginScreen from './components/LoginScreen'
 import MePage from './components/MePage'
+import PluginCenterPage from './components/PluginCenterPage'
+import SchedulerCenterPage from './components/SchedulerCenterPage'
 import SettingsPanel from './components/SettingsPanel'
 import TabBar from './components/TabBar'
 
@@ -85,6 +88,9 @@ function AppInner() {
   const [settingsInitialTab, setSettingsInitialTab] = useState('reply')
   const [activeTab, setActiveTab] = useState('chats')
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
+  const [pluginCenterOpen, setPluginCenterOpen] = useState(false)
+  const [schedulerCenterOpen, setSchedulerCenterOpen] = useState(false)
+  const [broadcastCenterOpen, setBroadcastCenterOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
   const accountsRef = useRef([])
   const refreshCoordinatorRef = useRef(createRefreshCoordinator())
@@ -308,26 +314,31 @@ function AppInner() {
     setApiSettings(fresh)
   }
 
-  const sendReply = async (conversation, message, mode) => {
-    setSending(true)
+  const sendReply = async (conversation, message, mode, { previewOnly = false } = {}) => {
+    setSending(!previewOnly)
     try {
+      if (conversation?.source === 'standalone' && conversation?.conversation_id && previewOnly) {
+        throw new Error(t('previewFailed') || 'Preview is not available for this conversation yet')
+      }
       const data = conversation?.source === 'standalone' && conversation?.conversation_id
         ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message })
-        : await api.post('/reply', { target: conversation?.user_id, message, mode, preview_only: false })
+        : await api.post('/reply', { target: conversation?.user_id, message, mode, preview_only: previewOnly })
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
         error.code = data?.code || 'delivery_failed'
         error.retryable = data?.retryable !== false
         throw error
       }
-      setSendingMeta({ mode: data.mode, language: data.rewrite?.language || 'direct' })
-      refreshWorkspace({ silent: true, fresh: true })
+      if (!previewOnly) {
+        setSendingMeta({ mode: data.mode, language: data.rewrite?.language || 'direct' })
+        refreshWorkspace({ silent: true, fresh: true })
+      }
       return data
     } catch (e) {
-      showError(e)
+      if (!previewOnly) showError(e)
       throw e
     } finally {
-      setSending(false)
+      if (!previewOnly) setSending(false)
     }
   }
 
@@ -575,7 +586,7 @@ function AppInner() {
               defaultAiModel={settings.web_settings?.reply?.ai_model || settings.model?.default || ''}
               onSaveContactConfig={quickSaveContactConfig}
               onBack={() => { setSelectedId(''); setSelectedName('') }}
-              onReply={(target, message, mode) => sendReply(selectedConversation, message, mode)}
+              onReply={(target, message, mode, options) => sendReply(selectedConversation, message, mode, options)}
               onHideMessage={hideMessage}
               sending={sending}
               sendingMeta={sendingMeta}
@@ -621,17 +632,34 @@ function AppInner() {
           <DiscoverPage dashboard={dashboard} channels={settings.channels || []} conversations={conversations} />
         )}
 
-        {activeTab === 'me' && !accountCenterOpen && (
+        {activeTab === 'me' && !accountCenterOpen && !pluginCenterOpen && (
           <MePage
             health={health}
             onOpenSettings={() => { setSettingsInitialTab('ui'); setSettingsOpen(true) }}
             onOpenGlobalAi={() => { setSettingsInitialTab('ai'); setSettingsOpen(true) }}
             onOpenAccounts={() => setAccountCenterOpen(true)}
+            onOpenPlugins={() => setPluginCenterOpen(true)}
             onLogout={logout}
             autoTranslate={autoTranslate}
             accountSummary={accountsController.summary}
             aiSummary={{ configured: !!apiSettings.api_key_configured, model: apiSettings.default_model || settings.web_settings?.reply?.ai_model || '' }}
           />
+        )}
+
+        {activeTab === 'me' && pluginCenterOpen && (
+          <PluginCenterPage
+            onBack={() => setPluginCenterOpen(false)}
+            onOpenScheduler={() => setSchedulerCenterOpen(true)}
+            onOpenBroadcast={() => setBroadcastCenterOpen(true)}
+          />
+        )}
+
+        {activeTab === 'me' && schedulerCenterOpen && (
+          <SchedulerCenterPage onBack={() => { setSchedulerCenterOpen(false); setPluginCenterOpen(true) }} />
+        )}
+
+        {activeTab === 'me' && broadcastCenterOpen && (
+          <BroadcastCenterPage onBack={() => { setBroadcastCenterOpen(false); setPluginCenterOpen(true) }} />
         )}
 
         {activeTab === 'me' && accountCenterOpen && (

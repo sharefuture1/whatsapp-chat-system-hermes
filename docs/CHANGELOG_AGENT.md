@@ -1,5 +1,91 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-13：插件中心可观察性与任务中心落地（Implemented）
+
+- `PLUGIN_CATALOG` 升级为带 `available / unavailable_reason / status_when_on / hooks` 的真值：
+  - 可用：`auto_translate / quick_reply / persona_styles / memory / analytics`
+  - 不可用：`schedule / broadcast / voice_tts / media_pack / auto_tag / followup`，全部带明确原因（指向 SDD-P0-06/07 等）。
+- `/api/plugins` 直接返回上述元数据；前端不可用插件的开关自动禁用并展示原因。
+- `/api/dashboard.stats` 扩展为 `unread_messages / pending_replies / sent_messages / avg_response_seconds`，统计插件有真数据。
+- 新增前端 `SchedulerCenterPage` 与 `BroadcastCenterPage`：列出当前任务，提供创建向导（Worker 未接通前会以 toast 提示）。
+- 插件中心定时/群发卡片显示“打开任务中心”按钮，跳转到对应 CenterPage。
+- i18n：四语新增 `schedulerTitle / broadcastTitle / pluginUnavailableReason / pluginHookEmpty / openToolCenter` 等。
+- 验证：Python `225 passed`、Web `79 passed`、Vite build、`git diff --check` 通过；systemd 重启后 `/api/health` 200，公网与本地均命中 `assets/index-BSMu_Kn5.js` / `index-BU2zSI7R.css`。
+
+## 2026-07-13：发现页与设置页微信化 + 定时/群发降级（Implemented）
+
+- 新增 UX-013：发现页只保留运营概览与受控 AI 人设；插件目录迁到 Me → 插件中心；定时发送、群发在可靠 Worker 落地前从 UI 中移除，API 写入端改为返回 `503 scheduler_not_connected` / `503 broadcast_not_connected`，不再让用户提交。
+- 重构 SettingsPanel：从六个高密度 Tab 收敛为 5 个核心 Tab（回复策略 / 全局 AI / 界面 / 账号中心 / 安全），全部走 i18n key；主题按钮调用显式 `setTheme('light'|'dark')`；移动端沿用 UX-012 的单行横滑导航与底部固定操作栏。
+- 新增 `components/PluginCenterPage.jsx`：独立的“插件中心”全屏页面，含搜索、分组、状态、不可用原因展示；Me 页新增入口。
+- Me 页整理为微信式分组：账号与连接 / 全局 AI / 服务（插件中心、设置）/ 偏好（语言、主题）/ 退出登录。
+- i18n：新增 `servicesTitle / preferencesTitle / apiKey / apiKeyKeep / apiKeyInput / apiKeyCurrent` 四语对齐；旧 `pluginCenter / pluginsEnabled` 中文重复键修复。
+- 验证：Python `223 passed`、Web `76 passed`、Vite build、`git diff --check` 通过；systemd 重启后 `/api/health` 200，公网与本地均命中 `assets/index-yMpubfk7.js` / `index-BU2zSI7R.css`。
+
+## 2026-07-13：设置页结构与移动端布局收敛（Implemented）
+
+- 新增 UX-012：桌面设置采用侧栏+独立内容滚动；移动端为全屏、单行横滑分段导航、独立滚动表单与固定底部操作栏，避免六个 Tab 网格挤压页面。
+- 修复主题按钮：浅色/深色现在调用 `setTheme('light'|'dark')` 精确选择，不再错误地通过无参反转造成点击目标主题却变成另一主题。
+- 设置导航移除硬编码英文/中文混合描述，改用 i18n key；未知语言 setter 也回退中文。
+- 验证：Python `223 passed`、Web `73 passed`、Vite build、`git diff --check` 通过；systemd 重启后 `/api/health` 200，公网与本地资源一致：`index-BKv2NUGm.js` / `index-BU2zSI7R.css`。
+
+## 2026-07-13：中文全量文案与 WhatsApp 联系人姓名优先级（Implemented）
+
+- 修复中文 locale 中遗留的英文运营、插件、联系人、定时与群发文案；新增静态回归，禁止中文用户可见值退化为未翻译英文（协议/产品专有名词除外）。
+- 新增 FR-CON-013：显示名固定遵循“人工备注 → WhatsApp 同步名称 → 会话标题 → 远端 ID”。V1 会话 API 已调整为优先 `Contact.display_name`，不会再由聊天标题压过对方在 WhatsApp 的原始名称。
+- 真实库抽查确认现有联系人的 `display_name=future`、`remark=null`，渲染将使用 `future` 而非低优先级标题/JID。
+- 验证：Python `223 passed`、Web `72 passed`、Vite build、`git diff --check` 通过；systemd 重启后 `/api/health` 200，本地与公网均命中 `assets/index-DgvLmKLK.js`（309300 bytes）。
+
+## 2026-07-13：账号加载故障恢复（Legacy 兼容服务）
+
+- 根因：前一轮手工重启时没有加载 `/etc/whatsapp-chat-system.env`，Legacy Web API 因此退回空默认 SQLite；`/api/v1/accounts` 查询缺少 `whatsapp_accounts` 表并返回 500，前端显示“账号加载失败”。
+- 已将 systemd 服务恢复为 Legacy 兼容启动路径，并明确加载原有环境文件；服务当前 active，实际独立库 `whatsapp_standalone.db` 的账号 Repository 可读取 1 个 online 账号。
+- 验证：`/api/health` 200，公网 `assets/index-CjMgNbWo.js` 200（309238 bytes）。Bridge V2 的连接/内部事件仍是迁移期独立问题，不把它误报为账号目录加载失败。
+
+## 2026-07-13：人设目录认证修复与中文优先语言策略（Implemented）
+
+- 根因修复：`personas.js` 不再直接匿名 `fetch` V1 人设接口，而是统一经 `api` 客户端携带登录 session token；401/5xx 不再静默降级为空人设目录，前端会显示实际加载错误。
+- 受控人设 `tong-jincheng` 在 UI 明确命名为“童锦程·直球关系顾问”；它是本地审计的通用关系沟通风格，不冒充或模仿真人，仍不显示/下载第三方源。
+- 新增 UX-011：中文成为首次访问默认语言、未知语言及缺失 key 的最高优先级回退；语言存储 key 升级为 `chat-system-language-v2`，使既有英文缓存不再覆盖中文默认。用户主动选择英语/泰语/老挝语后仍会持久化并实时生效。
+- V1 人设认证、童锦程可见性、401 不静默隐藏和中文优先策略均新增回归覆盖。
+- 验证：Python `222 passed`、Web `71 passed`、Vite build、`git diff --check` 通过；Legacy 8792 重启后 `/api/health` 200，`assets/index-CjMgNbWo.js` 200（309238 bytes），公网同资源一致。
+
+## 2026-07-13：人设预览与 Legacy V1 契约闭环（Implemented，待真实账号验收）
+
+- Legacy `build_app` 已实际注册 V1 personas router，并补齐真实登录后的列表/分配回归；未认证请求固定返回 401，不再以 404 或跳过测试掩盖路由缺失。
+- 智能/翻译模式在输入工具面板提供真实“预览”操作：仅调用 Legacy `/api/reply` 的 `preview_only=true`，不会发送 WhatsApp 消息；预览响应现包含安全的人设展示元数据，便于确认当前联系人人设已生效。
+- `App → ChatPane` 已透传 `previewOnly` 选项，预览不触发发送 busy 状态、全局刷新或错误 toast；Standalone 会话暂不伪装支持预览，会明确失败直到其独立 preview API 落地。
+- 清除了 DiscoverPage 未使用的人设启停 API import；恢复原先被跳过的预览契约测试。
+- 验证：Python `222 passed`、Web `70 passed`、Vite build、`git diff --check` 通过。生产尚未切流，真实 WhatsApp/Provider 验收仍待完成。
+
+## 2026-07-12：受控 AI 人设 P0（Implemented，未切流）
+
+- 新增 `src/whatsapp_chat_system/api/v1/personas.py`：`GET /api/v1/personas`、`PUT /api/v1/personas/{persona_id}/enable`、`PUT /api/v1/contacts/{contact_id}/persona`；默认人设不可关闭；未知人设 404；清空选择写入 `default`。
+- 受控人设目录仅含静态审计的 `default / tong-jincheng / professional-service / mature-uncle`，prompt 不下发到客户端；前端 UI 禁止显示任何外部源/仓库信息。
+- `router.prepare_reply` 与 admin_router 都读 `web_settings.contact_profiles[contact_id].persona_id` 并透传到 rewriter；切换/卸载/未知/插件关闭任一情况均回退默认策略。
+- V1 API 同时在 standalone `_build_standalone_app` 与 legacy `build_app` 注册，开发与生产不依赖 Hermes。
+- 前端 `web/src/personas.js` 客户端封装 V1 调用；`ChatPane` 头部 `…` → AI 人设 picker 真实接通；`DiscoverPage` "AI 人设"分类展示受控目录。
+- PC 端 `.wx-sidebar-nav` 补齐 `display:flex`、宽度从 64px 加到 72px、深色阴影、按钮更大尺寸，桌面 768px+ 真正可见。
+- 实施计划：`docs/plans/2026-07-12-persona-plugins.md`；测试 9 个 Python + 4 个 Web 全部 GREEN。
+- 验证：Python `219 passed`、Web `69 passed (1 skipped)`、Vite build、`git diff --check` 通过。未触碰生产 `/etc`、未重启服务、未切流。
+
+## 2026-07-12：Standalone API 运行时脱离 Hermes（Implemented，未切流）
+
+- 新增 `standalone_api.py` 与独立 `runtime.py`；`whatsapp-chat-system serve` 不再加载 Legacy `web_api`、Hermes profile、`state.db`、AdminRouter 或 Legacy Bridge。
+- standalone 启动只接受独立 `CHAT_SYSTEM_RUNTIME_DIR`、`DATABASE_URL`、`WHATSAPP_BRIDGE_INTERNAL_TOKEN`；数据库必须已迁移到当前 Alembic head，否则启动拒绝 ready。
+- 首次初始化要求至少 12 字符 bootstrap password；已保存有效 PBKDF2 认证记录后重启不再依赖该环境变量。runtime 设置采用 0700/0600 权限与 fsync + replace 原子写入，坏配置 fail-closed。
+- Legacy `/api` 与 `/api/*` 在 standalone 下明确返回 `410 legacy_api_disabled`；V1 继续受 session 鉴权。内部事件在 body 校验前验证 token，且统一返回结构化 validation error；短路响应也带 `X-Request-ID`。
+- 独立 systemd/迁移合同及 `docs/DEPLOYMENT.md` 已同步；旧生产脚本已硬阻断，不能用于 standalone 切换。
+- 验证：Python `203 passed`、Vite build、`git diff --check` 通过；双审查最终 **APPROVED**。未修改生产服务、未执行数据迁移、未进行 WhatsApp 真实收发或切流。
+
+## 2026-07-12：插件目录与四语言可靠性
+
+- 新增 `docs/plans/2026-07-12-plugin-i18n-reliability.md`，落实 SDD-P1-06 的插件可用性、四语言契约与 Worker 边界。
+- 修复 `i18n.js` 的重复 key 与 Lao `searchPlaceholder` 漏项；四个 locale 现有完全相同且无重复的 key 集合。`t()` 改用 `??`，不再错误吞掉有效空值。
+- Discover/Tools 插件目录现具备：本地化分类、可用/不可用状态、不可用 Worker 原因、禁用开关、隐藏不真实删除动作、busy/错误/空状态和刷新 guard。
+- 新增 `web/tests/pluginI18nReliability.test.js` 作为四语言/插件目录静态回归契约。
+- 修复与本轮无关但阻塞全量门禁的测试时钟漂移：job repository 测试为固定过去的 `now` 传入 `available_at=now`，保持生产“入队即按实际当前时间可用”的行为不变。
+- 验证：Web 契约 3/3，Vite build 通过，Python 183 passed（1 个现有依赖弃用 warning）。
+
 ## 2026-07-11：修复同步事件 occurrence 身份冲突
 
 - 同步联系人、聊天和历史批次改为在每次 Baileys handler 调用时生成 occurrence nonce；事件身份包含 occurrence、类型、chunk index 与 canonical content hash。

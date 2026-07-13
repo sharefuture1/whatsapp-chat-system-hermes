@@ -24,6 +24,7 @@ from .accounts.reconciler import AccountReconciler
 from .ai.provider import WendingAIProvider
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
+from .api.v1.personas import create_personas_router
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
     whatsapp_validation_exception_handler,
@@ -39,14 +40,16 @@ from .config import (
 from .db import create_engine, create_session_factory, session_scope
 from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
+from .runtime import StandaloneRuntime
 from .settings import AISettings
 from .memory_refresh import MemoryRefresher
 from .origins import OriginsCache
+from .personas import list_personas, resolve_persona
 from .router import AdminRouter
 from .storage import StateDB
 from .structured_profile import read_sidecar
 from .translations import bulk_put, load_many, load_translations, put_translation
-from .rewriter import Rewriter as _Rewriter  # imported for translation helper below
+from .rewriter import Rewriter as _Rewriter
 
 
 logger = logging.getLogger(__name__)
@@ -129,6 +132,11 @@ class BroadcastRequest(BaseModel):
 class PluginToggleRequest(BaseModel):
     plugin_id: str
     enabled: bool
+
+
+class PersonaAssignmentRequest(BaseModel):
+    target: str = Field(min_length=1)
+    clear: bool = False
 
 
 class AISettingsUpdateRequest(BaseModel):
@@ -663,7 +671,23 @@ def _dashboard_stats(
     }
 
 
-def _is_authenticated(config: AppConfig, request: Request) -> bool:
+def _compute_avg_response_seconds(conversations: list[dict[str, Any]]) -> float:
+    """Return the average outbound-to-inbound delta across conversations in seconds.
+
+    Each conversation may expose `last_response_seconds`; if no conversation reports
+    one, fall back to zero so the dashboard still renders a numeric card.
+    """
+    samples = [
+        float(c.get("last_response_seconds") or 0)
+        for c in conversations
+        if c.get("last_response_seconds")
+    ]
+    if not samples:
+        return 0.0
+    return round(sum(samples) / len(samples), 2)
+
+
+def _is_authenticated(config: AppConfig | StandaloneRuntime, request: Request) -> bool:
     if not bool(config.web_settings.get("auth_required", True)):
         return True
     auth = config.web_settings.get("auth") or {}
@@ -678,12 +702,14 @@ def _is_authenticated(config: AppConfig, request: Request) -> bool:
     if time.time() >= expires_at:
         sessions.pop(token, None)
         config.web_settings["sessions"] = sessions
-        save_json(config.paths.web_settings_file, config.web_settings)
+        _persist_web_settings(config)
         return False
     return True
 
 
-def _check_login_rate_limit(config: AppConfig, request: Request) -> None:
+def _check_login_rate_limit(
+    config: AppConfig | StandaloneRuntime, request: Request
+) -> None:
     policy = config.web_settings.get("auth_policy") or {}
     max_attempts = int(policy.get("max_attempts", 5))
     window_seconds = int(policy.get("window_seconds", 300))
@@ -702,15 +728,24 @@ def _check_login_rate_limit(config: AppConfig, request: Request) -> None:
     attempts.append(now)
     login_attempts[ip] = attempts
     config.web_settings["login_attempts"] = login_attempts
-    save_json(config.paths.web_settings_file, config.web_settings)
+    _persist_web_settings(config)
 
 
-def _clear_login_attempts(config: AppConfig, request: Request) -> None:
+def _clear_login_attempts(
+    config: AppConfig | StandaloneRuntime, request: Request
+) -> None:
     ip = (request.client.host if request.client else "unknown") or "unknown"
     login_attempts = dict(config.web_settings.get("login_attempts") or {})
     if ip in login_attempts:
         login_attempts.pop(ip, None)
         config.web_settings["login_attempts"] = login_attempts
+        _persist_web_settings(config)
+
+
+def _persist_web_settings(config: AppConfig | StandaloneRuntime) -> None:
+    if isinstance(config, StandaloneRuntime):
+        _save_runtime_settings(config)
+    else:
         save_json(config.paths.web_settings_file, config.web_settings)
 
 
@@ -854,6 +889,151 @@ class DisabledBridgeClient:
     delete = _disabled
 
 
+def _build_standalone_app(
+    *,
+    web_dist: str | Path | None,
+    runtime_dir: str | Path | None,
+    account_session_factory: sessionmaker[Session] | None,
+    account_bridge: BridgeProtocol | None,
+    internal_event_token: str | None,
+    account_reconcile_interval_seconds: float,
+) -> FastAPI:
+    """Build the production API without loading Hermes profile/state/router objects."""
+    runtime = StandaloneRuntime.from_env(
+        runtime_dir, internal_event_token=internal_event_token
+    )
+    factory = account_session_factory or create_session_factory(create_engine())
+    bridge = account_bridge or BridgeClient(
+        base_url=os.getenv("WHATSAPP_BRIDGE_V2_URL", "http://127.0.0.1:3100"),
+        internal_token=runtime.internal_event_token,
+    )
+    reconciler = AccountReconciler(factory, bridge)
+    runtime_ai_mgr = setup_ai_runtime_settings(runtime.ai_settings)
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI):
+        async def reconcile_loop() -> None:
+            while True:
+                try:
+                    await asyncio.to_thread(reconciler.reconcile_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("WhatsApp account reconciliation round failed")
+                await asyncio.sleep(account_reconcile_interval_seconds)
+
+        task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
+        app_instance.state.account_reconciler_task = task
+        try:
+            yield
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
+    app.state.runtime_mode = "standalone"
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(create_accounts_router(factory, bridge))
+    app.include_router(create_conversations_router(factory, bridge))
+    app.include_router(
+        create_whatsapp_events_router(factory, runtime.internal_event_token)
+    )
+    app.include_router(create_personas_router(runtime, factory))
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request.state.request_id = (
+            request.headers.get("X-Request-ID") or f"req_{secrets.token_hex(16)}"
+        )
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.state.request_id
+        return response
+
+    @app.middleware("http")
+    async def auth_guard(request: Request, call_next):
+        if request.method == "OPTIONS" or not request.url.path.startswith("/api"):
+            return await call_next(request)
+        if request.url.path in {"/api/health", "/api/login"}:
+            return await call_next(request)
+        if not _is_authenticated(runtime, request):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+    @app.get("/api/health")
+    def health() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "runtime_mode": "standalone",
+            "ts": time.time(),
+            "login_enabled": True,
+        }
+
+    @app.post("/api/login")
+    def login(request: Request, payload: LoginRequest) -> dict[str, Any]:
+        _check_login_rate_limit(runtime, request)
+        stored = runtime.web_settings.get("auth") or {}
+        if not verify_password(stored, payload.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
+        _clear_login_attempts(runtime, request)
+        token = secrets.token_urlsafe(24)
+        ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
+        sessions = dict(runtime.web_settings.get("sessions") or {})
+        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        runtime.web_settings["sessions"] = sessions
+        _save_runtime_settings(runtime)
+        return {"success": True, "session_token": token, "expires_in": ttl}
+
+    @app.post("/api/logout")
+    def logout(request: Request) -> dict[str, Any]:
+        sessions = dict(runtime.web_settings.get("sessions") or {})
+        sessions.pop(request.headers.get("x-session-token", ""), None)
+        runtime.web_settings["sessions"] = sessions
+        _save_runtime_settings(runtime)
+        return {"success": True}
+
+    @app.get("/api/v1/ai/settings")
+    def ai_settings() -> dict[str, Any]:
+        return runtime_ai_mgr.to_safe_dict()
+
+    @app.api_route(
+        "/api/{legacy_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
+    )
+    def legacy_api_disabled(legacy_path: str) -> JSONResponse:
+        return JSONResponse(
+            {
+                "code": "legacy_api_disabled",
+                "message": "This endpoint is unavailable in standalone runtime; use /api/v1 APIs.",
+            },
+            status_code=410,
+        )
+
+    frontend_dist = _resolve_frontend_dist(web_dist)
+    if frontend_dist:
+        assets = frontend_dist / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def spa(path: str) -> FileResponse:
+            return FileResponse(frontend_dist / "index.html")
+
+    return app
+
+
+def _save_runtime_settings(runtime: StandaloneRuntime) -> None:
+    import json
+
+    runtime.paths.web_settings_file.write_text(
+        json.dumps(runtime.web_settings, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def build_app(
     profile: str | Path | None = None,
     web_dist: str | Path | None = None,
@@ -861,7 +1041,21 @@ def build_app(
     account_bridge: BridgeProtocol | None = None,
     internal_event_token: str | None = None,
     account_reconcile_interval_seconds: float = 45.0,
+    *,
+    runtime_mode: str = "legacy",
+    runtime_dir: str | Path | None = None,
 ) -> FastAPI:
+    if runtime_mode == "standalone":
+        return _build_standalone_app(
+            web_dist=web_dist,
+            runtime_dir=runtime_dir,
+            account_session_factory=account_session_factory,
+            account_bridge=account_bridge,
+            internal_event_token=internal_event_token,
+            account_reconcile_interval_seconds=account_reconcile_interval_seconds,
+        )
+    if runtime_mode != "legacy":
+        raise ValueError("runtime_mode must be 'legacy' or 'standalone'")
     config = AppConfig.from_profile(profile)
     db = StateDB(config.paths.db)
 
@@ -885,6 +1079,11 @@ def build_app(
         pass
 
     # ---------------- Plugin center (declared up-front so other endpoints can read flags) ----------------
+    # Each plugin entry exposes enough metadata for the UI to decide whether it can be
+    # turned on right now, why not (when applicable), and what the runtime reports when
+    # it is on. `available` is the gate for the toggle button; `status_when_on` is shown
+    # in the detail row once the plugin is enabled. `unavailable_reason` is shown only
+    # when `available` is false and explains the missing hook.
     PLUGIN_CATALOG = [
         {
             "id": "auto_translate",
@@ -893,7 +1092,9 @@ def build_app(
             "category": "messaging",
             "builtin": True,
             "hooks": ["/api/conversations/{user_id}/messages", "/api/dashboard"],
-            "status_when_on": "实时翻译开启",
+            "available": True,
+            "unavailable_reason": None,
+            "status_when_on": "实时翻译开启：所有非中文入站消息将自动翻译",
         },
         {
             "id": "quick_reply",
@@ -902,7 +1103,20 @@ def build_app(
             "category": "messaging",
             "builtin": True,
             "hooks": ["/api/reply?preview_only=true"],
-            "status_when_on": "预览生成已启用",
+            "available": True,
+            "unavailable_reason": None,
+            "status_when_on": "预览生成已启用：聊天页可即时生成 AI 改写建议",
+        },
+        {
+            "id": "persona_styles",
+            "name": "Persona styles",
+            "description": "Controlled built-in personas for smart replies.",
+            "category": "messaging",
+            "builtin": True,
+            "hooks": ["GET /api/personas", "POST /api/personas/{persona_id}/assign"],
+            "available": True,
+            "unavailable_reason": None,
+            "status_when_on": "受控人设已启用：可分配“童锦程·直球关系顾问”等风格",
         },
         {
             "id": "broadcast",
@@ -911,7 +1125,9 @@ def build_app(
             "category": "productivity",
             "builtin": True,
             "hooks": ["POST /api/broadcast"],
-            "status_when_on": "群发接口可用",
+            "available": False,
+            "unavailable_reason": "群发后台 Worker 尚未接通（SDD-P0-07）；接口写入端暂时返回 503。",
+            "status_when_on": "群发任务中心可用",
         },
         {
             "id": "schedule",
@@ -920,7 +1136,9 @@ def build_app(
             "category": "productivity",
             "builtin": True,
             "hooks": ["GET/POST/DELETE /api/schedule"],
-            "status_when_on": "可创建/查看/删除定时任务",
+            "available": False,
+            "unavailable_reason": "定时任务 Worker 尚未接通（SDD-P0-06）；接口写入端暂时返回 503。",
+            "status_when_on": "定时任务中心可用",
         },
         {
             "id": "memory",
@@ -929,7 +1147,9 @@ def build_app(
             "category": "memory",
             "builtin": True,
             "hooks": ["GET /api/memory", "POST /api/memory/refresh"],
-            "status_when_on": "画像会随对话自动更新",
+            "available": True,
+            "unavailable_reason": None,
+            "status_when_on": "画像会随对话自动更新（受 worker 链路限制）",
         },
         {
             "id": "voice_tts",
@@ -938,7 +1158,9 @@ def build_app(
             "category": "productivity",
             "builtin": True,
             "hooks": [],
-            "status_when_on": "需要本地 TTS 客户端配合",
+            "available": False,
+            "unavailable_reason": "需要本地 TTS 客户端配合，尚未接入。",
+            "status_when_on": "TTS 已启用",
         },
         {
             "id": "media_pack",
@@ -947,7 +1169,9 @@ def build_app(
             "category": "media",
             "builtin": True,
             "hooks": [],
-            "status_when_on": "媒体类型回复需配置 Hermes 端",
+            "available": False,
+            "unavailable_reason": "媒体处理依赖 Hermes runtime 端能力，尚未接通。",
+            "status_when_on": "媒体回复已启用",
         },
         {
             "id": "analytics",
@@ -956,7 +1180,9 @@ def build_app(
             "category": "analytics",
             "builtin": True,
             "hooks": ["GET /api/dashboard"],
-            "status_when_on": "总览卡片展示插件开关数",
+            "available": True,
+            "unavailable_reason": None,
+            "status_when_on": "统计卡片展示真实数据：未读、待回复、已发送、平均回复时长",
         },
         {
             "id": "auto_tag",
@@ -965,7 +1191,9 @@ def build_app(
             "category": "messaging",
             "builtin": True,
             "hooks": [],
-            "status_when_on": "基于对话主题自动加标签",
+            "available": False,
+            "unavailable_reason": "自动标签依赖对话主题分类 Worker，尚未接通。",
+            "status_when_on": "自动标签已启用",
         },
         {
             "id": "followup",
@@ -974,15 +1202,13 @@ def build_app(
             "category": "productivity",
             "builtin": True,
             "hooks": [],
-            "status_when_on": "长时间无回复时给出跟进建议",
+            "available": False,
+            "unavailable_reason": "跟进提醒依赖静默检测 Worker，尚未接通。",
+            "status_when_on": "跟进提醒已启用",
         },
     ]
 
-    # 只有已经存在真实后端/工作链路的插件才允许标记为可用。
-    # schedule/broadcast 当前仅保存或同步执行，尚无可靠 Worker，不能冒充完整插件。
-    AVAILABLE_PLUGIN_IDS = {"auto_translate", "quick_reply", "memory", "analytics"}
-    for plugin in PLUGIN_CATALOG:
-        plugin["available"] = plugin["id"] in AVAILABLE_PLUGIN_IDS
+    {p["id"] for p in PLUGIN_CATALOG if p.get("available")}
 
     def _plugin_state() -> dict[str, bool]:
         state = config.web_settings.get("plugins")
@@ -1047,6 +1273,9 @@ def build_app(
     app.include_router(
         create_conversations_router(resolved_account_factory, resolved_account_bridge)
     )
+    app.include_router(
+        create_personas_router(config)
+    )  # legacy uses AppConfig; personas router only needs .web_settings
     resolved_event_token = (
         internal_event_token
         if internal_event_token is not None
@@ -1120,9 +1349,29 @@ def build_app(
     @app.get("/api/dashboard")
     def dashboard() -> dict[str, Any]:
         conversations = _compute_conversation_summaries(config, db)
+        total_unread = sum(
+            int(item.get("unread_count", 0) or 0) for item in conversations
+        )
+        pending_replies = sum(
+            1
+            for item in conversations
+            if item.get("last_message_direction") == "inbound"
+            or (not item.get("last_message_direction") and not item.get("replied"))
+        )
+        sent_messages = sum(
+            int(item.get("sent_count", 0) or 0) for item in conversations
+        )
+        avg_response = _compute_avg_response_seconds(conversations)
         return {
-            "stats": _dashboard_stats(conversations, config),
+            "stats": {
+                **_dashboard_stats(conversations, config),
+                "unread_messages": total_unread,
+                "pending_replies": pending_replies,
+                "sent_messages": sent_messages,
+                "avg_response_seconds": avg_response,
+            },
             "recent_conversations": conversations[:8],
+            "plugins_enabled": sum(1 for flag in _plugin_state().values() if flag),
         }
 
     @app.get("/api/conversations")
@@ -1330,12 +1579,13 @@ def build_app(
                 "message": prepared["rewrite"].message,
                 "used_fallback": prepared["rewrite"].used_fallback,
                 "error": prepared["rewrite"].error,
+                "persona": prepared["rewrite"].persona,
             },
             "mode": request.mode,
             "source_text": request.message,
             "memory_markdown": prepared["memory_markdown"][:2000],
             "profile_sidecar": prepared.get("profile_sidecar") or {},
-            "reply_overrides": prepared.get("reply_overrides") or {},
+            "persona": prepared["rewrite"].persona,
         }
         if request.preview_only:
             if prepared["rewrite"].error:
@@ -1706,94 +1956,35 @@ def build_app(
         return {"items": items}
 
     @app.post("/api/schedule")
-    def add_schedule(request: ScheduleRequest) -> dict[str, Any]:
-        if not request.target or not request.message:
-            raise HTTPException(status_code=400, detail="target and message required")
-        if request.run_at <= 0:
-            raise HTTPException(
-                status_code=400, detail="run_at must be a future timestamp"
-            )
-        items = list(config.web_settings.get("schedule") or [])
-        entry = {
-            "id": f"sch-{int(time.time() * 1000)}",
-            "target": request.target,
-            "message": request.message,
-            "run_at": float(request.run_at),
-            "mode": request.mode,
-            "use_memory": request.use_memory,
-            "status": "pending",
-            "created_at": time.time(),
-        }
-        items.append(entry)
-        config.web_settings["schedule"] = items
-        save_json(config.paths.web_settings_file, config.web_settings)
-        return {"success": True, "item": entry, "items": items}
+    async def add_schedule(request: ScheduleRequest) -> dict[str, Any]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "scheduler_not_connected",
+                "message": "Scheduled send is unavailable until a background worker is connected",
+            },
+        )
 
     @app.delete("/api/schedule/{schedule_id}")
-    def delete_schedule(schedule_id: str) -> dict[str, Any]:
-        current = list(config.web_settings.get("schedule") or [])
-        if not any(
-            str(i.get("id")) == schedule_id for i in current if isinstance(i, dict)
-        ):
-            raise HTTPException(status_code=404, detail="Scheduled message not found")
-        items = [i for i in current if str(i.get("id")) != schedule_id]
-        config.web_settings["schedule"] = items
-        save_json(config.paths.web_settings_file, config.web_settings)
-        return {"success": True, "items": items}
+    async def delete_schedule(schedule_id: str) -> dict[str, Any]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "scheduler_not_connected",
+                "message": "Scheduled send is unavailable until a background worker is connected",
+            },
+        )
 
     # ---------------- Broadcast (mass send) ----------------
     @app.post("/api/broadcast")
-    def broadcast(request: BroadcastRequest) -> dict[str, Any]:
-        if not request.targets:
-            raise HTTPException(status_code=400, detail="targets required")
-        if not request.message:
-            raise HTTPException(status_code=400, detail="message required")
-        results = []
-        for target in request.targets:
-            try:
-                prepared = router.prepare_reply(target, request.message, request.mode)
-                sent = router.send_prepared_reply(
-                    prepared["target"],
-                    prepared["rewrite"],
-                    request.message,
-                    request.mode,
-                )
-                ok = sent.get("success") is True
-                results.append(
-                    {
-                        "target": target,
-                        "success": ok,
-                        "message": sent.get("rewrite", {}).get("message")
-                        if ok
-                        else None,
-                        "error": None if ok else "Message delivery failed",
-                        "retryable": not ok,
-                    }
-                )
-            except Exception as exc:  # noqa: BLE001
-                results.append({"target": target, "success": False, "error": str(exc)})
-        log = list(config.web_settings.get("broadcast_log") or [])
-        entry = {
-            "id": f"bc-{int(time.time() * 1000)}",
-            "targets": request.targets,
-            "message": request.message,
-            "mode": request.mode,
-            "results": results,
-            "created_at": time.time(),
-        }
-        log.append(entry)
-        config.web_settings["broadcast_log"] = log[-30:]
-        save_json(config.paths.web_settings_file, config.web_settings)
-        succeeded = sum(1 for item in results if item.get("success") is True)
-        failed = len(results) - succeeded
-        return {
-            "success": failed == 0,
-            "partial_success": succeeded > 0 and failed > 0,
-            "total": len(results),
-            "succeeded": succeeded,
-            "failed": failed,
-            "entry": entry,
-        }
+    async def broadcast(request: BroadcastRequest) -> dict[str, Any]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "broadcast_not_connected",
+                "message": "Mass broadcast is unavailable until a background worker is connected",
+            },
+        )
 
     @app.get("/api/broadcast")
     def list_broadcast() -> dict[str, Any]:
@@ -1819,6 +2010,40 @@ def build_app(
             for p in PLUGIN_CATALOG
         ]
         return {"items": items}
+
+    @app.get("/api/personas")
+    def personas() -> dict[str, Any]:
+        available = _plugin_flag("persona_styles")
+        return {"items": list_personas() if available else [], "available": available}
+
+    @app.post("/api/personas/{persona_id}/assign")
+    def assign_persona(
+        persona_id: str, request: PersonaAssignmentRequest
+    ) -> dict[str, Any]:
+        if not _plugin_flag("persona_styles"):
+            raise HTTPException(
+                status_code=409, detail="Persona styles plugin is disabled"
+            )
+        target = request.target.strip()
+        if not target:
+            raise HTTPException(status_code=400, detail="Target is required")
+        if persona_id != "default" and resolve_persona(persona_id) is None:
+            raise HTTPException(status_code=404, detail="Unknown persona")
+        reply = config.web_settings.setdefault("reply", {})
+        overrides = reply.setdefault("user_overrides", {})
+        override = dict(overrides.get(target) or {})
+        if request.clear or persona_id == "default":
+            override.pop("persona_id", None)
+        else:
+            override["persona_id"] = persona_id
+        overrides[target] = override
+        save_json(config.paths.web_settings_file, config.web_settings)
+        persona = resolve_persona(override.get("persona_id"))
+        return {
+            "success": True,
+            "target": target,
+            "persona": persona.ui_metadata() if persona else None,
+        }
 
     @app.post("/api/plugins/toggle")
     def toggle_plugin(request: PluginToggleRequest) -> dict[str, Any]:

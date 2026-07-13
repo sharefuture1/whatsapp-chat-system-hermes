@@ -1,0 +1,19 @@
+[Unit]
+Description=WhatsApp Chat System Bridge V2
+After=network-online.target whatsapp-chat-system.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/whatsapp-chat-system/bridge
+EnvironmentFile=-/etc/whatsapp-chat-system/bridge.env
+# bridge.env supplies WHATSAPP_BRIDGE_INTERNAL_TOKEN and optional event tuning only.
+Environment=BRIDGE_HOST=127.0.0.1
+Environment=BRIDGE_PORT=3100
+Environment=BRIDGE_RUNTIME_ROOT=/var/lib/whatsapp-chat-system/bridge
+ExecStart=/usr/bin/node /opt/whatsapp-chat-system/bridge/src/index.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
