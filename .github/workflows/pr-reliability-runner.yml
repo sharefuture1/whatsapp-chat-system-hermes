@@ -1,0 +1,85 @@
+name: Restricted Reliability PR Runner
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reliability-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repair-and-test:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/standalone-reliability-ux-20260713'
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Vientiane
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/standalone-reliability-ux-20260713
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            bridge/package-lock.json
+
+      - name: Extract and apply approved patch
+        shell: bash
+        run: |
+          awk '
+            /python - <<.PY./ { capture=1; next }
+            capture && /^          PY$/ { capture=0; exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/reliability-fix.yml > /tmp/reliability_patch.py
+          python /tmp/reliability_patch.py
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e . pytest
+
+      - name: Python tests
+        run: pytest -q
+
+      - name: Web tests and production build
+        run: |
+          npm ci --prefix web
+          node --test web/tests/*.test.js
+          npm run build --prefix web
+
+      - name: Bridge tests and lint
+        run: |
+          npm ci --prefix bridge
+          npm test --prefix bridge
+          npm run lint --prefix bridge
+
+      - name: Diff quality
+        run: git diff --check
+
+      - name: Commit tested fixes
+        shell: bash
+        run: |
+          git restore --worktree --staged web/dist 2>/dev/null || true
+          git clean -fd web/dist 2>/dev/null || true
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src web tests docs
+          git commit -m 'fix: improve standalone reliability and chat UX [QA-001]'
+          git push origin HEAD:fix/standalone-reliability-ux-20260713
