@@ -58,6 +58,8 @@ jobs:
           code=$?
           cat standalone-apply.log
           exit "$code"
+      - name: Update outbox test contract
+        run: python scripts/update-outbox-test-contract.py
       - name: Upload standalone patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,6 +81,7 @@ jobs:
             src/whatsapp_chat_system/api/v1/accounts.py
             src/whatsapp_chat_system/standalone_api.py
             src/whatsapp_chat_system/bridge/client.py
+            tests/test_accounts_api.py
           )
           ruff check --fix "${files[@]}"
           ruff format "${files[@]}"
