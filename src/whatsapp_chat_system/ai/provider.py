@@ -41,7 +41,9 @@ class AIProviderError(Exception):
                 "message": str(self),
                 "retryable": self.retryable,
                 "request_id": self.request_id,
-                "details": {"status_code": self.status_code} if self.status_code else {},
+                "details": {"status_code": self.status_code}
+                if self.status_code
+                else {},
             }
         }
 
@@ -209,7 +211,9 @@ class WendingAIProvider:
                     content=content,
                     model=str(data.get("model") or model),
                     request_id=str(data.get("id") or request_id or "") or None,
-                    usage=data.get("usage") if isinstance(data.get("usage"), dict) else {},
+                    usage=data.get("usage")
+                    if isinstance(data.get("usage"), dict)
+                    else {},
                     latency_ms=max(0, int((monotonic() - started) * 1000)),
                 )
 

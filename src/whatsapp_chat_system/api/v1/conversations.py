@@ -359,11 +359,14 @@ def create_conversations_router(
             }
             for message in rows
         ]
-        total = session.scalar(
-            select(func.count(Message.id)).where(
-                Message.conversation_id == conversation.id
+        total = (
+            session.scalar(
+                select(func.count(Message.id)).where(
+                    Message.conversation_id == conversation.id
+                )
             )
-        ) or 0
+            or 0
+        )
         return {
             "conversation_id": conversation.id,
             "account_id": conversation.account_id,
