@@ -116,11 +116,21 @@ class BridgeClient:
         suffix = '?delete_session=true' if delete_session else '?delete_session=false'
         return self._request('DELETE', f'/accounts/{self._account_path(account_id)}{suffix}')
 
-    def send(self, account_id: str, *, chat_id: str, text: str) -> dict[str, Any]:
+    def send(
+        self,
+        account_id: str,
+        *,
+        chat_id: str,
+        text: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        body = {'chat_id': chat_id, 'text': text}
+        if idempotency_key:
+            body['idempotency_key'] = idempotency_key
         payload = self._request(
             'POST',
             f'/accounts/{self._account_path(account_id)}/send',
-            json={'chat_id': chat_id, 'text': text},
+            json=body,
         )
         message_id = payload.get('message_id')
         if payload.get('success') is not True or not isinstance(message_id, str) or not message_id.strip():
