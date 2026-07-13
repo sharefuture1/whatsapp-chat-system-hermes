@@ -81,38 +81,17 @@ jobs:
           node --test web/tests/*.test.js
           npm run build --prefix web
       - name: Bridge tests and lint
-        shell: bash
         run: |
-          set +e
-          npm ci --prefix bridge > standalone-bridge.log 2>&1
-          install_code=$?
-          if [ "$install_code" -eq 0 ]; then
-            npm test --prefix bridge >> standalone-bridge.log 2>&1
-            test_code=$?
-            npm run lint --prefix bridge >> standalone-bridge.log 2>&1
-            lint_code=$?
-          else
-            test_code=1
-            lint_code=1
-          fi
-          cat standalone-bridge.log
-          if [ "$install_code" -ne 0 ] || [ "$test_code" -ne 0 ] || [ "$lint_code" -ne 0 ]; then
-            exit 1
-          fi
-      - name: Upload Bridge diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: standalone-bridge-diagnostics
-          path: standalone-bridge.log
-          if-no-files-found: ignore
-          retention-days: 7
+          npm ci --prefix bridge
+          npm test --prefix bridge
+          npm run lint --prefix bridge
       - name: Diff quality
         run: git diff --check
       - name: Commit verified implementation
         run: |
           git restore --worktree --staged web/dist 2>/dev/null || true
           git clean -fd web/dist 2>/dev/null || true
+          git restore .github/workflows/ci.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
