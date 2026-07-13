@@ -33,6 +33,31 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             bridge/package-lock.json
+      - name: Normalize patch anchors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/apply-standalone-mainline.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '"""       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)\n        setMessages(prev => prev.map(m => m.message_id === tmpId ? {\n',
+              '"""      const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)\n      setMessages(prev => prev.map(m => m.message_id === tmpId ? {\n',
+          )
+          text = text.replace(
+              '"""       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)\n        const queued = Boolean(data?.queued) || data?.status === \'queued\'\n        setMessages(prev => prev.map(m => m.message_id === tmpId ? {\n',
+              '"""      const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)\n      const queued = Boolean(data?.queued) || data?.status === \'queued\'\n      setMessages(prev => prev.map(m => m.message_id === tmpId ? {\n',
+          )
+          text = text.replace(
+              '"         pending: false,\\n         failed: false,\\n         sent: true,\\n"',
+              '"        pending: false,\\n        failed: false,\\n        sent: true,\\n"',
+          )
+          text = text.replace(
+              '"         pending: queued,\\n         failed: false,\\n         sent: !queued,\\n         status: data?.status || (queued ? \'queued\' : \'sent\'),\\n"',
+              '"        pending: queued,\\n        failed: false,\\n        sent: !queued,\\n        status: data?.status || (queued ? \'queued\' : \'sent\'),\\n"',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Apply standalone mainline patch
         shell: bash
         run: |
