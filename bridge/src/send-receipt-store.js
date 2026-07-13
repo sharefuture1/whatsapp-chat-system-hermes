@@ -50,7 +50,8 @@ export class SendReceiptStore {
     this.entries.delete(normalized);
     this.entries.set(normalized, { message_id: messageId, created_at: Date.now() });
     this.#trim();
-    this.writeWork = this.writeWork.then(() => this.#flush());
+    const prior = this.writeWork.catch(() => undefined);
+    this.writeWork = prior.then(() => this.#flush());
     await this.writeWork;
   }
 
