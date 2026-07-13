@@ -198,7 +198,7 @@ class WendingAIProvider:
                 )
 
             error = _http_error(response.status_code, request_id)
-            if error.retryable and attempt < self.settings.max_retries:
+            if error.retryable and attempt < max_retries:
                 self.sleep(_retry_delay(attempt))
                 continue
             raise error
