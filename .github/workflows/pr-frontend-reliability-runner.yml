@@ -1,0 +1,79 @@
+name: Restricted Frontend Reliability Runner
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: frontend-reliability-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  patch-test-commit:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'fix/standalone-reliability-ux-20260713'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/standalone-reliability-ux-20260713
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Apply patch and verify frontend
+        id: verify
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            awk '
+              /python - <<.PY./ { capture=1; next }
+              capture && /^          PY$/ { capture=0; exit }
+              capture { sub(/^          /, ""); print }
+            ' .github/workflows/frontend-reliability-patch.yml > /tmp/frontend_reliability_patch.py
+            test -s /tmp/frontend_reliability_patch.py
+            python /tmp/frontend_reliability_patch.py
+            npm ci --prefix web
+            node --test web/tests/*.test.js
+            npm run build --prefix web
+            git diff --check
+          } 2>&1 | tee /tmp/frontend-reliability.log
+      - name: Commit verified frontend fixes
+        if: steps.verify.outcome == 'success'
+        shell: bash
+        run: |
+          git restore --worktree --staged web/dist 2>/dev/null || true
+          git clean -fd web/dist 2>/dev/null || true
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/src/App.jsx web/src/components/ChatPane.jsx web/src/dateTime.js web/tests/dateTime.test.js
+          git commit -m 'fix(web): improve standalone pagination and migration resilience [UX-APP-015]'
+          git push origin HEAD:fix/standalone-reliability-ux-20260713
+      - name: Report failure
+        if: steps.verify.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          {
+            echo '前端可靠性补丁未提交，Runner 验证失败。末尾诊断：'
+            echo
+            echo '```text'
+            tail -n 80 /tmp/frontend-reliability.log || true
+            echo '```'
+          } > /tmp/comment.md
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
+          exit 1
