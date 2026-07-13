@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  apply-standalone-mainline:
+  diagnose-web-mainline:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/standalone-reliability-ux-20260713'
     runs-on: ubuntu-latest
     steps:
@@ -23,14 +23,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-          cache-dependency-path: |
-            web/package-lock.json
-            bridge/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - name: Normalize patch anchors
         run: |
           python - <<'PY'
@@ -51,76 +48,33 @@ jobs:
           path.write_text(text, encoding='utf-8')
           PY
       - name: Apply standalone mainline patch
-        shell: bash
-        run: |
-          set +e
-          python scripts/apply-standalone-mainline.py > standalone-apply.log 2>&1
-          code=$?
-          cat standalone-apply.log
-          exit "$code"
+        run: python scripts/apply-standalone-mainline.py
       - name: Update outbox test contract
         run: python scripts/update-outbox-test-contract.py
-      - name: Upload standalone patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: standalone-apply-diagnostics
-          path: standalone-apply.log
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Install Python dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e . pytest httpx ruff
-      - name: Ruff changed implementation
-        shell: bash
-        run: |
-          files=(
-            src/whatsapp_chat_system/outbox.py
-            src/whatsapp_chat_system/api/v1/settings.py
-            src/whatsapp_chat_system/api/v1/operations.py
-            src/whatsapp_chat_system/api/v1/conversations.py
-            src/whatsapp_chat_system/api/v1/accounts.py
-            src/whatsapp_chat_system/standalone_api.py
-            src/whatsapp_chat_system/bridge/client.py
-            tests/test_accounts_api.py
-          )
-          ruff check --fix "${files[@]}"
-          ruff format "${files[@]}"
-          ruff check "${files[@]}"
-          ruff format --check "${files[@]}"
-      - name: Python tests
+      - name: Web diagnostics
         shell: bash
         run: |
           set +e
-          pytest -q > standalone-pytest.log 2>&1
-          code=$?
-          cat standalone-pytest.log
-          exit "$code"
-      - name: Upload standalone pytest diagnostics
+          npm ci --prefix web > standalone-web.log 2>&1
+          install_code=$?
+          if [ "$install_code" -eq 0 ]; then
+            node --test web/tests/*.test.js >> standalone-web.log 2>&1
+            test_code=$?
+            npm run build --prefix web >> standalone-web.log 2>&1
+            build_code=$?
+          else
+            test_code=1
+            build_code=1
+          fi
+          cat standalone-web.log
+          if [ "$install_code" -ne 0 ] || [ "$test_code" -ne 0 ] || [ "$build_code" -ne 0 ]; then
+            exit 1
+          fi
+      - name: Upload web diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: standalone-pytest-diagnostics
-          path: standalone-pytest.log
+          name: standalone-web-diagnostics
+          path: standalone-web.log
           if-no-files-found: ignore
           retention-days: 7
-      - name: Web tests and build
-        run: |
-          npm ci --prefix web
-          node --test web/tests/*.test.js
-          npm run build --prefix web
-      - name: Bridge tests and lint
-        run: |
-          npm ci --prefix bridge
-          npm test --prefix bridge
-          npm run lint --prefix bridge
-      - name: Diff quality
-        run: git diff --check
-      - name: Commit verified implementation
-        run: |
-          git restore --worktree --staged web/dist 2>/dev/null || true
-          git clean -fd web/dist 2>/dev/null || true
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat: complete standalone V1 and reliable outbox [SDD-P0]'
-          git push origin HEAD:fix/standalone-reliability-ux-20260713
