@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -289,7 +289,7 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        conversation.deleted_at = datetime.utcnow()
+        conversation.deleted_at = datetime.now(timezone.utc)
         session.commit()
         return {
             "success": True,
@@ -302,19 +302,44 @@ def create_conversations_router(
     def conversation_messages(
         conversation_id: str,
         limit: int = Query(default=80, ge=1, le=200),
+        before_occurred_at: datetime | None = Query(default=None),
+        before_id: str | None = Query(default=None),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        rows = session.scalars(
-            select(Message)
-            .where(Message.conversation_id == conversation.id)
-            .order_by(
-                Message.occurred_at.desc(), Message.created_at.desc(), Message.id.desc()
+        if before_id and before_occurred_at is None:
+            raise HTTPException(
+                status_code=422,
+                detail="before_id requires before_occurred_at",
             )
-            .limit(limit)
+        if before_occurred_at is not None and before_occurred_at.tzinfo is None:
+            before_occurred_at = before_occurred_at.replace(tzinfo=timezone.utc)
+
+        sort_time = func.coalesce(Message.occurred_at, Message.created_at)
+        statement = select(Message).where(Message.conversation_id == conversation.id)
+        if before_occurred_at is not None:
+            cursor_clause = sort_time < before_occurred_at
+            if before_id:
+                cursor_clause = or_(
+                    cursor_clause,
+                    and_(sort_time == before_occurred_at, Message.id < before_id),
+                )
+            statement = statement.where(cursor_clause)
+
+        rows = session.scalars(
+            statement.order_by(sort_time.desc(), Message.id.desc()).limit(limit + 1)
         ).all()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = None
+        if has_more and rows:
+            oldest = rows[-1]
+            next_cursor = {
+                "before_occurred_at": _iso(oldest.occurred_at or oldest.created_at),
+                "before_id": oldest.id,
+            }
         rows.reverse()
         messages = [
             {
@@ -334,13 +359,19 @@ def create_conversations_router(
             }
             for message in rows
         ]
+        total = session.scalar(
+            select(func.count(Message.id)).where(
+                Message.conversation_id == conversation.id
+            )
+        ) or 0
         return {
             "conversation_id": conversation.id,
             "account_id": conversation.account_id,
             "user_id": conversation.remote_jid,
             "messages": messages,
-            "total_messages": len(messages),
-            "has_more": False,
+            "total_messages": total,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
         }
 
     @router.post("/conversations/{conversation_id}/reply")
@@ -359,7 +390,7 @@ def create_conversations_router(
             chat_id=conversation.remote_jid,
             text=payload.message,
         )
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         message = Message(
             account_id=conversation.account_id,
             conversation_id=conversation.id,
