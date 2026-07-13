@@ -85,7 +85,21 @@ jobs:
           ruff check "${files[@]}"
           ruff format --check "${files[@]}"
       - name: Python tests
-        run: pytest -q
+        shell: bash
+        run: |
+          set +e
+          pytest -q > standalone-pytest.log 2>&1
+          code=$?
+          cat standalone-pytest.log
+          exit "$code"
+      - name: Upload standalone pytest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-pytest-diagnostics
+          path: standalone-pytest.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Web tests and build
         run: |
           npm ci --prefix web
