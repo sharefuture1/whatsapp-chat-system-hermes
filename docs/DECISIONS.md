@@ -1,4 +1,11 @@
-# DECISIONS.md — 架构决策记录
+## 2026-07-14: Standalone 插件 API 与 AI runtime 解耦
+
+**决策**：插件中心正式使用 `/api/v1/plugins`，不再依赖 standalone 下不存在的 legacy `/api/plugins`；插件 catalog 由 V1 后端返回，`available=false` 是硬能力门禁，启用请求返回结构化 409。Standalone AI runtime manager 放在独立 runtime 模块中，禁止通过导入 Legacy `web_api` 传递配置。
+
+**原因**：此前生产插件中心调用 `/api/plugins` 会命中前端壳而非 JSON API；Standalone 通过 Legacy `web_api` 初始化 AI 运行时会违反独立化边界。统一 V1 路径和本地 runtime manager 后，插件状态、AI 密钥热读取与 standalone 架构边界一致。
+
+**关联规格**：`SDD-P1-06`、`SDD-P0-01A`、`FR-PLG-007/008`。
+
 
 ## 2026-07-14: 全局 AI 设置页测试连接不走 AIService 中间层，直接调用 Provider
 

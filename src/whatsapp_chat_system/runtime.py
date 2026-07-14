@@ -97,6 +97,62 @@ class StandaloneRuntime:
         )
 
 
+class StandaloneAISettingsManager:
+    """Standalone-local live AI settings, independent of Legacy web_api."""
+
+    def __init__(self, base: AISettings) -> None:
+        self._base = base
+        self._model: str | None = None
+        self._base_url: str | None = None
+        self._ciphertext: str | None = None
+        self._timeout: int | None = None
+        self._retries: int | None = None
+
+    def load_from_db(self) -> None:
+        from .db import create_engine, create_session_factory
+        from .db.models import AIRuntimeSetting
+
+        try:
+            factory = create_session_factory(create_engine())
+            with factory() as session:
+                row = session.get(AIRuntimeSetting, "global")
+                if row is None:
+                    return
+                self._model = row.default_model or None
+                self._base_url = row.base_url or None
+                self._ciphertext = row.api_key_ciphertext or None
+                self._timeout = row.timeout_seconds or None
+                self._retries = row.max_retries
+        except Exception:
+            return
+
+    @property
+    def effective_api_key(self) -> str:
+        if self._ciphertext:
+            try:
+                from .ai.crypto import decrypt_api_key
+                return decrypt_api_key(self._ciphertext)
+            except Exception:
+                return ""
+        return self._base.api_key
+
+    @property
+    def effective_model(self) -> str:
+        return self._model or self._base.default_model
+
+    @property
+    def effective_base_url(self) -> str:
+        return self._base_url or self._base.base_url
+
+    @property
+    def effective_timeout(self) -> int:
+        return self._timeout or self._base.timeout_seconds
+
+    @property
+    def effective_retries(self) -> int:
+        return self._retries if self._retries is not None else self._base.max_retries
+
+
 def _resolve_runtime_dir(runtime_dir: str | Path | None) -> Path:
     raw = (
         str(runtime_dir)

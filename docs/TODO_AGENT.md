@@ -135,6 +135,11 @@
   - Legacy 数字 ID/V2 UUID 均支持；失败显示配置或 Provider 错误
   - 真实老挝语→中文 AI 探针通过
 
+- [x] **插件中心 V1 API 与前端接线**
+  - Standalone `/api/v1/plugins` 返回真实 catalog、available、reason、status、hooks
+  - 不可用插件固定返回 409，前端开关禁用；可用插件 toggle 可持久化
+  - 四语言 key 集合与重复 key 门禁通过
+
 - [ ] **自动翻译异步化**
   - 当前读取消息仍可能同步等待模型；迁移为任务队列、缓存回填、失败重试和实时更新
 

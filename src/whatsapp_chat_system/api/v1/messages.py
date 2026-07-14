@@ -71,8 +71,12 @@ def create_messages_router() -> APIRouter:
                 self.ai_settings = ai_settings
 
         config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings)
-        # Pass runtime manager so provider uses live DB-backed credentials
-        worker = Rewriter(config, lambda *args, **kwargs: None, runtime_manager=runtime.ai_settings)
+        # Pass the standalone runtime manager so provider uses live DB credentials.
+        worker = Rewriter(
+            config,
+            lambda *args, **kwargs: None,
+            runtime_manager=getattr(request.app.state, "ai_settings_manager", None),
+        )
         result = worker.translate_to_zh_result(text, lang)
 
         if result.message and result.message != text:

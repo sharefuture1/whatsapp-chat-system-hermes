@@ -1,4 +1,12 @@
-# CHANGELOG_AGENT.md — Agent 变更记录
+## 2026-07-14：继续全面优化：Standalone 插件 V1、AI runtime 解耦与多语言修复
+
+- 修复 `PluginCenterPage`：插件列表、toggle、disable 全部切换到 `/api/v1/plugins`；原 `/api/plugins` 在 Standalone 下会返回前端 HTML。
+- 新增 `src/whatsapp_chat_system/api/v1/plugins.py`：真实插件 catalog、`available/unavailable_reason/status_when_on/hooks`、可用插件持久化开关、不可用插件结构化 409。
+- Standalone AI 配置不再从 Legacy `web_api` 导入；新增独立 `StandaloneAISettingsManager`，翻译 Worker 读取业务库加密 API key。
+- 修复 legacy auth → users 迁移会覆盖原密码的问题：迁移时验证并保留现有 auth 记录。
+- 修复四语言用户管理/AI 测试缺失 key与重复 key，补充插件 API 回归测试。
+- 质量门禁：Python `241 passed`、Web `87 passed`、Bridge `74 passed`、Bridge lint PASS、Vite build PASS。
+
 
 ## 2026-07-14：全局 AI 设置页测试按钮 + 翻译端点修复
 

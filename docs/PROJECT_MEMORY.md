@@ -57,7 +57,10 @@
 - 聊天页面闪烁根因已修复：账号 3 秒轮询在数据不变时不再替换数组引用；Workspace 刷新 callback 不再依赖账号数组；ChatPane 初始加载仅依赖稳定会话 identity，不再因 settings 对象刷新而清空消息。
 - 微信式聊天页已收敛为单一“…”头部入口、双方 40px 方形头像、左右镜像气泡、译文内嵌气泡和可折叠输入工具面板；移动 390×844 无横向溢出。
 - 自动翻译增加 message-id in-flight 去重，同一条消息不会被并行重复请求 Provider。
-- 全局 AI 设置页新增**测试连接**按钮：`POST /api/v1/ai/test` 直接调用 `WendingAIProvider` 验证凭据，返回 `{ok, message}`；生产验证通过：`Connected — model: gpt-5.3-codex-spark`；表单任一改动自动清除测试结果，防止误读旧状态。
+- 前端 PluginCenter 已统一调用 `/api/v1/plugins`，不再请求不存在的 legacy `/api/plugins`；后端 Standalone 新增 `/api/v1/plugins` 真正 API，available=false 插件固定禁用，toggle 返回结构化 409。
+- Standalone AI runtime manager 已从 Legacy `web_api` 解耦，翻译 Worker 读取独立运行时数据库的加密密钥；登录迁移保留原 legacy auth 密码，不再写死临时密码。
+- 四语言新增用户管理/AI 测试缺失 key，清理重复 i18n key；插件 API 回归测试覆盖 catalog、不可用拒绝、可用开关持久化。
+- 本轮质量门禁：Python 241 passed、Web 87 passed、Bridge 74 passed/lint PASS、Vite build PASS。
 - 全站页面壳与滚动已完成一轮生产审计：桌面 1440×900 和移动 390×844 无横向溢出，通讯录/发现具有独立滚动容器，React Hooks 顺序崩溃已修复。
 
 ## 线上与影子状态

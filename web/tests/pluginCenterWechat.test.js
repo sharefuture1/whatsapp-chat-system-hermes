@@ -12,8 +12,8 @@ test('PluginCenter page surfaces real availability and reasons [UX-013]', () => 
   assert.match(source, /plugin\.unavailable_reason/)
   assert.match(source, /pluginUnavailableReason/)
   assert.match(source, /setRefreshing\(true\)/)
-  assert.match(source, /api\.post\('\/plugins\/toggle'/)
-  assert.match(source, /api\.delete\(`\/plugins\/\$\{plugin\.id\}`/)
+  assert.match(source, /api\.post\('\/v1\/plugins\/toggle'/)
+  assert.match(source, /api\.delete\(`\/v1\/plugins\/\$\{plugin\.id\}`/)
 })
 
 test('SchedulerCenter and BroadcastCenter pages exist and reuse the API client', () => {

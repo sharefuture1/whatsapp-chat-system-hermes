@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 import secrets
@@ -33,6 +32,7 @@ from .api.internal.whatsapp_events import (
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
 from .api.v1.personas import create_personas_router
+from .api.v1.plugins import create_plugins_router
 from .api.v1.operations import create_operations_router
 from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
@@ -41,10 +41,11 @@ from .db import models as _models  # noqa: F401 -- registers every mapped table 
 from .outbox import OutboxDispatcher
 from .runtime import (
     StandaloneRuntime,
+    StandaloneAISettingsManager,
     is_authenticated as _is_authenticated,
     verify_password as _verify_password,
     save_runtime_settings,
-    session_info as _session_info,
+    session_info as _session_info,  # noqa: F401 -- re-exported for users router
 )
 from .security.internal_auth import InternalAuthError, verify_internal_token
 
@@ -58,7 +59,7 @@ _DEFAULT_ALLOWED_ORIGINS = (
 
 
 class LoginRequest(BaseModel):
-    username: str = Field(default="", max_length=128)
+    username: str = Field(default="admin", max_length=128)
     password: str
 
 
@@ -201,10 +202,9 @@ def build_standalone_app(
     )
     factory = account_session_factory or create_session_factory(create_engine())
 
-    # Set up AI runtime settings so Rewriter can find the WendingAI API key
-    from whatsapp_chat_system.web_api import setup_ai_runtime_settings
-
-    setup_ai_runtime_settings(runtime.ai_settings)
+    # Keep standalone runtime settings independent from the legacy module.
+    runtime_ai_settings = StandaloneAISettingsManager(runtime.ai_settings)
+    runtime_ai_settings.load_from_db()
     bridge = account_bridge or BridgeClient(
         base_url=os.getenv("WHATSAPP_BRIDGE_V2_URL", "http://127.0.0.1:3100"),
         internal_token=runtime.internal_event_token,
@@ -228,6 +228,8 @@ def build_standalone_app(
                     await asyncio.to_thread(reconciler.reconcile_once)
                 except asyncio.CancelledError:
                     raise
+                except BridgeError:
+                    logger.warning("WhatsApp account reconciliation unavailable")
                 except Exception:
                     logger.exception("WhatsApp account reconciliation round failed")
                 await asyncio.sleep(account_reconcile_interval_seconds)
@@ -261,6 +263,7 @@ def build_standalone_app(
     app.state.runtime_mode = "standalone"
     app.state.ready = False
     app.state.runtime = runtime
+    app.state.ai_settings_manager = runtime_ai_settings
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_cors_origins(),
@@ -281,6 +284,7 @@ def build_standalone_app(
         create_whatsapp_events_router(factory, runtime.internal_event_token)
     )
     app.include_router(create_personas_router(runtime, factory))
+    app.include_router(create_plugins_router(runtime))
     # Lazy import to avoid circular dependency at module load time
     from .api.v1.users import create_users_router as _create_users_router
     from .api.v1.messages import create_messages_router as _create_messages_router
@@ -389,7 +393,7 @@ def build_standalone_app(
 
             # Multi-user lookup: username → password record
             users: dict[str, Any] = runtime.web_settings.get("users") or {}
-            username = (payload.username or "").strip()
+            username = (payload.username or "admin").strip()
             if not username:
                 recent.append(now)
                 attempt_map[client_ip] = recent
@@ -397,26 +401,15 @@ def build_standalone_app(
                 save_runtime_settings(runtime)
                 raise HTTPException(status_code=401, detail="Username is required")
 
-            # ── Migration: auth (old single-password) → users (new multi-user) ──
-            # If no users exist yet, bootstrap from the legacy auth record.
-            # This is a one-time migration on the first login after upgrade.
+            # Migration: legacy single-password auth -> multi-user admin record.
+            # Preserve the existing password; never replace it with a guessed default.
             if not users and runtime.web_settings.get("auth"):
-                admin_pw = "Welcome2026!"  # temp password – forces change on next login
-                salt = secrets.token_hex(16)
-                derived = hashlib.pbkdf2_hmac(
-                    "sha256", admin_pw.encode(), salt.encode(), 600_000
-                )
-                users["admin"] = {
-                    "scheme": "pbkdf2_sha256",
-                    "salt": salt,
-                    "iterations": 600_000,
-                    "hash": derived.hex(),
-                    "created_at": time.time(),
-                    "password_change_required": True,
-                }
-                runtime.web_settings["users"] = users
-                # Keep legacy auth for backward compat during migration window
-                save_runtime_settings(runtime)
+                legacy_auth = runtime.web_settings["auth"]
+                if username == "admin" and _verify_password(legacy_auth, payload.password):
+                    users["admin"] = dict(legacy_auth)
+                    users["admin"].setdefault("created_at", time.time())
+                    runtime.web_settings["users"] = users
+                    save_runtime_settings(runtime)
 
             user_record: dict[str, Any] | None = users.get(username)
             # Backward compat: also accept legacy auth (single shared password)

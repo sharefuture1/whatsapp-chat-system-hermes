@@ -55,7 +55,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
     setError(null)
     try {
       const [pluginData, personaCatalog] = await Promise.all([
-        api.get('/plugins'),
+        api.get('/v1/plugins'),
         fetchPersonaCatalog(),
       ])
       setPlugins(pluginData.items ?? [])
@@ -79,7 +79,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
   const toggle = async plugin => {
     if (plugin.available === false) return
     try {
-      await api.post('/plugins/toggle', { plugin_id: plugin.id, enabled: !plugin.enabled })
+      await api.post('/v1/plugins/toggle', { plugin_id: plugin.id, enabled: !plugin.enabled })
       await refresh()
     } catch (e) {
       setError(e.message || t('error'))
@@ -90,7 +90,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
     if (plugin.available === false || !plugin.enabled) return
     if (!window.confirm(`${t('removePluginConfirm')} (${plugin.name})`)) return
     try {
-      await api.delete(`/plugins/${plugin.id}`)
+      await api.delete(`/v1/plugins/${plugin.id}`)
       await refresh()
     } catch (e) {
       setError(e.message || t('error'))

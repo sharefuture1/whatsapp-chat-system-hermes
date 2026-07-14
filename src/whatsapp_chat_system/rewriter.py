@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from .ai.provider import AIProviderError, WendingAIProvider
 from .ai.service import AIService
