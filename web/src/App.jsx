@@ -275,12 +275,13 @@ function AppInner() {
   }, [sessionToken, refreshSettings, refreshWorkspace])
 
   const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds) || 0
+  const refreshInterval = autoSeconds > 0 ? Math.max(30, autoSeconds) : 0
   useEffect(() => {
-    if (!sessionToken || autoSeconds <= 0) return undefined
+    if (!sessionToken || refreshInterval <= 0) return undefined
     let timer = null
     let stopped = false
     let running = false
-    const delay = Math.max(3, autoSeconds) * 1000
+    const delay = refreshInterval * 1000
     const clearTimer = () => {
       if (timer) clearTimeout(timer)
       timer = null
@@ -309,7 +310,7 @@ function AppInner() {
       clearTimer()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [sessionToken, autoSeconds, refreshWorkspace])
+  }, [sessionToken, refreshInterval, refreshWorkspace])
 
   const saveSettings = async (payload, done) => {
     setSaving(true)

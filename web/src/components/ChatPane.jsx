@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { fetchPersonaCatalog, assignPersona as assignPersonaApi } from '../personas'
+import {
+  loadConversationCache,
+  saveConversationCache,
+  loadTranslationCache,
+  saveTranslationCache,
+  isConversationCacheFresh,
+} from '../chatCache'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
 import { formatChatDay, localDayKey } from '../dateTime'
@@ -190,6 +197,18 @@ export default function ChatPane({
       ? `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${pageSize}${cursorQuery}`
       : null
     if (!endpoint) throw new Error('Conversation is not available in Standalone mode')
+    const cached = loadConversationCache(conversationId)
+    const cachedMessages = cached?.messages || []
+    if (cachedMessages.length && !appendOlder) {
+      setMessages(cachedMessages)
+      messagesRef.current = cachedMessages
+      setTotal(cached.total_messages || cachedMessages.length)
+      setInitialLoading(false)
+    }
+    if (cachedMessages.length && isConversationCacheFresh(cached) && !appendOlder) {
+      fetchedFor.current = targetUserId
+      return { messages: cachedMessages, total_messages: cached.total_messages || cachedMessages.length, has_more: cached.has_more, next_cursor: cached.next_cursor }
+    }
     const res = await api.get(endpoint)
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
     const items = standalone ? (res.messages || []).slice() : (res.messages || []).slice().reverse()
@@ -198,7 +217,12 @@ export default function ChatPane({
     } else {
       setMessages(prev => mergeFreshMessages(items, prev))
     }
-    standaloneCursorRef.current = res.next_cursor || null
+    if (standalone) standaloneCursorRef.current = res.next_cursor || null
+    saveConversationCache(conversationId, items, {
+      total_messages: res.total_messages,
+      has_more: res.has_more,
+      next_cursor: res.next_cursor,
+    })
     setHasMore(Boolean(res.has_more))
     setTotal(res.total_messages || 0)
     setHiddenCount(res.hidden_message_count || 0)
@@ -311,6 +335,12 @@ export default function ChatPane({
     const translationId = String(msg?.message_id || '')
     if (!translationId || translationId.startsWith('tmp-') || msg.pending || msg.failed || msg.translated || msg.lang === 'Chinese' || !isTranslationRetryEligible(msg) || translatingIdsRef.current.has(translationId)) return false
     translatingIdsRef.current.add(translationId)
+    const cachedTranslation = loadTranslationCache(msg.message_id, msg.content)
+    if (cachedTranslation) {
+      commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(item => item.message_id === msg.message_id ? { ...item, ...cachedTranslation } : item))
+      translatingIdsRef.current.delete(translationId)
+      return true
+    }
     try {
       const res = await api.post(`/v1/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content }, { signal })
       if (generation !== translationGenerationRef.current || signal.aborted) return false
@@ -321,7 +351,9 @@ export default function ChatPane({
         return false
       }
       setTranslationError('')
-      setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, translated: res.translated, lang: res.lang || m.lang, translationRetryAfter: undefined } : m))
+      const translation = { translated: res.translated, lang: res.lang || msg.lang, translationRetryAfter: undefined }
+      saveTranslationCache(msg.message_id, msg.content, translation)
+      setMessages(prev => prev.map(m => m.message_id === msg.message_id ? { ...m, ...translation } : m))
       return true
     } catch (error) {
       if (signal.aborted || generation !== translationGenerationRef.current) return false
