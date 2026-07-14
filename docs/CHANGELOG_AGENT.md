@@ -1,5 +1,11 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-14：修复 auth 记录缺失导致全员 401（hotfix）
+
+- `web-settings.json` 缺少 `auth` 字段（无 `scheme`/`salt`/`hash`），导致所有认证请求返回 401，前端误报"AI 翻译失败"。
+- 重建密码记录（scheme: pbkdf2_sha256，密码：`W3lcome2026!`），重启后登录和 AI 翻译恢复正常。
+- **注意**：下次 systemd 升级若使用 EnvFile 中的 `CHAT_SYSTEM_BOOTSTRAP_PASSWORD`，服务重启后密码不变（持久化在 `web-settings.json`）；若直接删除 `web-settings.json`，则需要 EnvFile 中存在 ≥12 字符的 bootstrap password。
+
 ## 2026-07-13：Standalone 可靠性分支合并（Implemented，待独立生产切流验收）
 
 - 合并 `fix/standalone-reliability-ux-20260713`：Standalone V1 完成可靠 Outbox Dispatcher、lease ownership 防旧 Worker 覆盖、Bridge idempotency key 与 receipt 持久化/恢复。
