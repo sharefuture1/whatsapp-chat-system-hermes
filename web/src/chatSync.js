@@ -1,5 +1,5 @@
 const LOCAL_TRANSLATION_FIELDS = ['translated', 'lang', 'translationError']
-const SERVER_UPSERT_FIELDS = ['translated', 'lang', 'content', 'status', 'platform_message_id']
+const SERVER_UPSERT_FIELDS = ['translated', 'lang', 'content', 'status', 'platform_message_id', 'media_metadata', 'message_type']
 const LOCAL_DELIVERY_FIELDS = ['pending', 'failed', 'sent', 'local_only']
 
 function hasOwn(item, field) {

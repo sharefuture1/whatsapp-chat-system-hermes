@@ -338,12 +338,10 @@ function AppInner() {
   const sendReply = async (conversation, message, mode, { previewOnly = false, idempotencyKey = null } = {}) => {
     setSending(!previewOnly)
     try {
-      if (conversation?.source === 'standalone' && conversation?.conversation_id && previewOnly) {
-        throw new Error(t('previewFailed') || 'Preview is not available for this conversation yet')
+      if (conversation?.source !== 'standalone' || !conversation?.conversation_id) {
+        throw new Error(t('conversationUnavailable') || 'Conversation is not available in Standalone mode')
       }
-      const data = conversation?.source === 'standalone' && conversation?.conversation_id
-        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey, preview_only: previewOnly })
-        : await Promise.reject(new Error(t('conversationUnavailable') || 'Conversation is not available in Standalone mode'))
+      const data = await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey, preview_only: previewOnly })
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
         error.code = data?.code || 'delivery_failed'

@@ -232,7 +232,7 @@ export class AccountSession {
             for (const message of update?.messages ?? []) {
               const payload = normalizeMessage(message, this.now);
               if (!payload || typeof payload.wa_message_id !== 'string' || typeof payload.remote_jid !== 'string') continue;
-              await this.#emitEvent('message.upsert', payload, `message:${payload.wa_message_id}:${createHash('sha256').update(JSON.stringify(payload)).digest('hex')}`);
+              await this.#emitEvent('message.upsert', payload, `message:${payload.wa_message_id}`);
             }
           })
           .catch((error) => {
