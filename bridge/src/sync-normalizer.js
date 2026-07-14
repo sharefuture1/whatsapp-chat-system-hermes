@@ -12,7 +12,7 @@ export function normalizeContact(item = {}) {
   if (jidKind(jid) !== 'dm') return null;
   return {
     remote_jid: jid,
-    display_name: item.name ?? item.notify ?? item.verifiedName ?? item.display_name ?? null,
+    display_name: item.name ?? item.notify ?? item.verifiedName ?? item.display_name ?? item.push_name ?? null,
     phone_number: item.phone_number ?? (jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : null),
     lid: item.lid ?? (jid.endsWith('@lid') ? jid : null),
     avatar_url: item.imgUrl ?? item.avatar_url ?? null,

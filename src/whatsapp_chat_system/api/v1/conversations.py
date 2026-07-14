@@ -25,6 +25,20 @@ from whatsapp_chat_system.outbox import enqueue_outbox_message
 PLATFORM = "whatsapp"
 
 
+def _display_name(*values: Any) -> str | None:
+    """Return a human name, never a raw WhatsApp JID/LID."""
+    for value in values:
+        text = str(value or "").strip()
+        if not text or "@" in text or text.startswith(("lid:", "jid:")):
+            continue
+        return text
+    return None
+
+
+def _fallback_contact_name(remote_jid: str) -> str:
+    return "WhatsApp 联系人" if remote_jid.endswith("@lid") else remote_jid
+
+
 class ConversationReplyRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
     idempotency_key: str | None = Field(default=None, max_length=255)
@@ -152,12 +166,11 @@ def create_conversations_router(
                 "account_name": account.name,
                 "account_label": account.name,
                 "user_id": conversation.remote_jid,
-                "user_name": (
-                    (contact.remark if contact else None)
-                    or (contact.display_name if contact else None)
-                    or conversation.title
-                    or conversation.remote_jid
-                ),
+                "user_name": _display_name(
+                    contact.remark if contact else None,
+                    contact.display_name if contact else None,
+                    conversation.title,
+                ) or _fallback_contact_name(conversation.remote_jid),
                 "contact_id": conversation.contact_id,
                 "contact_profile": {
                     "remark": contact.remark if contact else None,
@@ -263,9 +276,11 @@ def create_conversations_router(
                 "user_id": contact.remote_jid,
                 "display_name": contact.display_name,
                 "remark": contact.remark,
-                "user_name": contact.remark
-                or contact.display_name
-                or contact.remote_jid,
+                "user_name": _display_name(
+                    contact.remark,
+                    contact.display_name,
+                    conversation.title if conversation else None,
+                ) or _fallback_contact_name(contact.remote_jid),
                 "phone_number": contact.phone_number,
                 "avatar_url": contact.avatar_url,
                 "tags": contact.tags or [],
@@ -304,7 +319,8 @@ def create_conversations_router(
                         account_id=contact.account_id,
                         contact_id=contact.id,
                         remote_jid=contact.remote_jid,
-                        title=contact.remark or contact.display_name,
+                        title=_display_name(contact.remark, contact.display_name)
+                        or _fallback_contact_name(contact.remote_jid),
                     )
                     session.add(conversation)
                     session.flush()

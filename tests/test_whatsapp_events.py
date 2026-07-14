@@ -99,6 +99,34 @@ def post(client, body, token=TOKEN, request_id=None):
     return client.post("/internal/events/whatsapp", json=body, headers=headers)
 
 
+def test_lid_contact_uses_push_name_instead_of_lid(events_api):
+    client, factory = events_api
+    response = post(client, envelope(payload=message_payload(
+        remote_jid="12345@lid",
+        sender_jid="12345@lid",
+        push_name="小明",
+    )))
+    assert response.status_code in {200, 202}
+    with factory() as db:
+        contact = db.scalar(select(Contact).where(Contact.remote_jid == "12345@lid"))
+        conversation = db.scalar(select(Conversation).where(Conversation.remote_jid == "12345@lid"))
+        assert contact.display_name == "小明"
+        assert conversation.title == "小明"
+
+
+def test_lid_contact_without_name_uses_human_fallback(events_api):
+    client, factory = events_api
+    response = post(client, envelope(payload=message_payload(
+        remote_jid="67890@lid",
+        sender_jid="67890@lid",
+        push_name=None,
+    )))
+    assert response.status_code in {200, 202}
+    with factory() as db:
+        conversation = db.scalar(select(Conversation).where(Conversation.remote_jid == "67890@lid"))
+        assert conversation.title == "WhatsApp 联系人"
+
+
 def test_internal_token_is_fail_closed_and_does_not_use_web_session(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'closed.db'}")
     Base.metadata.create_all(engine)

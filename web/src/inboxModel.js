@@ -1,3 +1,7 @@
+function humanName(item) {
+  const candidates = [item?.remark, item?.display_name, item?.user_name, item?.push_name]
+  return candidates.map(value => String(value || '').trim()).find(value => value && !value.includes('@')) || 'WhatsApp 联系人'
+}
 function normalizePlatform(value) {
   const platform = String(value || 'whatsapp').toLowerCase()
   return platform === 'wa' ? 'whatsapp' : platform
@@ -30,6 +34,7 @@ export function buildInbox({ legacy = [], standalone = [], standaloneAccounts = 
 
   const legacyItems = legacy.map(item => ({
     ...item,
+    user_name: humanName(item),
     platform: normalizePlatform(item.platform),
     account_id: 'legacy',
     account_name: 'Legacy WhatsApp',
@@ -50,6 +55,7 @@ export function buildInbox({ legacy = [], standalone = [], standaloneAccounts = 
     }
     return {
       ...item,
+      user_name: humanName(item),
       platform: normalizePlatform(item.platform),
       account_label: account.label,
       source: 'standalone',
@@ -67,6 +73,7 @@ export function buildContacts({ legacy = [], standalone = [], accounts = [] } = 
   const legacyAccount = accountMap.get('legacy') || { id: 'legacy', label: 'WA1', name: 'Legacy WhatsApp' }
   const legacyItems = legacy.map(item => ({
     ...item,
+    user_name: humanName(item),
     contact_id: null,
     contact_key: `legacy:${item.user_id}`,
     conversation_key: `legacy:${item.user_id}`,
@@ -81,6 +88,7 @@ export function buildContacts({ legacy = [], standalone = [], accounts = [] } = 
     const account = accountMap.get(String(item.account_id)) || { label: 'WA', name: item.account_name || 'WhatsApp' }
     return {
       ...item,
+      user_name: humanName(item),
       contact_key: `standalone:${item.contact_id || `${item.account_id}:${item.remote_jid || item.user_id}`}`,
       conversation_key: item.conversation_id ? `standalone:${item.conversation_id}` : '',
       account_name: item.account_name || account.name,

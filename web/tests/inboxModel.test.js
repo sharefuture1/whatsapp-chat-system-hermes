@@ -38,6 +38,20 @@ test('filterInbox supports ALL, platform, and platform-account scopes without lo
   )
 })
 
+test('human nickname wins over LID when no remark is set', () => {
+  const result = buildInbox({
+    standalone: [{ conversation_id: 'conv-name', account_id: 'a1', remote_jid: '12345@lid', user_name: '小明', title: '12345@lid' }],
+    standaloneAccounts: [{ id: 'a1', name: 'Sales' }],
+  })
+  assert.equal(result.conversations[0].user_name, '小明')
+
+  const contacts = buildContacts({
+    standalone: [{ contact_id: 'contact-name', account_id: 'a1', remote_jid: '12345@lid', display_name: '小明' }],
+    accounts: [{ id: 'a1', name: 'Sales', label: 'WA1' }],
+  })
+  assert.equal(contacts[0].user_name, '小明')
+})
+
 test('buildContacts preserves identical ids from different accounts and attaches WA labels', () => {
   const contacts = buildContacts({
     legacy: [{ user_id: 'same@lid', user_name: 'Legacy Same', platform: 'whatsapp' }],

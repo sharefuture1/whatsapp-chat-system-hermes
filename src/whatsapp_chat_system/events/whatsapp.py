@@ -28,6 +28,10 @@ EventType = Literal[
 ]
 
 
+def _fallback_name(remote_jid: str) -> str:
+    return 'WhatsApp 联系人' if remote_jid.endswith('@lid') else remote_jid
+
+
 class WhatsAppEventEnvelope(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -265,7 +269,7 @@ class WhatsAppEventService:
                 contact_id=contact.id if contact else None,
                 remote_jid=payload.remote_jid,
                 type=payload.conversation_type,
-                title=payload.push_name,
+                title=payload.push_name or _fallback_name(payload.remote_jid),
             )
             self.session.add(conversation)
             self.session.flush()
