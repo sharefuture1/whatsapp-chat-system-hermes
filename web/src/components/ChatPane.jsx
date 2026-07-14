@@ -132,6 +132,8 @@ export default function ChatPane({
   const [contactDraft, setContactDraft] = useState({ remark: '', notes: '', ai_model: '', custom_system_prompt: '', reply_style: '' })
   const [contactSaving, setContactSaving] = useState(false)
   const [contactSaved, setContactSaved] = useState(false)
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(userOverride?.auto_reply_enabled === true)
+  const [autoReplySaving, setAutoReplySaving] = useState(false)
   const [activeMessageId, setActiveMessageId] = useState(null)
   const [hiddenTranslations, setHiddenTranslations] = useState({})
   const [translationError, setTranslationError] = useState('')
@@ -549,6 +551,7 @@ export default function ChatPane({
 
   const openContactDrawer = () => {
     setContactSaved(false)
+    setAutoReplyEnabled(userOverride?.auto_reply_enabled === true)
     setContactDraft({
       remark: contactProfile?.remark || '',
       notes: contactProfile?.notes || '',
@@ -601,6 +604,19 @@ export default function ChatPane({
     }
   }
 
+  const toggleAutoReply = async () => {
+    if (!conversationId || autoReplySaving) return
+    const next = !autoReplyEnabled
+    setAutoReplySaving(true)
+    try {
+      const result = await api.patch(`/v1/conversations/${encodeURIComponent(conversationId)}/auto-reply`, { enabled: next })
+      setAutoReplyEnabled(Boolean(result.auto_reply_enabled))
+    } catch (error) {
+      setTranslationError(error?.message || t('error'))
+    } finally {
+      setAutoReplySaving(false)
+    }
+  }
   const saveContactDrawer = async () => {
     if (!userId || !onSaveContactConfig) return
     setContactSaving(true)
@@ -775,6 +791,10 @@ export default function ChatPane({
               <button type="button" className={`wx-drawer-tab ${contactDrawerTab === 'ai' ? 'active' : ''}`} onClick={() => setContactDrawerTab('ai')}>{t('ai') || 'AI'}</button>
             </div>
             <div className="wx-contact-drawer-body">
+              <div className="wx-auto-reply-card">
+                <div><strong>{t('autoReply') || '自动回复'}</strong><span>{autoReplyEnabled ? (t('enabled') || '已开启') : (t('disabled') || '已关闭')}</span></div>
+                <button type="button" className={`wx-toggle-switch ${autoReplyEnabled ? 'on' : ''}`} onClick={toggleAutoReply} disabled={autoReplySaving} aria-pressed={autoReplyEnabled} aria-label={t('autoReply') || '自动回复'}><span /></button>
+              </div>
               {contactDrawerTab === 'profile' ? (
                 <div className="wx-contact-card">
                   <div className="wx-contact-card-row">

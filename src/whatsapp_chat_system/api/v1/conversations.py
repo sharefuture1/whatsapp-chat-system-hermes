@@ -51,6 +51,10 @@ class ConversationStateUpdate(BaseModel):
     archived: bool | None = None
 
 
+class AutoReplyUpdate(BaseModel):
+    enabled: bool
+
+
 class TranslateRequest(BaseModel):
     user_id: str = Field(default="", max_length=255)
     content: str = Field(default="", max_length=10000)
@@ -180,13 +184,9 @@ def create_conversations_router(
                 },
                 "user_override": {
                     "ai_model": override.model if override else None,
-                    "custom_system_prompt": override.system_prompt
-                    if override
-                    else None,
+                    "custom_system_prompt": override.system_prompt if override else None,
                     "reply_style": override.reply_style if override else None,
-                    "auto_reply_enabled": override.auto_reply_enabled
-                    if override
-                    else None,
+                    "auto_reply_enabled": override.auto_reply_enabled if override else None,
                 },
                 "platform": PLATFORM,
                 "last_message": conversation.last_message_preview or "",
@@ -345,6 +345,34 @@ def create_conversations_router(
             "restored": True,
         }
 
+    @router.patch("/conversations/{conversation_id}/auto-reply")
+    def update_auto_reply(
+        conversation_id: str,
+        payload: AutoReplyUpdate,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        account = session.get(WhatsAppAccount, conversation.account_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        contact = session.get(Contact, conversation.contact_id) if conversation.contact_id else None
+        if contact is None:
+            raise HTTPException(status_code=409, detail="Conversation has no contact")
+        override = session.scalar(select(ContactAIOverride).where(
+            ContactAIOverride.account_id == account.id,
+            ContactAIOverride.contact_id == contact.id,
+        ))
+        if override is None:
+            override = ContactAIOverride(account_id=account.id, contact_id=contact.id)
+            session.add(override)
+        override.auto_reply_enabled = payload.enabled
+        session.commit()
+        return {"success": True, "conversation_id": conversation.id, "contact_id": contact.id,
+                "auto_reply_enabled": override.auto_reply_enabled,
+                "account_mode": account.auto_reply_mode,
+                "account_online": account.status == "online"}
     @router.patch("/conversations/{conversation_id}")
     def update_conversation_state(
         conversation_id: str,

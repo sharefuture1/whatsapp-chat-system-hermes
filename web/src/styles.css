@@ -269,6 +269,14 @@ a { color: var(--wx-link); text-decoration: none; }
 }
 
 .wx-bubble-content { min-width: 0; }
+
+.wx-auto-reply-card { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; margin-bottom:12px; border:1px solid var(--wx-divider); border-radius:10px; background:var(--wx-panel-soft); }.wx-auto-reply-card div { display:grid; gap:3px; }
+.wx-auto-reply-card span { font-size:12px; color:var(--wx-text-muted); }
+.wx-toggle-switch { width:44px; height:26px; padding:3px; border:0; border-radius:999px; background:var(--wx-divider); transition:.15s; }
+.wx-toggle-switch span { display:block; width:20px; height:20px; border-radius:50%; background:#fff; transition:.15s; }
+.wx-toggle-switch.on { background:var(--wx-brand); }
+.wx-toggle-switch.on span { transform:translateX(18px); }
+
 .wx-bubble-translation { margin-top: 7px; padding-top: 7px; border-top: 1px solid rgba(0,0,0,.10); display: grid; gap: 5px; color: var(--wx-text-secondary); font-size: 12px; line-height: 1.45; text-align: left; position: relative; }
 .wx-bubble.out .wx-bubble-translation { border-top-color: rgba(0,0,0,.09); }
 :root[data-theme="dark"] .wx-bubble-translation { border-top-color: rgba(255,255,255,.11); color: #b8b8bc; }

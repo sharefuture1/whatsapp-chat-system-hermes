@@ -165,6 +165,10 @@ const STRINGS = {
     model: 'model',
     error: 'Something went wrong',
     autoTranslate: 'Auto translate messages',
+    autoReply: 'Auto reply',
+  conversationUnavailable: 'Conversation is not available',
+  messageHideUnavailable: 'Message hiding is not available',
+
     translationAiNotConfigured: 'Auto translate is on, but the AI API key is not configured',
     translationFailed: 'AI translation failed. Check the model settings and try again.',
     translationDisabled: 'Auto translate is disabled',
@@ -499,6 +503,10 @@ const STRINGS = {
     model: '模型',
     error: '发生错误',
     autoTranslate: '自动翻译消息',
+    autoReply: '自动回复',
+    conversationUnavailable: '当前会话不可用',
+    messageHideUnavailable: '当前消息不支持隐藏',
+
     translationAiNotConfigured: '自动翻译已开启，但尚未配置 AI API Key',
     translationFailed: 'AI 翻译失败，请检查模型配置或稍后重试',
     translationDisabled: '自动翻译已关闭',
@@ -851,6 +859,10 @@ const STRINGS = {
     model: 'โมเดล',
     error: 'เกิดข้อผิดพลาด',
     autoTranslate: 'แปลข้อความอัตโนมัติ',
+    autoReply: 'ตอบกลับอัตโนมัติ',
+    conversationUnavailable: 'ไม่พบการสนทนา',
+    messageHideUnavailable: 'ไม่สามารถซ่อนข้อความนี้ได้',
+
     translationAiNotConfigured: 'เปิดการแปลอัตโนมัติแล้ว แต่ยังไม่ได้ตั้งค่า AI API Key',
     translationFailed: 'การแปลด้วย AI ล้มเหลว โปรดตรวจสอบการตั้งค่าโมเดลแล้วลองอีกครั้ง',
     translationDisabled: 'ปิดการแปลอัตโนมัติอยู่',
@@ -1194,6 +1206,10 @@ const STRINGS = {
     model: 'ໂມເດລ',
     error: 'ເກີດຂໍ້ຜິດພາດ',
     autoTranslate: 'ແປຂໍ້ຄວາມອັດຕະໂນມັດ',
+    autoReply: 'ຕອບອັດຕະໂນມັດ',
+    conversationUnavailable: 'ບໍ່ມີການສົນທະນາ',
+    messageHideUnavailable: 'ບໍ່ສາມາດເຊື່ອງຂໍ້ຄວາມນີ້',
+
     translationAiNotConfigured: 'ເປີດການແປອັດຕະໂນມັດແລ້ວ ແຕ່ຍັງບໍ່ໄດ້ຕັ້ງຄ່າ AI API Key',
     translationFailed: 'ການແປດ້ວຍ AI ລົ້ມເຫຼວ ກະລຸນາກວດກາການຕັ້ງຄ່າໂມເດລແລ້ວລອງໃໝ່',
     translationDisabled: 'ປິດການແປອັດຕະໂນມັດຢູ່',
