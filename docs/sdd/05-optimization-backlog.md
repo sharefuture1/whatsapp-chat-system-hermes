@@ -119,7 +119,17 @@
   - 独立 `broadcast_jobs / broadcast_recipients` 状态模型和大批量分页；
   - 多 Worker 与真实生产账号的端到端验收。
 
-### SDD-P0-08 受控内置 AI 人设
+### SDD-P0-09 24x7 AI 自动回复可靠性
+
+- 状态：`Approved`
+- 目标：AI 自动回复必须由独立的持久化 Job + Outbox 链路驱动，不能在 webhook 请求线程同步调用模型，也不能依赖浏览器页面打开。
+- 触发：仅处理入站、非系统、非自己发送的消息；账号 `enabled=true`、`auto_reply_mode=auto`、会话 `ai_mode=auto` 且联系人未显式关闭时才创建任务。
+- 幂等：以 `account_id + wa_message_id + policy_revision` 为唯一幂等键；同一入站消息最多产生一个自动回复 Job 和一个 Outbox。
+- 可靠性：AI Job 状态为 `pending/claimed/running/retry/completed/failed/dead/cancelled`；Provider 超时、429、5xx 使用指数退避；不可重试错误进入 dead；Outbox 使用 lease、真实 WhatsApp message ID 和回执对账。
+- 安全：管理员配置全局策略、模型、限速、工作时间和暂停开关；普通用户只能看到状态，不能修改 Provider、Prompt、模型、限速或全局开关；联系人可以由管理员单独暂停自动回复。
+- 防骚扰：每账号/联系人限速、冷却窗口、每日预算、连续失败熔断；AI 回复前再次检查账号在线、策略和消息是否已被人工回复。
+- 运维：`/api/v1/automation/health` 返回 worker heartbeat、pending/running/retry/dead、最近错误和熔断状态；systemd 必须自动重启，服务启动后不依赖 Web 页面。
+- 验收：服务停止/重启后 Job 可恢复；重复 webhook 不重复回复；AI 超时可重试；Bridge 离线进入 retry；管理员暂停立即阻止新任务；真实账号 24 小时运行观测无永久 pending/dead 增长。
 
 - 状态：`In Progress`（代码与 API 已落地，但未做真实部署切流；待生产验收后再标记 `Verified`）。
 - 需求：`FR-PLG-007`、`FR-PLG-008`、`FR-AI-012`。

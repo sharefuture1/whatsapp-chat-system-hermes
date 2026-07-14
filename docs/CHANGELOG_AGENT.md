@@ -8,7 +8,12 @@
 - 质量门禁：Python `241 passed`、Web `87 passed`、Bridge `74 passed`、Bridge lint PASS、Vite build PASS。
 
 
-## 2026-07-14：工程化重构 Phase 1 启动
+## 2026-07-14：24x7 AI 自动回复工程化规格建立
+
+- 审计确认：Standalone 已有 `OutboxDispatcher` 和 `analysis_jobs` 数据/Repository，但 `message.upsert` 尚未创建自动回复 Job；当前不能保证无人值守自动回复。
+- 新增 `SDD-P0-09` 与实施计划 `docs/plans/2026-07-14-engineering-phase2-auto-reply.md`。
+- 明确自动回复必须满足：账号/会话/联系人策略、幂等、AI Job lease/retry/dead、Outbox 回执、限速/预算/熔断、管理员暂停、health API 和真实 24 小时验收。
+
 
 - 新增 `docs/plans/2026-07-14-engineering-phase1-data-layer.md`，冻结数据层和性能重构边界。
 - 更新 `docs/sdd/05-optimization-backlog.md`：明确 Phase 1 数据层、Phase 2 SSE/cursor、Phase 3 翻译/AI Job、Phase 4 媒体/可观测性。

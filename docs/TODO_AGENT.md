@@ -8,7 +8,16 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
-### P0 — 工程化重构 Phase 1
+### P0 — 24x7 AI 自动回复
+
+- [>] **持久化 AI 自动回复闭环（SDD-P0-09）**
+  - [x] 规格和实施计划已建立
+  - [ ] 入站消息触发 Job（账号/会话/联系人策略）
+  - [ ] AI Job Worker：claim、lease、retry、dead、heartbeat
+  - [ ] Job 完成后幂等写入 Outbox，Bridge 真实回执对账
+  - [ ] 管理员策略、暂停、限速、预算和熔断
+  - [ ] `/api/v1/automation/health` 和 24 小时真实账号验收
+
 
 - [>] **统一前端数据层与性能预算**
   - [x] SDD 与实施计划已建立：`docs/plans/2026-07-14-engineering-phase1-data-layer.md`

@@ -2,7 +2,7 @@
 
 > 最后更新：2026-07-14 UTC
 
-## 当前结论
+- 24x7 自动回复当前仅完成规格和计划，尚未接入入站 Job 触发器；Standalone 当前只有账号 reconciler + Outbox worker，不能把“AI 自动回复”描述为已完成。下一步必须实现 `SDD-P0-09` 的 Job/策略/健康检查并用真实账号持续验收。
 
 - 工程化重构 Phase 1 已批准：先做统一 API client、请求去重/缓存失效、feature 数据边界和 cursor 同步，再推进 SSE、数据库翻译批处理、AI Job、媒体代理与可观测性；不再在 App.jsx 继续堆叠跨域业务逻辑。
 - 受控 AI 人设 P0（SDD-P0-08 / FR-PLG-007/008 / FR-AI-012）已进入 **Implemented**：V1 API `GET/PUT /api/v1/personas`、`PUT /api/v1/contacts/{contact_id}/persona`；前端 `DiscoverPage` AI 人设分类与 `ChatPane` picker 已接 V1；聊天页头部 `…` 菜单切换人设、预览条同步显示；受控目录仅含 `default / tong-jincheng / professional-service / mature-uncle`，prompt 不下发到客户端，UI 严禁显示任何外部源/仓库信息。

@@ -1,4 +1,11 @@
-## 2026-07-14：工程化重构路线冻结
+## 2026-07-14：24x7 AI 自动回复必须走持久化 Job + Outbox
+
+**决策**：自动回复不依赖浏览器，不在 webhook 请求线程同步调用 AI。入站消息只在事务中创建 account-scoped、幂等的 AnalysisJob；Worker 负责 AI 生成，成功后以唯一 idempotency key 创建 Outbox，最后由 Bridge 发送并等待真实回执。
+
+**原因**：当前系统已有 Outbox 和 AnalysisJob Repository，但入站事件尚未接自动回复触发器，直接声称“24小时可用”是不真实的。必须先补齐策略、限速、熔断、恢复和健康 API，再做真实账号 24 小时验收。
+
+**关联规格**：`SDD-P0-09`、`docs/plans/2026-07-14-engineering-phase2-auto-reply.md`。
+
 
 **决策**：停止继续在单体 `App.jsx` 中堆叠功能，按数据层、同步、翻译/AI Job、媒体、可观测性分阶段重构。第一阶段先稳定统一 `/api/v1` client、认证、single-flight、短 TTL 缓存、mutation 失效和 feature 边界；后续再引入 SSE/cursor、数据库批量翻译、异步 AI Job 与媒体代理。
 
