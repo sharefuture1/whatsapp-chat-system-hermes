@@ -31,6 +31,7 @@ export default function MePage({
   onOpenGlobalAi,
   onOpenAccounts,
   onOpenPlugins,
+  onOpenUserMgm,
   onLogout,
   autoTranslate,
   accountSummary,
@@ -97,6 +98,18 @@ export default function MePage({
           <button className="wx-setting-row link" type="button" onClick={onOpenPlugins}>
             <span className="wx-setting-row-icon"><PluginsIcon /></span>
             <span>{t('pluginCenter')}</span>
+            <span aria-hidden="true">›</span>
+          </button>
+          <button className="wx-setting-row link" type="button" onClick={onOpenUserMgm}>
+            <span className="wx-setting-row-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M4 21v-1a5 5 0 0110 0v1"/>
+                <path d="M16 3.13a4 4 0 010 7.75"/>
+                <path d="M21 21v-1a4 4 0 00-3-3.85"/>
+              </svg>
+            </span>
+            <span>{t('userManagement')}</span>
             <span aria-hidden="true">›</span>
           </button>
           <button className="wx-setting-row link" type="button" onClick={onOpenSettings}>

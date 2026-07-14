@@ -1,5 +1,17 @@
 # DECISIONS.md — 架构决策记录
 
+## 2026-07-14: 全局 AI 设置页测试连接不走 AIService 中间层，直接调用 Provider
+
+**决策**：AI 连接测试端点 `POST /api/v1/ai/test` 直接实例化 `WendingAIProvider` 并发送单轮 `chat(model, messages=[{"role":"user","content":"Hi"}])` 验证凭据，不经过 `AIService` 的 `translate_to_zh()` 或其他业务中间层。
+
+原因：`AIService.check_configured()` 需要 `set_runtime_manager()` 在服务启动时调用（standalone 模式启动流程中未调用），导致即使凭据正确也返回 `configuration_error`。直接调用 Provider 绕过此依赖，且测试结果更精确（直接反映网络+认证+模型是否可用）。
+
+- 前端传表单当前值优先，其次读 DB 加密存储的 key，再其次读 `runtime.ai_settings` 默认值
+- 返回 `{ok: bool, message: str}`，方便前端直接展示成功/失败信息
+- 任一字段改动自动清除测试结果，防止用户误读旧状态
+
+**关联规格**：`SDD-P0-08`、`FR-AI-012`。
+
 ## 2026-07-13: 未接线插件一律降级为可观察状态，禁止伪造投递成功
 
 **决策**：在 Outbox/Worker（SDD-P0-05/06/07）完成前，定时与群发只能作为“我 → 插件中心”的二级任务可见性页面存在；读取可返回历史/空列表，但写入必须返回结构化 `503 scheduler_not_connected` 或 `503 broadcast_not_connected`。UI 不得出现成功状态、假进度或可用开关。

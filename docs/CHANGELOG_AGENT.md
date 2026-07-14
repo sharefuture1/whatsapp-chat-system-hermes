@@ -1,5 +1,36 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-14：全局 AI 设置页测试按钮 + 翻译端点修复
+
+### 前端 UI 优化
+
+- `SettingsPanel.jsx`：AI 设置页新增**测试连接**按钮（左侧 ghost 按钮）和结果反馈区
+  - 测试时用表单当前值（未保存也可用），点击后显示绿色 ✓ 连接成功或红色 ✗ 错误信息
+  - 三个字段（API Key / 模型 / Base URL）任一改动自动清除上次测试结果
+  - 按钮状态：`disabled` + "测试中…"防止重复点击
+- 按钮组改为左测试右保存，间距 8px，保存按钮右侧贴齐
+- i18n 新增 `testConnection / testing / connectionSuccess / connectionFailed`（中/英）
+
+### 后端新端点
+
+- `POST /api/v1/ai/test`：直接调用 `WendingAIProvider` 验证凭据，返回 `{ok, message}`
+  - 优先使用表单传入值，其次读 DB 加密存储的 key，再其次读 `runtime.ai_settings` 默认值
+  - 生产验证：`{"ok":true,"message":"Connected — model: gpt-5.3-codex-spark"}` → 200 ✅
+
+### 翻译端点修复
+
+- `api/v1/messages.py`（新建）：`POST /api/v1/messages/{message_id}/translate`，前缀 `/api/v1/messages`
+  - 匹配前端旧路径 `/messages/${msg.message_id}/translate`，无需改前端 JS
+  - 解决旧路径被中间件拦截返回 `legacy_api_disabled` (410) 的问题
+- `standalone_api.py`：注入 `app.state.runtime = runtime`；注册 messages router
+
+### 验证结果
+
+- `/api/health` → 200 ✅
+- `/api/v1/ai/test` → 200 `{"ok":true,"message":"Connected — model: gpt-5.3-codex-spark"}` ✅
+- `POST /api/v1/users/register`（admin session）→ 201 ✅
+- 新 bundle：`index-BqseTvKJ.js`（308.87 KB）/ `index-CyWC_Vl7.css`（76.16 KB）
+
 ## 2026-07-14：修复 auth 记录缺失导致全员 401（hotfix）
 
 - `web-settings.json` 缺少 `auth` 字段（无 `scheme`/`salt`/`hash`），导致所有认证请求返回 401，前端误报"AI 翻译失败"。

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import logging
 import os
 import secrets
@@ -22,7 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -40,7 +39,12 @@ from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
 from .outbox import OutboxDispatcher
-from .runtime import StandaloneRuntime, save_runtime_settings
+from .runtime import (
+    StandaloneRuntime,
+    is_authenticated as _is_authenticated,
+    verify_password as _verify_password,
+    save_runtime_settings,
+)
 from .security.internal_auth import InternalAuthError, verify_internal_token
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,7 @@ _DEFAULT_ALLOWED_ORIGINS = (
 
 
 class LoginRequest(BaseModel):
+    username: str = Field(default="", max_length=128)
     password: str
 
 
@@ -74,25 +79,6 @@ class DisabledBridgeClient:
     stop = _disabled
     delete = _disabled
     send = _disabled
-
-
-def _verify_password(record: dict[str, Any], password: str) -> bool:
-    try:
-        derived = hashlib.pbkdf2_hmac(
-            "sha256",
-            password.encode(),
-            str(record["salt"]).encode(),
-            int(record["iterations"]),
-        ).hex()
-        return hmac.compare_digest(derived, str(record["hash"]))
-    except (KeyError, TypeError, ValueError):
-        return False
-
-
-def _is_authenticated(runtime: StandaloneRuntime, request: Request) -> bool:
-    token = request.headers.get("x-session-token", "")
-    session = (runtime.web_settings.get("sessions") or {}).get(token)
-    return bool(session and float(session.get("expires_at", 0)) > time.time())
 
 
 def _allowed_cors_origins(raw: str | None = None) -> list[str]:
@@ -213,6 +199,11 @@ def build_standalone_app(
         runtime_dir, internal_event_token=internal_event_token
     )
     factory = account_session_factory or create_session_factory(create_engine())
+
+    # Set up AI runtime settings so Rewriter can find the WendingAI API key
+    from whatsapp_chat_system.web_api import setup_ai_runtime_settings
+
+    setup_ai_runtime_settings(runtime.ai_settings)
     bridge = account_bridge or BridgeClient(
         base_url=os.getenv("WHATSAPP_BRIDGE_V2_URL", "http://127.0.0.1:3100"),
         internal_token=runtime.internal_event_token,
@@ -268,6 +259,7 @@ def build_standalone_app(
     app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
     app.state.ready = False
+    app.state.runtime = runtime
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_cors_origins(),
@@ -288,8 +280,14 @@ def build_standalone_app(
         create_whatsapp_events_router(factory, runtime.internal_event_token)
     )
     app.include_router(create_personas_router(runtime, factory))
+    # Lazy import to avoid circular dependency at module load time
+    from .api.v1.users import create_users_router as _create_users_router
+    from .api.v1.messages import create_messages_router as _create_messages_router
+
     app.include_router(create_settings_router(runtime, factory))
     app.include_router(create_operations_router(factory))
+    app.include_router(_create_users_router(runtime))
+    app.include_router(_create_messages_router())
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
@@ -326,7 +324,7 @@ def build_standalone_app(
             or path in {"/api/health", "/api/login", "/api/logout"}
         ):
             return await call_next(request)
-        if not _is_authenticated(runtime, request):
+        if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
             return JSONResponse({"detail": "Unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -388,24 +386,90 @@ def build_standalone_app(
                     },
                 )
 
-            if not _verify_password(
-                runtime.web_settings.get("auth") or {}, payload.password
-            ):
+            # Multi-user lookup: username → password record
+            users: dict[str, Any] = runtime.web_settings.get("users") or {}
+            username = (payload.username or "").strip()
+            if not username:
                 recent.append(now)
                 attempt_map[client_ip] = recent
                 runtime.web_settings["login_attempts"] = attempt_map
                 save_runtime_settings(runtime)
-                raise HTTPException(status_code=401, detail="Invalid password")
+                raise HTTPException(status_code=401, detail="Username is required")
+
+            # ── Migration: auth (old single-password) → users (new multi-user) ──
+            # If no users exist yet, bootstrap from the legacy auth record.
+            # This is a one-time migration on the first login after upgrade.
+            if not users and runtime.web_settings.get("auth"):
+                admin_pw = "Welcome2026!"  # temp password – forces change on next login
+                salt = secrets.token_hex(16)
+                derived = hashlib.pbkdf2_hmac(
+                    "sha256", admin_pw.encode(), salt.encode(), 600_000
+                )
+                users["admin"] = {
+                    "scheme": "pbkdf2_sha256",
+                    "salt": salt,
+                    "iterations": 600_000,
+                    "hash": derived.hex(),
+                    "created_at": time.time(),
+                    "password_change_required": True,
+                }
+                runtime.web_settings["users"] = users
+                # Keep legacy auth for backward compat during migration window
+                save_runtime_settings(runtime)
+
+            user_record: dict[str, Any] | None = users.get(username)
+            # Backward compat: also accept legacy auth (single shared password)
+            if not user_record and username == "admin":
+                user_record = runtime.web_settings.get("auth")
+            if not user_record or not _verify_password(user_record, payload.password):
+                recent.append(now)
+                attempt_map[client_ip] = recent
+                runtime.web_settings["login_attempts"] = attempt_map
+                save_runtime_settings(runtime)
+                raise HTTPException(
+                    status_code=401, detail="Invalid username or password"
+                )
+
+            # If password_change_required, return flag so frontend forces a change
+            needs_password_change = False
+            if user_record.get("password_change_required"):
+                needs_password_change = True
+                # Clear the flag on successful login so they land in the app
+                user_record.pop("password_change_required", None)
+                users[username] = user_record
+                runtime.web_settings["users"] = users
+                save_runtime_settings(runtime)
+
+            # Logout all existing sessions for this user (single-session policy)
+            sessions = dict(runtime.web_settings.get("sessions") or {})
+            for tok, sess in list(sessions.items()):
+                if (
+                    sess.get("username") == username
+                    and float(sess.get("expires_at", 0)) > now
+                ):
+                    sessions.pop(tok, None)
 
             attempt_map.pop(client_ip, None)
             runtime.web_settings["login_attempts"] = attempt_map
             token = secrets.token_urlsafe(24)
             ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
-            sessions = dict(runtime.web_settings.get("sessions") or {})
-            sessions[token] = {"issued_at": now, "expires_at": now + ttl}
+            sessions[token] = {
+                "issued_at": now,
+                "expires_at": now + ttl,
+                "username": username,
+            }
             runtime.web_settings["sessions"] = sessions
             save_runtime_settings(runtime)
-        return {"success": True, "session_token": token, "expires_in": ttl}
+
+        resp: dict[str, Any] = {
+            "success": True,
+            "session_token": token,
+            "expires_in": ttl,
+            "username": username,
+        }
+        if needs_password_change:
+            resp["password_change_required"] = True
+        return resp
 
     @app.post("/api/logout")
     def logout(request: Request) -> dict[str, Any]:

@@ -8,7 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -44,6 +44,12 @@ class AISettingsUpdate(BaseModel):
     api_key: str | None = Field(default=None, max_length=512)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     max_retries: int | None = Field(default=None, ge=0, le=5)
+
+
+class AITestRequest(BaseModel):
+    base_url: str | None = None
+    default_model: str | None = None
+    api_key: str | None = None
 
 
 class ContactSettingsUpdate(BaseModel):
@@ -249,6 +255,60 @@ def create_settings_router(
             row.max_retries = payload.max_retries
         session.commit()
         return {"success": True, **_ai_payload(runtime, row)}
+
+    @router.post("/ai/test")
+    def test_ai_connection(
+        payload: AITestRequest = Body(...),
+    ) -> dict[str, Any]:
+        """
+        Test AI connection with the given or currently configured credentials.
+        Used by the Global AI settings page to verify connectivity before saving.
+        """
+        from whatsapp_chat_system.ai.provider import AIProviderError
+        from whatsapp_chat_system.ai.provider import WendingAIProvider
+
+        # Resolve effective credentials
+        effective_key = payload.api_key.strip() if payload.api_key else None
+        effective_base_url = (
+            payload.base_url or ""
+        ).strip() or runtime.ai_settings.base_url
+        effective_model = (
+            payload.default_model or ""
+        ).strip() or runtime.ai_settings.default_model
+
+        if effective_key is None:
+            # Try to read from DB
+            row = next(get_session()).get(AIRuntimeSetting, "global")
+            if row and row.api_key_ciphertext:
+                from whatsapp_chat_system.ai.crypto import decrypt_api_key
+
+                effective_key = decrypt_api_key(row.api_key_ciphertext)
+
+        if not effective_key:
+            return {"ok": False, "message": "No API key configured"}
+
+        # Build a temporary provider to test
+        from whatsapp_chat_system.settings import AISettings
+
+        test_settings = AISettings(
+            base_url=effective_base_url,
+            api_key=effective_key,
+            default_model=effective_model or "gpt-5.4",
+            timeout_seconds=90,
+            max_retries=2,
+        )
+        provider = WendingAIProvider(test_settings)
+
+        try:
+            result = provider.chat(
+                model=effective_model,
+                messages=[{"role": "user", "content": "Hi"}],
+            )
+            return {"ok": True, "message": f"Connected — model: {result.model}"}
+        except AIProviderError as exc:
+            return {"ok": False, "message": exc.message or exc.code}
+        except Exception as exc:
+            return {"ok": False, "message": str(exc)}
 
     @router.get("/dashboard")
     def dashboard(session: Session = Depends(get_session)) -> dict[str, Any]:

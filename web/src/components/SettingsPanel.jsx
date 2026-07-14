@@ -40,6 +40,8 @@ export default function SettingsPanel({
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiSaving, setAiSaving] = useState(false)
   const [aiSaved, setAiSaved] = useState(false)
+  const [aiTesting, setAiTesting] = useState(false)
+  const [aiTestResult, setAiTestResult] = useState(null) // { ok, message }
 
   useEffect(() => {
     if (!open) return
@@ -115,6 +117,31 @@ export default function SettingsPanel({
       setAiApiKey('')
     } finally {
       setAiSaving(false)
+    }
+  }
+
+  const testAiConnection = async () => {
+    setAiTesting(true)
+    setAiTestResult(null)
+    try {
+      const res = await fetch('/api/v1/ai/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-token': window.__session_token__ || '',
+        },
+        body: JSON.stringify({
+          base_url: aiBaseUrl || undefined,
+          default_model: aiModel || undefined,
+          api_key: aiApiKey || undefined,
+        }),
+      })
+      const data = await res.json()
+      setAiTestResult({ ok: res.ok && data.ok, message: data.message || data.error || (res.ok ? 'OK' : 'Failed') })
+    } catch (err) {
+      setAiTestResult({ ok: false, message: err.message })
+    } finally {
+      setAiTesting(false)
     }
   }
 
@@ -338,7 +365,7 @@ export default function SettingsPanel({
                     <input
                       type="password"
                       value={aiApiKey}
-                      onChange={e => setAiApiKey(e.target.value)}
+                      onChange={e => { setAiApiKey(e.target.value); setAiTestResult(null) }}
                       placeholder={apiSettings.api_key_configured ? t('apiKeyKeep') : t('apiKeyInput')}
                       autoComplete="new-password"
                     />
@@ -353,7 +380,7 @@ export default function SettingsPanel({
                     <input
                       type="text"
                       value={aiModel}
-                      onChange={e => setAiModel(e.target.value)}
+                      onChange={e => { setAiModel(e.target.value); setAiTestResult(null) }}
                       placeholder={apiSettings.default_model || t('settingAiModelPlaceholder')}
                     />
                   </label>
@@ -362,13 +389,22 @@ export default function SettingsPanel({
                     <input
                       type="url"
                       value={aiBaseUrl}
-                      onChange={e => setAiBaseUrl(e.target.value)}
+                      onChange={e => { setAiBaseUrl(e.target.value); setAiTestResult(null) }}
                       placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
                     />
                   </label>
                 </div>
                 {aiSaved ? <div className="wx-ai-saved visible">{t('saved')}</div> : <div className="wx-ai-saved" />}
+                {aiTestResult && (
+                  <div className={`wx-ai-test-result ${aiTestResult.ok ? 'ok' : 'error'}`}>
+                    <span className="wx-ai-test-icon">{aiTestResult.ok ? '✓' : '✗'}</span>
+                    {aiTestResult.message}
+                  </div>
+                )}
                 <div className="wx-ai-actions">
+                  <button className="ghost-btn" type="button" onClick={testAiConnection} disabled={aiTesting}>
+                    {aiTesting ? t('testing') + '…' : t('testConnection')}
+                  </button>
                   <button className="wx-primary-btn" type="button" onClick={saveAiSettings} disabled={aiSaving}>
                     {aiSaving ? t('saving') : t('save')}
                   </button>

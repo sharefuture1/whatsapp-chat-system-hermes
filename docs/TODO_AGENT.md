@@ -9,7 +9,15 @@
 - [x] Legacy AI assistant 消息 delta 同会话 single-flight/coalescing，慢响应不再被后续 tick 丢弃
 - [x] 相同消息 ID upsert、optimistic 状态对账、真实新增消息精确计数
 - [x] Legacy delta cache-only 翻译挂载；V2 刷新保留有效本地译文；翻译失败 30 秒有界重试
-- [ ] 将翻译旁路 JSON 迁移到数据库 revision/event cursor，并提供 SSE/WebSocket `translation.completed` 跨客户端实时同步
+- [x] **全局 AI 设置页测试连接按钮**（Implemented）
+  - `POST /api/v1/ai/test` 直接调用 `WendingAIProvider` 验证凭据，返回 `{ok, message}`
+  - 前端 SettingsPanel AI 页新增 ghost 按钮 + 绿色 OK / 红色 Error 反馈
+  - 生产验证：`{"ok":true,"message":"Connected — model: gpt-5.3-codex-spark"}` → 200
+  - 表单任一字段改动自动清除测试结果，防止误读旧状态
+- [x] **翻译端点 410 修复**（Implemented）
+  - 新增 `api/v1/messages.py`：`POST /api/v1/messages/{message_id}/translate`
+  - 匹配前端旧路径 `/messages/${msg.message_id}/translate`，解决中间件拦截问题
+  - 服务端 curl 测试 200，AI 翻译功能不再返回 410
 
 ### P0 — AI 关系智能（数据层已实现，Worker/API/UI 待推进）
 

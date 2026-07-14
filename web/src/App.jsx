@@ -17,8 +17,10 @@ import PluginCenterPage from './components/PluginCenterPage'
 import SchedulerCenterPage from './components/SchedulerCenterPage'
 import SettingsPanel from './components/SettingsPanel'
 import TabBar from './components/TabBar'
+import UserManagementPage from './components/UserManagementPage'
 
 const TOKEN_KEY='***'
+const USERNAME_KEY='chat-system-username'
 const PAGE_SIZE = 30
 const PIN_KEY = 'chat-system-pinned'
 const READ_KEY = 'chat-system-read'
@@ -62,8 +64,10 @@ function AppInner() {
     setSessionToken(stored)
     return stored
   })
+  const USERNAME_KEY = 'chat-system-username'
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+  const [loggedInUsername, setLoggedInUsername] = useState(() => localStorage.getItem(USERNAME_KEY) || '')
   const [banner, setBanner] = useState('')
   const [health, setHealth] = useState(null)
   const [dashboard, setDashboard] = useState(null)
@@ -91,6 +95,7 @@ function AppInner() {
   const [pluginCenterOpen, setPluginCenterOpen] = useState(false)
   const [schedulerCenterOpen, setSchedulerCenterOpen] = useState(false)
   const [broadcastCenterOpen, setBroadcastCenterOpen] = useState(false)
+  const [userMgmOpen, setUserMgmOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
   const accountsRef = useRef([])
   const refreshCoordinatorRef = useRef(createRefreshCoordinator())
@@ -109,8 +114,10 @@ function AppInner() {
       if (sessionToken) await api.post('/logout', {})
     } catch {}
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USERNAME_KEY)
     clearSessionToken()
     setToken('')
+    setLoggedInUsername('')
     setDashboard(null)
     setConversations([])
   }, [sessionToken])
@@ -127,17 +134,32 @@ function AppInner() {
 
   const showError = e => setBanner(e?.message || t('error'))
 
-  const handleLogin = async (password) => {
+  const handleLogin = async ({ username, password }) => {
     setLoginLoading(true)
     setLoginError('')
     try {
-      const data = await api.post('/login', { password })
+      const data = await api.post('/login', { username, password })
       localStorage.setItem(TOKEN_KEY, data.session_token)
+      localStorage.setItem(USERNAME_KEY, data.username || username)
       setSessionToken(data.session_token)
       setToken(data.session_token)
+      setLoggedInUsername(data.username || username)
     } catch (e) {
       setLoginError(e.message)
     } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  const handleRegister = async ({ username, password }) => {
+    setLoginLoading(true)
+    setLoginError('')
+    try {
+      await api.post('/v1/users/register', { username, password })
+      // Auto-login after successful registration
+      await handleLogin({ username, password })
+    } catch (e) {
+      setLoginError(e.message)
       setLoginLoading(false)
     }
   }
@@ -541,7 +563,7 @@ function AppInner() {
   }
 
   if (!sessionToken) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} loading={loginLoading} />
+    return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={loginError} loading={loginLoading} />
   }
 
   return (
@@ -664,13 +686,14 @@ function AppInner() {
           <DiscoverPage dashboard={dashboard} channels={settings.channels || []} conversations={conversations} />
         )}
 
-        {activeTab === 'me' && !accountCenterOpen && !pluginCenterOpen && (
+        {activeTab === 'me' && !accountCenterOpen && !pluginCenterOpen && !userMgmOpen && (
           <MePage
             health={health}
             onOpenSettings={() => { setSettingsInitialTab('ui'); setSettingsOpen(true) }}
             onOpenGlobalAi={() => { setSettingsInitialTab('ai'); setSettingsOpen(true) }}
             onOpenAccounts={() => setAccountCenterOpen(true)}
             onOpenPlugins={() => setPluginCenterOpen(true)}
+            onOpenUserMgm={() => setUserMgmOpen(true)}
             onLogout={logout}
             autoTranslate={autoTranslate}
             accountSummary={accountsController.summary}
@@ -683,6 +706,13 @@ function AppInner() {
             onBack={() => setPluginCenterOpen(false)}
             onOpenScheduler={() => setSchedulerCenterOpen(true)}
             onOpenBroadcast={() => setBroadcastCenterOpen(true)}
+          />
+        )}
+
+        {activeTab === 'me' && userMgmOpen && (
+          <UserManagementPage
+            onClose={() => setUserMgmOpen(false)}
+            onSwitchUser={() => { setUserMgmOpen(false); logout() }}
           />
         )}
 

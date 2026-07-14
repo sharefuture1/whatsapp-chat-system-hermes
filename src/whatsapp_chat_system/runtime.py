@@ -22,6 +22,10 @@ class StandaloneRuntimePaths:
     admin_channels_file: Path
     alias_file: Path
 
+    @property
+    def memory_dir(self) -> Path:
+        return self.root / "memory"
+
 
 @dataclass(slots=True)
 class StandaloneRuntime:
@@ -66,6 +70,7 @@ class StandaloneRuntime:
             admin_channels_file=root / "admin-channels.json",
             alias_file=root / "user-aliases.json",
         )
+        paths.memory_dir.mkdir(parents=True, exist_ok=True)
         if not paths.web_settings_file.exists():
             # Bootstrap is the only path that consumes the one-time password.
             web_settings = _default_web_settings()
@@ -177,6 +182,49 @@ def _save_json(path: Path, payload: Any) -> None:
 def save_runtime_settings(runtime: StandaloneRuntime) -> None:
     """Persist settings with the same atomic, restrictive policy as bootstrap."""
     _save_json(runtime.paths.web_settings_file, runtime.web_settings)
+
+
+def is_authenticated(runtime: StandaloneRuntime, token: str) -> bool:
+    """Return True if token is a valid, non-expired session token."""
+    session = (runtime.web_settings.get("sessions") or {}).get(token)
+    if not session:
+        return False
+    try:
+        return float(session.get("expires_at", 0)) > __import__("time").time()
+    except (TypeError, ValueError):
+        return False
+
+
+def session_info(runtime: StandaloneRuntime, token: str) -> dict[str, Any] | None:
+    """Return session dict (with username) if valid, else None."""
+    import time as _time
+
+    session = (runtime.web_settings.get("sessions") or {}).get(token)
+    if not session:
+        return None
+    try:
+        if float(session.get("expires_at", 0)) <= _time.time():
+            return None
+    except (TypeError, ValueError):
+        return None
+    return session
+
+
+def verify_password(record: dict[str, Any], password: str) -> bool:
+    """Verify a password against a stored PBKDF2 record."""
+    import hashlib
+    import hmac
+
+    try:
+        derived = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            str(record["salt"]).encode(),
+            int(record["iterations"]),
+        ).hex()
+        return hmac.compare_digest(derived, str(record["hash"]))
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def _build_password_record(password: str, iterations: int = 600000) -> dict[str, Any]:

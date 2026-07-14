@@ -1,6 +1,6 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-13 UTC
+> 最后更新：2026-07-14 UTC
 
 ## 当前结论
 
@@ -57,13 +57,13 @@
 - 聊天页面闪烁根因已修复：账号 3 秒轮询在数据不变时不再替换数组引用；Workspace 刷新 callback 不再依赖账号数组；ChatPane 初始加载仅依赖稳定会话 identity，不再因 settings 对象刷新而清空消息。
 - 微信式聊天页已收敛为单一“…”头部入口、双方 40px 方形头像、左右镜像气泡、译文内嵌气泡和可折叠输入工具面板；移动 390×844 无横向溢出。
 - 自动翻译增加 message-id in-flight 去重，同一条消息不会被并行重复请求 Provider。
-- 真实 AI 探针已完成老挝语→中文翻译；失败状态会向前端显示配置或 Provider 错误，不再静默或伪装成功。
+- 全局 AI 设置页新增**测试连接**按钮：`POST /api/v1/ai/test` 直接调用 `WendingAIProvider` 验证凭据，返回 `{ok, message}`；生产验证通过：`Connected — model: gpt-5.3-codex-spark`；表单任一改动自动清除测试结果，防止误读旧状态。
 - 全站页面壳与滚动已完成一轮生产审计：桌面 1440×900 和移动 390×844 无横向溢出，通讯录/发现具有独立滚动容器，React Hooks 顺序崩溃已修复。
 
 ## 线上与影子状态
 
 - FastAPI：`http://127.0.0.1:8792`，health 200。
-- 前端：`index-DRPbZjTf.js` / `index-n1Ei7oEG.css`，本机 FastAPI 与公网 `https://whats.future1.us` 资源哈希一致。
+- 前端：`index-BqseTvKJ.js` / `index-CyWC_Vl7.css`，本机 FastAPI 与公网 `https://whats.future1.us` 资源哈希一致。
 - Legacy Bridge：`127.0.0.1:3000`，保持运行。
 - Bridge V2：`127.0.0.1:3100` 当前运行，live/ready 200，内部 token 与 FastAPI 配置一致；当前登记业务账号状态为 offline。
 - 独立会话 API：`/api/v1/conversations` 返回当前 V2 独立库数据，实测全部账号视图 2 条会话。
