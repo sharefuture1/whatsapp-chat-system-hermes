@@ -9,6 +9,8 @@ export function getApiBase() {
 
 export function setSessionToken(token) {
   sessionToken = token || ''
+  requestCache.clear()
+  inflightRequests.clear()
 }
 
 export function clearSessionToken() {
@@ -61,8 +63,21 @@ function disabledLegacyFallback(path, status, data) {
   return undefined
 }
 
-async function request(path, { method = 'GET', body, signal } = {}) {
-  const headers = {}
+const requestCache = new Map()
+const inflightRequests = new Map()
+
+function cacheKey(path, method) { return `${sessionToken}:${method}:${path}` }
+
+async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = {}) {
+  const key = cacheKey(path, method)
+  if (method === 'GET' && cacheTtlMs > 0) {
+    const cached = requestCache.get(key)
+    if (cached && cached.expiresAt > Date.now()) return cached.data
+  }
+  if (method === 'GET' && inflightRequests.has(key)) return inflightRequests.get(key)
+  const operation = (async () => {
+    if (method !== 'GET') requestCache.clear()
+    const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (sessionToken) headers['x-session-token'] = sessionToken
   const res = await fetch(`${DEFAULT_API_BASE}${path}`, {
@@ -84,10 +99,20 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     throw new ApiError(res.status, data?.detail, data)
   }
   return data
+  })()
+  if (method === 'GET') {
+    inflightRequests.set(key, operation)
+    operation.then(
+      () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
+      () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
+    )
+    if (cacheTtlMs > 0) operation.then(data => requestCache.set(key, { data, expiresAt: Date.now() + cacheTtlMs })).catch(() => {})
+  }
+  return operation
 }
 
 export const api = {
-  get: (path, opts) => request(path, opts),
+  get: (path, opts) => request(path, { ...opts, cacheTtlMs: opts?.cacheTtlMs ?? (path.startsWith('/v1/personas') ? 30_000 : 5_000), dedupe: opts?.dedupe !== false }),
   post: (path, body, opts) => request(path, { ...opts, method: 'POST', body }),
   put: (path, body, opts) => request(path, { ...opts, method: 'PUT', body }),
   patch: (path, body, opts) => request(path, { ...opts, method: 'PATCH', body }),

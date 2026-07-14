@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { api } from '../api'
 import { useSettings } from '../settings'
 import { SUPPORTED_LANGUAGES } from '../i18n'
 
@@ -124,20 +125,12 @@ export default function SettingsPanel({
     setAiTesting(true)
     setAiTestResult(null)
     try {
-      const res = await fetch('/api/v1/ai/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-session-token': window.__session_token__ || '',
-        },
-        body: JSON.stringify({
-          base_url: aiBaseUrl || undefined,
-          default_model: aiModel || undefined,
-          api_key: aiApiKey || undefined,
-        }),
+      const data = await api.post('/v1/ai/test', {
+        base_url: aiBaseUrl || undefined,
+        default_model: aiModel || undefined,
+        api_key: aiApiKey || undefined,
       })
-      const data = await res.json()
-      setAiTestResult({ ok: res.ok && data.ok, message: data.message || data.error || (res.ok ? 'OK' : 'Failed') })
+      setAiTestResult({ ok: data?.ok === true, message: data?.message || data?.error || 'Failed' })
     } catch (err) {
       setAiTestResult({ ok: false, message: err.message })
     } finally {
