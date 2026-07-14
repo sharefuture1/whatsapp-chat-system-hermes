@@ -276,6 +276,7 @@ def build_standalone_app(
     app.state.runtime_mode = "standalone"
     app.state.ready = False
     app.state.runtime = runtime
+    app.state.session_factory = factory
     app.state.ai_settings_manager = runtime_ai_settings
     app.add_middleware(
         CORSMiddleware,

@@ -354,6 +354,70 @@ class OutboxMessage(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
+class MessageTranslation(TimestampMixin, Base):
+    __tablename__ = 'message_translations'
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'running', 'completed', 'failed', 'dead')", name='status_valid'),
+        Index('ix_message_translations_conversation_status_updated', 'conversation_id', 'status', 'updated_at'),
+        Index('ix_message_translations_account_status_retry', 'account_id', 'status', 'retry_after'),
+        UniqueConstraint('message_id', 'target_lang', 'source_text_hash', name='uq_message_translations_message_target_hash'),
+    )
+
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False
+    )
+    message_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False
+    )
+    source_text: Mapped[str | None] = mapped_column(Text)
+    source_text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_lang: Mapped[str | None] = mapped_column(String(32))
+    target_lang: Mapped[str] = mapped_column(String(32), nullable=False, default='zh-CN')
+    translated_text: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='pending')
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(255))
+    context_window_size: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    batch_id: Mapped[str | None] = mapped_column(String(UUID_LENGTH), ForeignKey('translation_batches.id', ondelete='SET NULL'))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TranslationBatch(TimestampMixin, Base):
+    __tablename__ = 'translation_batches'
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'claimed', 'running', 'completed', 'failed', 'dead')", name='status_valid'),
+        Index('ix_translation_batches_account_status_created', 'account_id', 'status', 'created_at'),
+        Index('ix_translation_batches_account_status_retry', 'account_id', 'status', 'retry_after'),
+    )
+
+    id: Mapped[str] = mapped_column(String(UUID_LENGTH), primary_key=True, default=new_uuid)
+    account_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('whatsapp_accounts.id', ondelete='CASCADE'), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False
+    )
+    anchor_message_id: Mapped[str] = mapped_column(
+        String(UUID_LENGTH), ForeignKey('messages.id', ondelete='CASCADE'), nullable=False
+    )
+    target_lang: Mapped[str] = mapped_column(String(32), nullable=False, default='zh-CN')
+    window_size: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default='pending')
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[str | None] = mapped_column(String(255))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ConversationSegment(TimestampMixin, Base):
     __tablename__ = 'conversation_segments'
     __table_args__ = (

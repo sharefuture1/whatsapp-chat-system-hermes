@@ -1,3 +1,12 @@
+## 2026-07-14：P1-05 翻译数据库真源 Phase 1（数据库落地，异步批入口就位）
+
+- 新增数据模型：`message_translations`、`translation_batches`，并提供 Alembic `0005_message_translations.py`。
+- `/api/v1/messages/{message_id}/translate` 现在优先读取数据库真源；命中相同 `source_text_hash + target_lang` 的 completed 记录直接返回，不再只依赖 `translations__*.json`。
+- 消息翻译成功/失败均回写数据库：`translated_text / status / error_code / error_message / source_lang / completed_at`。
+- `/api/v1/conversations/{conversation_id}/messages` 已开始返回 `translated / translation_status / translation_updated_at`，前端可逐步切换到数据库真源展示。
+- 新增 `POST /api/v1/conversations/{conversation_id}/translations`：返回 `202 queued`、`batch_id`、`queued_message_ids`、`cached_message_ids`，为后续真正异步 Worker/SSE 铺路。
+- 本轮仍未完成：真正的 TranslationDispatcher/批任务执行、管理员窗口策略、SSE/WebSocket；因此 SDD-P1-05 继续保持 `In Progress`。
+
 ## 2026-07-14：P0-09 自动回复可靠性补全（执行前竞态取消 + lease recovery + backoff）
 
 - `auto_reply.py`：入站自动回复 enqueue 现在显式过滤 `message_type=system`，并将 `account_id` 纳入 idempotency key / input hash 语义，降低跨账号与策略混淆风险。

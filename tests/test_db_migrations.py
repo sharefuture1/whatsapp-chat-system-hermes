@@ -24,6 +24,8 @@ CORE_TABLES = {
     'contact_ai_overrides',
     'whatsapp_events',
     'outbox_messages',
+    'message_translations',
+    'translation_batches',
     'conversation_segments',
     'conversation_summaries',
     'profile_claims',
@@ -72,6 +74,15 @@ EXPECTED_COLUMNS = {
     'outbox_messages': {
         'id', 'message_id', 'account_id', 'idempotency_key', 'status', 'attempts', 'available_at',
         'lease_owner', 'lease_expires_at', 'last_error', 'created_at', 'updated_at',
+    },
+    'message_translations': {
+        'id', 'account_id', 'conversation_id', 'message_id', 'source_text', 'source_text_hash', 'source_lang',
+        'target_lang', 'translated_text', 'status', 'error_code', 'error_message', 'retry_after', 'provider',
+        'model', 'context_window_size', 'batch_id', 'completed_at', 'created_at', 'updated_at',
+    },
+    'translation_batches': {
+        'id', 'account_id', 'conversation_id', 'anchor_message_id', 'target_lang', 'window_size', 'status',
+        'attempt_count', 'retry_after', 'error_code', 'error_message', 'requested_by', 'completed_at', 'created_at', 'updated_at',
     },
 }
 
@@ -136,6 +147,17 @@ def test_alembic_upgrade_creates_nine_core_tables_columns_and_foreign_keys(tmp_p
                 ('message_id', 'messages', 'id'),
                 ('account_id', 'whatsapp_accounts', 'id'),
             },
+            'message_translations': {
+                ('account_id', 'whatsapp_accounts', 'id'),
+                ('conversation_id', 'conversations', 'id'),
+                ('message_id', 'messages', 'id'),
+                ('batch_id', 'translation_batches', 'id'),
+            },
+            'translation_batches': {
+                ('account_id', 'whatsapp_accounts', 'id'),
+                ('conversation_id', 'conversations', 'id'),
+                ('anchor_message_id', 'messages', 'id'),
+            },
         }
         for table_name, expected in expected_foreign_keys.items():
             actual = {
@@ -162,6 +184,7 @@ def test_core_unique_constraints_partial_message_idempotency_and_indexes(tmp_pat
         assert ('account_id', 'sequence') in _index_column_sets(inspector, 'whatsapp_events')
         assert ('message_id',) in _unique_column_sets(inspector, 'outbox_messages')
         assert ('idempotency_key',) in _unique_column_sets(inspector, 'outbox_messages')
+        assert ('message_id', 'target_lang', 'source_text_hash') in _unique_column_sets(inspector, 'message_translations')
 
         assert {
             ('account_id', 'archived', 'last_message_at'),

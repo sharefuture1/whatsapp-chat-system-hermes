@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Callable, Generator
 from datetime import datetime, timezone
@@ -11,12 +12,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from whatsapp_chat_system.db.models import (
+    Conversation,
     Contact,
     ContactAIOverride,
-    Conversation,
     Message,
+    MessageTranslation,
+    OutboxMessage,
+    TranslationBatch,
     WhatsAppAccount,
 )
 from whatsapp_chat_system.outbox import enqueue_outbox_message
@@ -33,6 +36,10 @@ def _display_name(*values: Any) -> str | None:
             continue
         return text
     return None
+
+
+def _source_text_hash(text: str) -> str:
+    return hashlib.sha256((text or '').encode('utf-8')).hexdigest()
 
 
 def _fallback_contact_name(remote_jid: str) -> str:
@@ -473,6 +480,14 @@ def create_conversations_router(
                 "before_id": oldest.id,
             }
         rows.reverse()
+        translation_rows = session.scalars(select(MessageTranslation).where(
+            MessageTranslation.conversation_id == conversation.id,
+            MessageTranslation.message_id.in_([message.id for message in rows]),
+            MessageTranslation.target_lang == 'zh-CN',
+        ).order_by(MessageTranslation.updated_at.desc())).all() if rows else []
+        translations_by_message: dict[str, MessageTranslation] = {}
+        for item in translation_rows:
+            translations_by_message.setdefault(item.message_id, item)
         messages = [
             {
                 "message_id": message.id,
@@ -490,7 +505,10 @@ def create_conversations_router(
                 "sent": message.status in {"sent", "delivered", "read"},
                 "error": message.error_message,
                 "retryable": message.status != "failed" or message.retry_count < 6,
-                "lang": "Unknown",
+                "lang": translation.source_lang if (translation := translations_by_message.get(message.id)) else "Unknown",
+                "translated": translation.translated_text if translation and translation.status == 'completed' else None,
+                "translation_status": translation.status if translation else None,
+                "translation_updated_at": _iso(translation.updated_at) if translation else None,
                 "timestamp": _timestamp(message.occurred_at or message.created_at),
                 "occurred_at": _iso(message.occurred_at),
                 "created_at": _iso(message.created_at),
@@ -576,6 +594,72 @@ def create_conversations_router(
     class _TranslateRequest(BaseModel):
         user_id: str = Field(default="", max_length=255)
         content: str = Field(default="", max_length=10000)
+
+    class TranslationBatchRequest(BaseModel):
+        anchor_message_id: str = Field(..., max_length=36)
+        target_lang: str = Field(default='zh-CN', max_length=32)
+        window_size: int = Field(default=10, ge=1, le=20)
+
+    @router.post(
+        "/conversations/{conversation_id}/translations",
+        tags=["conversations"],
+        status_code=202,
+        summary="Queue conversation translation batch",
+    )
+    def queue_translation_batch(
+        conversation_id: str,
+        payload: TranslationBatchRequest,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        anchor = session.get(Message, payload.anchor_message_id)
+        if anchor is None or anchor.conversation_id != conversation.id:
+            raise HTTPException(status_code=404, detail="Anchor message not found")
+        rows = session.scalars(select(Message).where(
+            Message.conversation_id == conversation.id,
+            func.coalesce(Message.occurred_at, Message.created_at) <= func.coalesce(anchor.occurred_at, anchor.created_at),
+        ).order_by(func.coalesce(Message.occurred_at, Message.created_at).desc(), Message.id.desc()).limit(payload.window_size)).all()
+        rows.reverse()
+        queued_message_ids: list[str] = []
+        cached_message_ids: list[str] = []
+        for message in rows:
+            text = message.content or ''
+            if not text:
+                continue
+            lang = _language_hint_for(text)
+            if lang == 'Chinese':
+                cached_message_ids.append(message.id)
+                continue
+            existing = session.scalar(select(MessageTranslation).where(
+                MessageTranslation.message_id == message.id,
+                MessageTranslation.target_lang == payload.target_lang,
+                MessageTranslation.source_text_hash == _source_text_hash(text),
+                MessageTranslation.status == 'completed',
+            ))
+            if existing is not None:
+                cached_message_ids.append(message.id)
+            else:
+                queued_message_ids.append(message.id)
+        batch = TranslationBatch(
+            account_id=conversation.account_id,
+            conversation_id=conversation.id,
+            anchor_message_id=anchor.id,
+            target_lang=payload.target_lang,
+            window_size=payload.window_size,
+            status='pending',
+        )
+        session.add(batch)
+        session.commit()
+        return {
+            'batch_id': batch.id,
+            'status': 'queued',
+            'queued_message_ids': queued_message_ids,
+            'cached_message_ids': cached_message_ids,
+            'target_lang': payload.target_lang,
+            'window_size': payload.window_size,
+        }
 
     @router.post(
         "/conversations/{conversation_id}/translate",
