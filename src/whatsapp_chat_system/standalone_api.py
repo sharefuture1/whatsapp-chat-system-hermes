@@ -339,7 +339,7 @@ def build_standalone_app(
         if (
             request.method == "OPTIONS"
             or not path.startswith("/api")
-            or path in {"/api/health", "/api/login", "/api/logout", "/api/v1/automation/health"}
+            or path in {"/api/health", "/api/login", "/api/logout", "/api/v1/automation/health", "/api/v1/me"}
         ):
             return await call_next(request)
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
@@ -384,6 +384,25 @@ def build_standalone_app(
     @app.get("/api/v1/automation/health")
     def automation_health() -> dict[str, Any]:
         return {"ok": True, "worker": auto_reply_worker.health(), "service": "standalone"}
+
+    @app.get("/api/v1/me")
+    def get_me(request: Request) -> dict[str, Any]:
+        token = request.headers.get("x-session-token", "")
+        sessions = dict(runtime.web_settings.get("sessions") or {})
+        session = sessions.get(token)
+        if not session:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        now = time.time()
+        if float(session.get("expires_at", 0)) < now:
+            raise HTTPException(status_code=401, detail="Session expired")
+        username = session.get("username", "admin")
+        users: dict[str, Any] = runtime.web_settings.get("users") or {}
+        user = users.get(username, {})
+        return {
+            "username": username,
+            "role": user.get("role", "admin"),  # admin | operator | viewer
+            "session_expires_at": session.get("expires_at"),
+        }
 
     @app.post("/api/login")
     def login(request: Request, payload: LoginRequest) -> dict[str, Any]:

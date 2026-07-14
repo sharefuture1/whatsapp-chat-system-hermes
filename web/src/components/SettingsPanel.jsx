@@ -20,6 +20,7 @@ export default function SettingsPanel({
   modelDefault = '',
   apiSettings = {},
   onSaveAiSettings,
+  currentUser = { role: 'admin' }, // { username, role }
 }) {
   const { t, language, setLanguage, theme, setTheme } = useSettings()
   const [draftChannels, setDraftChannels] = useState(channels)
@@ -222,6 +223,7 @@ export default function SettingsPanel({
                       onChange={e => setReply(prev => ({ ...prev, translate_max_length: Number(e.target.value) || 60 }))}
                     />
                   </label>
+                  {currentUser.role === 'admin' ? (
                   <label className="full-span">
                     <span>{t('settingAiModel')}</span>
                     <input
@@ -235,6 +237,7 @@ export default function SettingsPanel({
                       </span>
                     ) : null}
                   </label>
+                  ) : null}
                   <label>
                     <span>{t('settingPreviewDebounce')}</span>
                     <input
@@ -243,6 +246,7 @@ export default function SettingsPanel({
                       onChange={e => setReply(prev => ({ ...prev, preview_debounce_ms: Number(e.target.value) || 320 }))}
                     />
                   </label>
+                  {currentUser.role === 'admin' ? (
                   <label className="full-span">
                     <span>{t('settingCustomSystemPrompt')}</span>
                     <textarea
@@ -252,6 +256,7 @@ export default function SettingsPanel({
                       placeholder={t('settingCustomSystemPromptHelp')}
                     />
                   </label>
+                  ) : null}
                   <label className="full-span">
                     <span>{t('settingDefaultReplyStyle')}</span>
                     <textarea
@@ -261,6 +266,7 @@ export default function SettingsPanel({
                       placeholder={t('settingDefaultReplyStyleHelp')}
                     />
                   </label>
+                  {currentUser.role === 'admin' ? (
                   <label className="checkbox">
                     <input
                       type="checkbox"
@@ -269,6 +275,7 @@ export default function SettingsPanel({
                     />
                     {t('settingAllowFallback')}
                   </label>
+                  ) : null}
                   <label className="checkbox">
                     <input
                       type="checkbox"
@@ -300,6 +307,8 @@ export default function SettingsPanel({
                             placeholder="123456@lid"
                           />
                         </label>
+                        {currentUser.role === 'admin' ? (
+                        <>
                         <label>
                           <span>{t('settingAiModel')}</span>
                           <input
@@ -322,6 +331,8 @@ export default function SettingsPanel({
                             placeholder={t('contactPromptHelp')}
                           />
                         </label>
+                        </>
+                        ) : null}
                         <label className="full-span">
                           <span>{t('settingDefaultReplyStyle')}</span>
                           <textarea

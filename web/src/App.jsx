@@ -68,6 +68,7 @@ function AppInner() {
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loggedInUsername, setLoggedInUsername] = useState(() => localStorage.getItem(USERNAME_KEY) || '')
+  const [currentUser, setCurrentUser] = useState({ username: '', role: 'admin' })
   const [banner, setBanner] = useState('')
   const [health, setHealth] = useState(null)
   const [dashboard, setDashboard] = useState(null)
@@ -254,12 +255,14 @@ function AppInner() {
   }, [commitConversationsPage, conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
 
   const refreshSettings = useCallback(async () => {
-    const [settingsData, aiData] = await Promise.all([
+    const [settingsData, aiData, meData] = await Promise.all([
       api.get('/v1/settings'),
       api.get('/v1/ai/settings').catch(() => ({})),
+      api.get('/v1/me').catch(() => ({ username: '', role: 'admin' })),
     ])
     setSettings(settingsData)
     setApiSettings(aiData)
+    setCurrentUser({ username: meData.username || '', role: meData.role || 'admin' })
   }, [])
 
   const [apiSettings, setApiSettings] = useState({})
@@ -750,6 +753,7 @@ function AppInner() {
         modelDefault={settings.model?.default || ''}
         apiSettings={apiSettings}
         onSaveAiSettings={saveAiSettings}
+        currentUser={currentUser}
       />
 
       {banner ? <div className="wx-toast">{banner}</div> : null}
