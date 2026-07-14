@@ -8,6 +8,7 @@
 - `TranslationDispatcher` 已接入 Standalone lifespan：轮询 `translation_batches.pending`，按锚点消息窗口执行翻译，并回填 `message_translations`。
 - Dispatcher 现优先走“单次窗口批量翻译”JSON 调用；若批量返回解析失败，再回退到逐条翻译，兼顾 SDD 方向与线上稳态。
 - `web/src/components/ChatPane.jsx` 的自动翻译主路径已开始切到 batch API：Standalone 模式优先调用 `/api/v1/conversations/{id}/translations`，再刷新消息列表读取数据库真源；Legacy 路径仍保留单条翻译回退。
+- 新增 `scripts/deploy-frontend-prod.sh`：自动执行前端 build、提取 bundle hash、rsync 到 `/opt/whatsapp-chat-system/web/dist`、校验生产 HTML 引用与静态资源 200，减少手工发布遗漏。
 
 ## 2026-07-14：P0-09 自动回复可靠性补全（执行前竞态取消 + lease recovery + backoff）
 
