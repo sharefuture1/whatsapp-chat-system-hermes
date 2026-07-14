@@ -409,6 +409,43 @@ export default function ChatPane({
     }
   }
 
+  const queueTranslationBatch = async (anchorMessage, generation, signal) => {
+    if (!standalone || !conversationId || !anchorMessage?.message_id) return false
+    const translationId = String(anchorMessage.message_id)
+    if (translatingIdsRef.current.has(translationId)) return false
+    translatingIdsRef.current.add(translationId)
+    try {
+      const windowSize = Number(uiSettings?.message_ops?.translation_context_window || 10)
+      await api.post(`/v1/conversations/${encodeURIComponent(conversationId)}/translations`, {
+        anchor_message_id: anchorMessage.message_id,
+        target_lang: uiSettings?.message_ops?.translation_target_language || 'zh-CN',
+        window_size: Number.isFinite(windowSize) ? Math.max(1, Math.min(20, windowSize)) : 10,
+      }, { signal })
+      if (generation !== translationGenerationRef.current || signal.aborted) return false
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (signal.aborted || generation !== translationGenerationRef.current) return false
+        await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 350 : 700))
+        const refreshed = await fetchPage(userId, page || 1, false)
+        if (!refreshed?.messages?.length) continue
+        const translatedNow = refreshed.messages.some(item => item.message_id === anchorMessage.message_id && item.translated)
+        if (translatedNow) {
+          setTranslationError('')
+          return true
+        }
+      }
+      commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(m => m.message_id === anchorMessage.message_id ? { ...m, translationRetryAfter: Date.now() + 30_000 } : m))
+      return false
+    } catch (error) {
+      if (signal.aborted || generation !== translationGenerationRef.current) return false
+      const code = error?.data?.detail?.code || error?.data?.code || error?.code
+      setTranslationError(code === 'auto_translate_disabled' ? t('translationDisabled') : t('translationFailed'))
+      commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(m => m.message_id === anchorMessage.message_id ? { ...m, translationRetryAfter: Date.now() + 30_000 } : m))
+      return false
+    } finally {
+      translatingIdsRef.current.delete(translationId)
+    }
+  }
+
   useEffect(() => {
     if (!autoTranslate) {
       translationGenerationRef.current += 1
@@ -426,13 +463,24 @@ export default function ChatPane({
     translationWorkerRunningRef.current = true
     ;(async () => {
       let processed = 0
-      while (!controller.signal.aborted && generation === translationGenerationRef.current && processed < 6) {
+      while (!controller.signal.aborted && generation === translationGenerationRef.current && processed < 3) {
+        const cachedCandidate = messagesRef.current.find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && loadTranslationCache(m.message_id, m.content))
+        if (cachedCandidate) {
+          const cached = loadTranslationCache(cachedCandidate.message_id, cachedCandidate.content)
+          if (cached) {
+            commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(item => item.message_id === cachedCandidate.message_id ? { ...item, ...cached } : item))
+            attempted.add(String(cachedCandidate.message_id || ''))
+            processed += 1
+            continue
+          }
+        }
         const msg = messagesRef.current.find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
         if (!msg) break
         const id = String(msg.message_id || '')
         attempted.add(id)
         processed += 1
-        await translateOne(msg, generation, controller.signal)
+        const handled = standalone ? await queueTranslationBatch(msg, generation, controller.signal) : await translateOne(msg, generation, controller.signal)
+        if (!handled) break
       }
     })().finally(() => {
       if (translationAbortRef.current === controller) translationAbortRef.current = null
