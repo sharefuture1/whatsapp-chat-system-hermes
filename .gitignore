@@ -8,6 +8,7 @@ __pycache__/
 
 # Virtual envs
 .venv/
+.venv-ci/
 venv/
 
 # Build artifacts
@@ -36,6 +37,9 @@ audit-artifacts/
 .artifacts/screenshots/
 .artifacts/audits/
 *.har
+
+# Editor backups
+*.bak
 
 # IDE
 .vscode/

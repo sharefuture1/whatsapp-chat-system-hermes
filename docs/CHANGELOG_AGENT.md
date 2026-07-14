@@ -1,9 +1,20 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-14：性能与前端可访问性优化 + 密码入库整改
+
+- AI Provider：`WendingAIProvider` 默认 Session 改为实例级持久复用（懒加载；`close()` 释放；注入 Session 生命周期归调用方），AI 翻译/重写不再每次调用重建 TCP+TLS 连接，重试共享同一连接池。
+- 数据库：`create_engine` 对非 SQLite（生产 PostgreSQL）启用 `pool_pre_ping` / `pool_recycle=1800` / `pool_size=10` / `max_overflow=20`，防止陈旧连接引发间歇性失败；SQLite 行为不变。
+- 前端性能：`ChatList`、`TabBar` memo 化；App 层将 `contactProfileMap`、`chatListAccounts` 与平台/账号切换、Tab 切换、打开设置回调用 useMemo/useCallback 稳定化，工作台轮询与无关 state 变化不再触发整列表重渲染。
+- 可访问性（SDD-P2-04 部分落地）：全局键盘 `:focus-visible` 焦点环；`prefers-reduced-motion` 下关闭装饰性过渡/动画。
+- 安全整改：移除本文件 2026-07-14 hotfix 条目中的明文生产密码（该密码视为已泄露，**必须在生产轮换**）；删除误提交的 `web/src/i18n.js.bak`；`.gitignore` 新增 `*.bak`。
+- 门禁：Python `238 passed`（+4）、Web `87 passed`（+4）+ Vite build、Bridge `74 passed` + lint、changed-files ruff check/format 与 `git diff --check` 全部通过。
+- 计划：`docs/plans/2026-07-14-perf-ui-optimization.md`。
+
 ## 2026-07-14：修复 auth 记录缺失导致全员 401（hotfix）
 
 - `web-settings.json` 缺少 `auth` 字段（无 `scheme`/`salt`/`hash`），导致所有认证请求返回 401，前端误报"AI 翻译失败"。
-- 重建密码记录（scheme: pbkdf2_sha256，密码：`W3lcome2026!`），重启后登录和 AI 翻译恢复正常。
+- 重建密码记录（scheme: pbkdf2_sha256；密码本体不入 Git，见 SDD 总纲安全纪律），重启后登录和 AI 翻译恢复正常。
+- **安全整改（2026-07-14）**：本条目初版曾把明文密码写入本文件并推送到 GitHub，该密码应视为已泄露，必须在生产轮换；今后 changelog/memory 文档只记录密码存在与 scheme，不记录值。
 - **注意**：下次 systemd 升级若使用 EnvFile 中的 `CHAT_SYSTEM_BOOTSTRAP_PASSWORD`，服务重启后密码不变（持久化在 `web-settings.json`）；若直接删除 `web-settings.json`，则需要 EnvFile 中存在 ≥12 字符的 bootstrap password。
 
 ## 2026-07-13：Standalone 可靠性分支合并（Implemented，待独立生产切流验收）

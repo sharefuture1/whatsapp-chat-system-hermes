@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { useSettings } from '../settings'
 import { fmtRelative } from '../format'
 
@@ -127,7 +127,7 @@ function SwipeRow({ rowId, children, onPin, onDelete, pinned, t, isOpen, onReque
   )
 }
 
-export default function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, accounts = [], selectedAccountId = 'all', selectedAccountName = '', onAccountChange, onOpenSettings }) {
+function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, accounts = [], selectedAccountId = 'all', selectedAccountName = '', onAccountChange, onOpenSettings }) {
   const { t } = useSettings()
   const [openSwipeId, setOpenSwipeId] = useState(null)
   const showPlatformFilter = platformOptions && platformOptions.length > 1
@@ -174,3 +174,6 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
     </div>
   </aside>
 }
+
+// App 层轮询已保证会话数组/回调引用稳定，memo 让无关 state 变化不再整列表重渲染
+export default memo(ChatList)

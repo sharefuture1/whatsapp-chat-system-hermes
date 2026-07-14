@@ -229,12 +229,13 @@
 
 ### SDD-P2-04 可访问性
 
-- focus-visible；
-- dialog focus trap；
-- aria-live；
-- 键盘操作；
-- reduced motion；
-- 色彩对比。
+- 状态：`In Progress`
+- 已实现（2026-07-14）：全局键盘 `:focus-visible` 焦点环（鼠标/触摸不受影响）；`prefers-reduced-motion` 下关闭装饰性过渡与动画；静态回归 `web/tests/uiPolishAccessibility.test.js`。
+- 剩余：
+  - dialog focus trap；
+  - aria-live；
+  - 键盘操作；
+  - 色彩对比。
 
 ### SDD-P2-05 深色模式和语言实时切换
 
