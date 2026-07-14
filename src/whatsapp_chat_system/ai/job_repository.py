@@ -29,11 +29,12 @@ class JobLease:
     conversation_id: str | None
     parent_job_id: str | None
     job_type: str
-    input_hash: str
     status: str
+    idempotency_key: str
+    input_hash: str
     version: int
     lease_owner: str
-    lease_expires_at: datetime
+    lease_expires_at: datetime | None
     attempts: int
     max_attempts: int
     budget_tokens: int
@@ -436,7 +437,7 @@ def claim_next_committed(session_factory: Callable[[], Session], *args, **kwargs
         session.flush()
         lease = JobLease(id=job.id, account_id=job.account_id, contact_id=job.contact_id,
             conversation_id=job.conversation_id, parent_job_id=job.parent_job_id,
-            job_type=job.job_type, input_hash=job.input_hash, status=job.status,
+            job_type=job.job_type, status=job.status, idempotency_key=job.idempotency_key, input_hash=job.input_hash,
             version=job.version, lease_owner=job.lease_owner,
             lease_expires_at=_aware(job.lease_expires_at), attempts=job.attempts,
             max_attempts=job.max_attempts, budget_tokens=job.budget_tokens,

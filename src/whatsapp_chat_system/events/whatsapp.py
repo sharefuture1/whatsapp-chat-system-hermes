@@ -182,6 +182,14 @@ class WhatsAppEventService:
 
         if envelope.event_type == 'message.upsert':
             self._upsert_message(account, MessageUpsertPayload.model_validate(envelope.payload))
+            from whatsapp_chat_system.ai.auto_reply import enqueue_for_inbound_message
+            message = self.session.scalar(select(Message).where(
+                Message.account_id == account.id,
+                Message.wa_message_id == envelope.payload.get('wa_message_id'),
+            ))
+            conversation = self.session.get(Conversation, message.conversation_id) if message else None
+            if message is not None and conversation is not None:
+                enqueue_for_inbound_message(self.session, account, conversation, message)
         elif envelope.event_type in {'contacts.upsert', 'contacts.update'}:
             self._upsert_contacts(account, ContactBatchPayload.model_validate(envelope.payload))
         elif envelope.event_type in {'chats.upsert', 'chats.update'}:

@@ -39,6 +39,7 @@ from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
 from .outbox import OutboxDispatcher
+from .ai.auto_reply_worker import AutoReplyWorker
 from .runtime import (
     StandaloneRuntime,
     StandaloneAISettingsManager,
@@ -211,8 +212,8 @@ def build_standalone_app(
     )
     reconciler = AccountReconciler(factory, bridge)
     outbox_dispatcher = OutboxDispatcher(factory, bridge)
+    auto_reply_worker = AutoReplyWorker(factory, runtime_ai_settings)
     login_lock = RLock()
-
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if not _schema_ready(factory):
@@ -245,19 +246,31 @@ def build_standalone_app(
                     processed = 0
                 await asyncio.sleep(0 if processed else outbox_poll_interval_seconds)
 
-        reconcile_task = asyncio.create_task(
-            reconcile_loop(), name="whatsapp-account-reconciler"
-        )
+        async def auto_reply_loop() -> None:
+            while True:
+                try:
+                    processed = await asyncio.to_thread(auto_reply_worker.run_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("AI auto reply worker round failed")
+                    processed = False
+                await asyncio.sleep(0 if processed else 2.0)
+
+        reconcile_task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
         outbox_task = asyncio.create_task(outbox_loop(), name="whatsapp-outbox-worker")
+        auto_reply_task = asyncio.create_task(auto_reply_loop(), name="whatsapp-ai-auto-reply-worker")
         app.state.account_reconciler_task = reconcile_task
         app.state.outbox_worker_task = outbox_task
+        app.state.auto_reply_worker_task = auto_reply_task
         try:
             yield
         finally:
             app.state.ready = False
             reconcile_task.cancel()
             outbox_task.cancel()
-            await asyncio.gather(reconcile_task, outbox_task, return_exceptions=True)
+            auto_reply_task.cancel()
+            await asyncio.gather(reconcile_task, outbox_task, auto_reply_task, return_exceptions=True)
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
@@ -326,7 +339,7 @@ def build_standalone_app(
         if (
             request.method == "OPTIONS"
             or not path.startswith("/api")
-            or path in {"/api/health", "/api/login", "/api/logout"}
+            or path in {"/api/health", "/api/login", "/api/logout", "/api/v1/automation/health"}
         ):
             return await call_next(request)
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
@@ -364,8 +377,13 @@ def build_standalone_app(
                 "ts": time.time(),
                 "login_enabled": True,
                 "outbox_worker": "running",
+                "auto_reply_worker": auto_reply_worker.health(),
             }
         )
+
+    @app.get("/api/v1/automation/health")
+    def automation_health() -> dict[str, Any]:
+        return {"ok": True, "worker": auto_reply_worker.health(), "service": "standalone"}
 
     @app.post("/api/login")
     def login(request: Request, payload: LoginRequest) -> dict[str, Any]:
