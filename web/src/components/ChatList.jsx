@@ -131,16 +131,16 @@ export default function ChatList({ conversations, selectedId, selectedProfileMap
   const { t } = useSettings()
   const [openSwipeId, setOpenSwipeId] = useState(null)
   const showPlatformFilter = platformOptions && platformOptions.length > 1
-  const isPinnedFn = userId => pinnedSet instanceof Set ? pinnedSet.has(userId) : Array.isArray(pinnedSet) ? pinnedSet.includes(userId) : Array.isArray(pinned) ? pinned.includes(userId) : false
+  const isPinnedFn = key => pinnedSet instanceof Set ? pinnedSet.has(key) : Array.isArray(pinnedSet) ? pinnedSet.includes(key) : Array.isArray(pinned) ? pinned.includes(key) : false
 
   const renderRow = item => {
     const count = unread?.[item.conversation_key] || 0
-    const remark = selectedProfileMap?.[item.user_id]?.remark || ''
+    const remark = item.contact_profile?.remark || selectedProfileMap?.[item.user_id]?.remark || ''
     const displayName = remark || item.user_name
     const showName = remark ? item.user_name : ''
-    const isPinned = item.pinned || isPinnedFn(item.user_id)
+    const isPinned = item.pinned || isPinnedFn(item.conversation_key || item.user_id)
     return (
-      <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item.user_id)} onDelete={() => onDeleteChat(item)}>
+      <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item)} onDelete={() => onDeleteChat(item)}>
         <button type="button" className={`wx-list-item${selectedId === item.conversation_key ? ' active' : ''}`} onClick={() => onSelect(item.conversation_key)}>
           <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(displayName)}</div>
           <div className="wx-list-text">

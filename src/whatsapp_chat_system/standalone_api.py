@@ -11,6 +11,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from alembic.config import Config
@@ -30,16 +31,25 @@ from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
     whatsapp_validation_exception_handler,
 )
-from .security.internal_auth import InternalAuthError, verify_internal_token
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
 from .api.v1.personas import create_personas_router
+from .api.v1.operations import create_operations_router
+from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
+from .outbox import OutboxDispatcher
 from .runtime import StandaloneRuntime, save_runtime_settings
+from .security.internal_auth import InternalAuthError, verify_internal_token
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_ALLOWED_ORIGINS = (
+    "https://whats.future1.us",
+    "http://127.0.0.1:38998",
+    "http://localhost:38998",
+)
 
 
 class LoginRequest(BaseModel):
@@ -63,6 +73,7 @@ class DisabledBridgeClient:
     logout = _disabled
     stop = _disabled
     delete = _disabled
+    send = _disabled
 
 
 def _verify_password(record: dict[str, Any], password: str) -> bool:
@@ -82,6 +93,67 @@ def _is_authenticated(runtime: StandaloneRuntime, request: Request) -> bool:
     token = request.headers.get("x-session-token", "")
     session = (runtime.web_settings.get("sessions") or {}).get(token)
     return bool(session and float(session.get("expires_at", 0)) > time.time())
+
+
+def _allowed_cors_origins(raw: str | None = None) -> list[str]:
+    """Return a deterministic, explicit browser origin allowlist.
+
+    Wildcard origins are deliberately rejected because the web console carries an
+    operator session token. Additional production origins can be supplied as a
+    comma-separated CHAT_SYSTEM_ALLOWED_ORIGINS value.
+    """
+
+    configured = (
+        os.getenv("CHAT_SYSTEM_ALLOWED_ORIGINS", "") if raw is None else raw
+    ).strip()
+    candidates = configured.split(",") if configured else list(_DEFAULT_ALLOWED_ORIGINS)
+    origins: list[str] = []
+    for candidate in candidates:
+        origin = candidate.strip().rstrip("/")
+        if not origin or origin == "*":
+            continue
+        if not origin.startswith(("https://", "http://")):
+            continue
+        if origin not in origins:
+            origins.append(origin)
+    if not origins:
+        return list(_DEFAULT_ALLOWED_ORIGINS)
+    return origins
+
+
+def _positive_policy_int(value: Any, default: int, *, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if 1 <= parsed <= maximum else default
+
+
+def _login_policy(runtime: StandaloneRuntime) -> tuple[int, int]:
+    policy = runtime.web_settings.get("auth_policy") or {}
+    return (
+        _positive_policy_int(policy.get("max_attempts"), 5, maximum=100),
+        _positive_policy_int(policy.get("window_seconds"), 300, maximum=86400),
+    )
+
+
+def _recent_login_attempts(
+    values: Any,
+    *,
+    now: float,
+    window_seconds: int,
+) -> list[float]:
+    if not isinstance(values, list):
+        return []
+    recent: list[float] = []
+    for value in values:
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= now - timestamp < window_seconds:
+            recent.append(timestamp)
+    return recent
 
 
 def _current_alembic_head() -> str:
@@ -134,6 +206,7 @@ def build_standalone_app(
     account_bridge: BridgeProtocol | None = None,
     internal_event_token: str | None = None,
     account_reconcile_interval_seconds: float = 45.0,
+    outbox_poll_interval_seconds: float = 1.0,
 ) -> FastAPI:
     """Build a standalone API; schema migration is an external Alembic prerequisite."""
     runtime = StandaloneRuntime.from_env(
@@ -145,6 +218,8 @@ def build_standalone_app(
         internal_token=runtime.internal_event_token,
     )
     reconciler = AccountReconciler(factory, bridge)
+    outbox_dispatcher = OutboxDispatcher(factory, bridge)
+    login_lock = RLock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -165,24 +240,47 @@ def build_standalone_app(
                     logger.exception("WhatsApp account reconciliation round failed")
                 await asyncio.sleep(account_reconcile_interval_seconds)
 
-        task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
-        app.state.account_reconciler_task = task
+        async def outbox_loop() -> None:
+            while True:
+                try:
+                    processed = await asyncio.to_thread(outbox_dispatcher.run_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Outbound message worker round failed")
+                    processed = 0
+                await asyncio.sleep(0 if processed else outbox_poll_interval_seconds)
+
+        reconcile_task = asyncio.create_task(
+            reconcile_loop(), name="whatsapp-account-reconciler"
+        )
+        outbox_task = asyncio.create_task(outbox_loop(), name="whatsapp-outbox-worker")
+        app.state.account_reconciler_task = reconcile_task
+        app.state.outbox_worker_task = outbox_task
         try:
             yield
         finally:
             app.state.ready = False
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            reconcile_task.cancel()
+            outbox_task.cancel()
+            await asyncio.gather(reconcile_task, outbox_task, return_exceptions=True)
 
-    app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
+    app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
     app.state.ready = False
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=_allowed_cors_origins(),
         allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Content-Type",
+            "X-Session-Token",
+            "X-Request-ID",
+            "Idempotency-Key",
+        ],
+        expose_headers=["X-Request-ID"],
+        max_age=600,
     )
     app.include_router(create_accounts_router(factory, bridge))
     app.include_router(create_conversations_router(factory, bridge))
@@ -190,6 +288,8 @@ def build_standalone_app(
         create_whatsapp_events_router(factory, runtime.internal_event_token)
     )
     app.include_router(create_personas_router(runtime, factory))
+    app.include_router(create_settings_router(runtime, factory))
+    app.include_router(create_operations_router(factory))
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
@@ -260,29 +360,60 @@ def build_standalone_app(
                 "runtime_mode": "standalone",
                 "ts": time.time(),
                 "login_enabled": True,
+                "outbox_worker": "running",
             }
         )
 
     @app.post("/api/login")
-    def login(payload: LoginRequest) -> dict[str, Any]:
-        if not _verify_password(
-            runtime.web_settings.get("auth") or {}, payload.password
-        ):
-            raise HTTPException(status_code=401, detail="Invalid password")
-        token = secrets.token_urlsafe(24)
-        ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
-        sessions = dict(runtime.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
-        runtime.web_settings["sessions"] = sessions
-        save_runtime_settings(runtime)
+    def login(request: Request, payload: LoginRequest) -> dict[str, Any]:
+        client_ip = (request.client.host if request.client else "unknown") or "unknown"
+        now = time.time()
+        max_attempts, window_seconds = _login_policy(runtime)
+        with login_lock:
+            attempt_map = dict(runtime.web_settings.get("login_attempts") or {})
+            recent = _recent_login_attempts(
+                attempt_map.get(client_ip),
+                now=now,
+                window_seconds=window_seconds,
+            )
+            if len(recent) >= max_attempts:
+                attempt_map[client_ip] = recent
+                runtime.web_settings["login_attempts"] = attempt_map
+                save_runtime_settings(runtime)
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "code": "login_rate_limited",
+                        "message": "Too many login attempts, try again later",
+                    },
+                )
+
+            if not _verify_password(
+                runtime.web_settings.get("auth") or {}, payload.password
+            ):
+                recent.append(now)
+                attempt_map[client_ip] = recent
+                runtime.web_settings["login_attempts"] = attempt_map
+                save_runtime_settings(runtime)
+                raise HTTPException(status_code=401, detail="Invalid password")
+
+            attempt_map.pop(client_ip, None)
+            runtime.web_settings["login_attempts"] = attempt_map
+            token = secrets.token_urlsafe(24)
+            ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
+            sessions = dict(runtime.web_settings.get("sessions") or {})
+            sessions[token] = {"issued_at": now, "expires_at": now + ttl}
+            runtime.web_settings["sessions"] = sessions
+            save_runtime_settings(runtime)
         return {"success": True, "session_token": token, "expires_in": ttl}
 
     @app.post("/api/logout")
     def logout(request: Request) -> dict[str, Any]:
-        sessions = dict(runtime.web_settings.get("sessions") or {})
-        sessions.pop(request.headers.get("x-session-token", ""), None)
-        runtime.web_settings["sessions"] = sessions
-        save_runtime_settings(runtime)
+        with login_lock:
+            sessions = dict(runtime.web_settings.get("sessions") or {})
+            sessions.pop(request.headers.get("x-session-token", ""), None)
+            runtime.web_settings["sessions"] = sessions
+            save_runtime_settings(runtime)
         return {"success": True}
 
     frontend_dist = _resolve_frontend_dist(web_dist)

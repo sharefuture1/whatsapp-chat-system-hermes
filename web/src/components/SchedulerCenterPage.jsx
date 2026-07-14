@@ -14,7 +14,7 @@ export default function SchedulerCenterPage({ onBack }) {
   const refresh = async () => {
     setError(null)
     try {
-      const data = await api.get('/schedule')
+      const data = await api.get('/v1/schedule')
       setItems(data.items ?? [])
     } catch (e) {
       setError(e.message || t('error'))
@@ -44,7 +44,7 @@ export default function SchedulerCenterPage({ onBack }) {
     }
     setSubmitting(true)
     try {
-      await api.post('/schedule', {
+      await api.post('/v1/schedule', {
         target: draft.target.trim(),
         message: draft.message.trim(),
         run_at: Math.floor(ts / 1000),
@@ -63,7 +63,7 @@ export default function SchedulerCenterPage({ onBack }) {
 
   const remove = async id => {
     try {
-      await api.delete(`/schedule/${id}`)
+      await api.delete(`/v1/schedule/${id}`)
       await refresh()
     } catch (e) {
       flash(e.message || t('error'))

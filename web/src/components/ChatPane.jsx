@@ -3,6 +3,7 @@ import { api } from '../api'
 import { fetchPersonaCatalog, assignPersona as assignPersonaApi } from '../personas'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
+import { formatChatDay, localDayKey } from '../dateTime'
 import {
   commitMessagesUpdate,
   createConversationDeltaScheduler,
@@ -32,19 +33,11 @@ function avatarColor(name) {
 }
 
 function dayKey(ts) {
-  const d = new Date(ts * 1000)
-  return d.toISOString().slice(0, 10)
+  return localDayKey(ts)
 }
 
 function formatDay(ts, t) {
-  const d = new Date(ts * 1000)
-  const today = new Date()
-  const yest = new Date()
-  yest.setDate(today.getDate() - 1)
-  const same = (a, b) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10)
-  if (same(d, today)) return t('today')
-  if (same(d, yest)) return t('yesterday')
-  return d.toLocaleDateString()
+  return formatChatDay(ts, t)
 }
 
 function normalizeRewriteLanguage(language) {
@@ -129,6 +122,7 @@ export default function ChatPane({
   const requestTracker = useRef(createConversationRequestTracker())
   const deltaScheduler = useRef(createConversationDeltaScheduler())
   const deltaCursorRef = useRef(0)
+  const standaloneCursorRef = useRef(null)
   const translatingIdsRef = useRef(new Set())
   const translationWorkerRunningRef = useRef(false)
   const translationGenerationRef = useRef(0)
@@ -188,8 +182,12 @@ export default function ChatPane({
   const fetchPage = async (targetUserId, p, appendOlder = false) => {
     if (!targetUserId) return null
     const request = requestTracker.current.begin(targetUserId)
+    const cursor = standalone && appendOlder ? standaloneCursorRef.current : null
+    const cursorQuery = cursor
+      ? `&before_occurred_at=${encodeURIComponent(cursor.before_occurred_at)}&before_id=${encodeURIComponent(cursor.before_id)}`
+      : ''
     const endpoint = standalone && conversationId
-      ? `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${pageSize}`
+      ? `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${pageSize}${cursorQuery}`
       : `/conversations/${encodeURIComponent(targetUserId)}?page=${p}&page_size=${pageSize}`
     const res = await api.get(endpoint)
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
@@ -199,7 +197,8 @@ export default function ChatPane({
     } else {
       setMessages(prev => mergeFreshMessages(items, prev))
     }
-    setHasMore(standalone ? false : Boolean(res.has_more))
+    if (standalone) standaloneCursorRef.current = res.next_cursor || null
+    setHasMore(Boolean(res.has_more))
     setTotal(res.total_messages || 0)
     setHiddenCount(res.hidden_message_count || 0)
     setPage(p)
@@ -228,6 +227,7 @@ export default function ChatPane({
     setPage(1)
     fetchedFor.current = null
     deltaCursorRef.current = 0
+    standaloneCursorRef.current = null
     setNewMessageCount(0)
     setMode(defaultMode)
     setToolsOpen(false)
@@ -424,21 +424,23 @@ export default function ChatPane({
   const deliverMessage = async (tmpId, target, sourceText, sendMode, optimisticText) => {
     setMessages(prev => prev.map(m => m.message_id === tmpId ? { ...m, pending: true, failed: false, error: '' } : m))
     try {
-      const data = await onReply(target, sourceText, sendMode)
+      const data = await onReply(target, sourceText, sendMode, { idempotencyKey: tmpId })
       if (data?.success !== true) throw new Error(data?.detail || t('sendFailed'))
       const finalText = data?.rewrite?.message || optimisticText
       const platformId = data?.message_id || data?.messageId || null
       const finalId = data?.local_message_id || data?.message_id || tmpId
       const finalLang = normalizeRewriteLanguage(data?.rewrite?.language)
+      const queued = Boolean(data?.queued) || data?.status === 'queued'
       setMessages(prev => prev.map(m => m.message_id === tmpId ? {
         ...m,
         message_id: finalId,
         platform_message_id: platformId,
         local_only: !data?.local_message_id,
         content: finalText,
-        pending: false,
+        pending: queued,
         failed: false,
-        sent: true,
+        sent: !queued,
+        status: data?.status || (queued ? 'queued' : 'sent'),
         lang: finalLang,
         translated: null,
       } : m))

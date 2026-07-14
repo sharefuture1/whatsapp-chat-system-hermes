@@ -77,6 +77,15 @@ function requiredString(body, key) {
   return value.trim();
 }
 
+function optionalIdempotencyKey(body) {
+  const value = body.idempotency_key;
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/.test(value)) {
+    throw new BridgeDomainError('invalid_idempotency_key', 'Invalid idempotency_key', { status: 400 });
+  }
+  return value;
+}
+
 function pathAccountId(pathname, suffix) {
   const expression = new RegExp(`^/accounts/([^/]+)/${suffix}$`);
   const match = pathname.match(expression);
@@ -179,7 +188,8 @@ export function createBridgeServer({
         const body = await readJson(request);
         const chatId = requiredString(body, 'chat_id');
         const text = requiredString(body, 'text');
-        const messageId = await manager.send(sendId, { chatId, text });
+        const idempotencyKey = optionalIdempotencyKey(body);
+        const messageId = await manager.send(sendId, { chatId, text, idempotencyKey });
         return sendJson(response, 200, {
           success: true,
           account_id: sendId,

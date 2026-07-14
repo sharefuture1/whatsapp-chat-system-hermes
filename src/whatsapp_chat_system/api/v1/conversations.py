@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Generator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.db.models import (
     Contact,
+    ContactAIOverride,
     Conversation,
     Message,
     WhatsAppAccount,
 )
+from whatsapp_chat_system.outbox import enqueue_outbox_message
 
 
 PLATFORM = "whatsapp"
@@ -23,6 +26,13 @@ PLATFORM = "whatsapp"
 
 class ConversationReplyRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
+    idempotency_key: str | None = Field(default=None, max_length=255)
+
+
+class ConversationStateUpdate(BaseModel):
+    pinned: bool | None = None
+    muted: bool | None = None
+    archived: bool | None = None
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -90,9 +100,16 @@ def create_conversations_router(
                 "available_accounts": [],
             }
         statement = (
-            select(Conversation, Contact, WhatsAppAccount)
+            select(Conversation, Contact, WhatsAppAccount, ContactAIOverride)
             .join(WhatsAppAccount, WhatsAppAccount.id == Conversation.account_id)
             .outerjoin(Contact, Contact.id == Conversation.contact_id)
+            .outerjoin(
+                ContactAIOverride,
+                and_(
+                    ContactAIOverride.account_id == Conversation.account_id,
+                    ContactAIOverride.contact_id == Conversation.contact_id,
+                ),
+            )
             .where(Conversation.deleted_at.is_(None), Conversation.archived.is_(False))
         )
         count_statement = select(func.count(Conversation.id)).where(
@@ -134,6 +151,23 @@ def create_conversations_router(
                     or conversation.title
                     or conversation.remote_jid
                 ),
+                "contact_id": conversation.contact_id,
+                "contact_profile": {
+                    "remark": contact.remark if contact else None,
+                    "notes": contact.notes if contact else None,
+                    "tags": (contact.tags or []) if contact else [],
+                    "language": contact.language if contact else None,
+                },
+                "user_override": {
+                    "ai_model": override.model if override else None,
+                    "custom_system_prompt": override.system_prompt
+                    if override
+                    else None,
+                    "reply_style": override.reply_style if override else None,
+                    "auto_reply_enabled": override.auto_reply_enabled
+                    if override
+                    else None,
+                },
                 "platform": PLATFORM,
                 "last_message": conversation.last_message_preview or "",
                 "last_timestamp": _timestamp(conversation.last_message_at),
@@ -142,7 +176,7 @@ def create_conversations_router(
                 "pinned": conversation.pinned,
                 "muted": conversation.muted,
             }
-            for conversation, contact, account in rows
+            for conversation, contact, account, override in rows
         ]
         total = session.scalar(count_statement) or 0
         return {
@@ -173,13 +207,20 @@ def create_conversations_router(
                 "available_accounts": [],
             }
         statement = (
-            select(Contact, WhatsAppAccount, Conversation)
+            select(Contact, WhatsAppAccount, Conversation, ContactAIOverride)
             .join(WhatsAppAccount, WhatsAppAccount.id == Contact.account_id)
             .outerjoin(
                 Conversation,
                 (Conversation.account_id == Contact.account_id)
                 & (Conversation.remote_jid == Contact.remote_jid)
                 & Conversation.deleted_at.is_(None),
+            )
+            .outerjoin(
+                ContactAIOverride,
+                and_(
+                    ContactAIOverride.account_id == Contact.account_id,
+                    ContactAIOverride.contact_id == Contact.id,
+                ),
             )
         )
         if account_id != "all":
@@ -224,7 +265,7 @@ def create_conversations_router(
                 "language": contact.language,
                 "notes": contact.notes,
             }
-            for contact, account, conversation in rows
+            for contact, account, conversation, override in rows
         ]
         return {
             "items": items,
@@ -281,6 +322,46 @@ def create_conversations_router(
             "restored": True,
         }
 
+    @router.patch("/conversations/{conversation_id}")
+    def update_conversation_state(
+        conversation_id: str,
+        payload: ConversationStateUpdate,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        changes = payload.model_dump(exclude_unset=True)
+        if not changes:
+            raise HTTPException(status_code=422, detail="No state changes provided")
+        for key, value in changes.items():
+            setattr(conversation, key, value)
+        session.commit()
+        return {
+            "success": True,
+            "conversation_id": conversation.id,
+            "account_id": conversation.account_id,
+            "pinned": conversation.pinned,
+            "muted": conversation.muted,
+            "archived": conversation.archived,
+        }
+
+    @router.post("/conversations/{conversation_id}/read")
+    def mark_conversation_read(
+        conversation_id: str,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conversation.unread_count = 0
+        session.commit()
+        return {
+            "success": True,
+            "conversation_id": conversation.id,
+            "unread_count": 0,
+        }
+
     @router.delete("/conversations/{conversation_id}")
     def delete_conversation(
         conversation_id: str,
@@ -289,7 +370,7 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        conversation.deleted_at = datetime.utcnow()
+        conversation.deleted_at = datetime.now(timezone.utc)
         session.commit()
         return {
             "success": True,
@@ -302,19 +383,44 @@ def create_conversations_router(
     def conversation_messages(
         conversation_id: str,
         limit: int = Query(default=80, ge=1, le=200),
+        before_occurred_at: datetime | None = Query(default=None),
+        before_id: str | None = Query(default=None),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        rows = session.scalars(
-            select(Message)
-            .where(Message.conversation_id == conversation.id)
-            .order_by(
-                Message.occurred_at.desc(), Message.created_at.desc(), Message.id.desc()
+        if before_id and before_occurred_at is None:
+            raise HTTPException(
+                status_code=422,
+                detail="before_id requires before_occurred_at",
             )
-            .limit(limit)
+        if before_occurred_at is not None and before_occurred_at.tzinfo is None:
+            before_occurred_at = before_occurred_at.replace(tzinfo=timezone.utc)
+
+        sort_time = func.coalesce(Message.occurred_at, Message.created_at)
+        statement = select(Message).where(Message.conversation_id == conversation.id)
+        if before_occurred_at is not None:
+            cursor_clause = sort_time < before_occurred_at
+            if before_id:
+                cursor_clause = or_(
+                    cursor_clause,
+                    and_(sort_time == before_occurred_at, Message.id < before_id),
+                )
+            statement = statement.where(cursor_clause)
+
+        rows = session.scalars(
+            statement.order_by(sort_time.desc(), Message.id.desc()).limit(limit + 1)
         ).all()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = None
+        if has_more and rows:
+            oldest = rows[-1]
+            next_cursor = {
+                "before_occurred_at": _iso(oldest.occurred_at or oldest.created_at),
+                "before_id": oldest.id,
+            }
         rows.reverse()
         messages = [
             {
@@ -327,6 +433,11 @@ def create_conversations_router(
                 "content": message.content or "",
                 "message_type": message.message_type,
                 "status": message.status,
+                "pending": message.status in {"queued", "sending"},
+                "failed": message.status == "failed",
+                "sent": message.status in {"sent", "delivered", "read"},
+                "error": message.error_message,
+                "retryable": message.status != "failed" or message.retry_count < 6,
                 "lang": "Unknown",
                 "timestamp": _timestamp(message.occurred_at or message.created_at),
                 "occurred_at": _iso(message.occurred_at),
@@ -334,53 +445,54 @@ def create_conversations_router(
             }
             for message in rows
         ]
+        total = (
+            session.scalar(
+                select(func.count(Message.id)).where(
+                    Message.conversation_id == conversation.id
+                )
+            )
+            or 0
+        )
         return {
             "conversation_id": conversation.id,
             "account_id": conversation.account_id,
             "user_id": conversation.remote_jid,
             "messages": messages,
-            "total_messages": len(messages),
-            "has_more": False,
+            "total_messages": total,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
         }
 
-    @router.post("/conversations/{conversation_id}/reply")
+    @router.post("/conversations/{conversation_id}/reply", status_code=202)
     def reply_to_conversation(
         conversation_id: str,
         payload: ConversationReplyRequest,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
-        if bridge is None:
-            raise HTTPException(status_code=503, detail="WhatsApp bridge unavailable")
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        sent = bridge.send(
-            conversation.account_id,
-            chat_id=conversation.remote_jid,
-            text=payload.message,
-        )
-        now = datetime.utcnow()
-        message = Message(
-            account_id=conversation.account_id,
-            conversation_id=conversation.id,
-            contact_id=conversation.contact_id,
-            wa_message_id=sent["message_id"],
-            direction="outbound",
-            sender_jid=None,
-            message_type="text",
-            content=payload.message,
-            status="sent",
-            occurred_at=now,
-            sent_at=now,
-        )
-        session.add(message)
-        conversation.last_message_preview = payload.message
-        conversation.last_message_at = now
+        idempotency_key = payload.idempotency_key or f"reply:{uuid4()}"
+        if not idempotency_key.startswith("reply:"):
+            idempotency_key = f"reply:{idempotency_key}"
+        try:
+            message, outbox, created = enqueue_outbox_message(
+                session,
+                conversation,
+                text=payload.message,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.commit()
         return {
             "success": True,
+            "created": created,
+            "queued": outbox.status in {"pending", "claimed"},
+            "status": message.status,
             "local_message_id": message.id,
             "message_id": message.wa_message_id,
+            "outbox_id": outbox.id,
             "account_id": conversation.account_id,
             "conversation_id": conversation.id,
         }

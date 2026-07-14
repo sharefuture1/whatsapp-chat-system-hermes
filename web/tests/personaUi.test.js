@@ -52,8 +52,9 @@ test('smart and translate preview uses the reply contract without sending [FR-PL
   assert.match(chatPane, /data\?\.rewrite \? \{/)
   assert.match(chatPane, /setPreview\(null\)/)
   assert.match(chatPane, /onClick=\{previewReply\}/)
-  assert.match(app, /const sendReply = async \(conversation, message, mode, \{ previewOnly = false \} = \{\}\) => \{/)
+  assert.match(app, /const sendReply = async \(conversation, message, mode, \{ previewOnly = false, idempotencyKey = null \} = \{\}\) => \{/)
   assert.match(app, /preview_only:\s*previewOnly/)
+  assert.match(app, /idempotency_key:\s*idempotencyKey/)
   assert.match(app, /\(target, message, mode, options\) => sendReply\(selectedConversation, message, mode, options\)/)
 })
 
