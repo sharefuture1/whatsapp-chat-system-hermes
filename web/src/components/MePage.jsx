@@ -36,8 +36,11 @@ export default function MePage({
   autoTranslate,
   accountSummary,
   aiSummary,
+  currentUser = { username: '', role: 'admin' },
 }) {
   const { t, language, setLanguage, languages, theme, setTheme } = useSettings()
+  const displayName = currentUser?.username || 'admin'
+  const isAdmin = currentUser?.role === 'admin'
   return (
     <section className="wx-page wx-me-page">
       <header className="wx-me-hero">
@@ -45,15 +48,25 @@ export default function MePage({
           <OperatorIcon />
         </div>
         <div className="wx-me-hero-meta">
-          <div className="wx-me-name">{t('operator')}</div>
-          <div className="wx-me-sub">{t('operatorRole')}</div>
+          <div className="wx-me-name">{displayName}</div>
+          <div className="wx-me-sub">
+            {isAdmin ? t('roleAdmin') : t('roleOperator')} · {t('operatorRole')}
+          </div>
           <div className="wx-me-status-row">
             <span className={`pill ${health ? 'ok' : 'muted'}`}>
               {health ? t('serviceOnline') : t('serviceOffline')}
             </span>
             <span className="pill muted">{t('autoTranslate')}</span>
+            <span className="pill muted">
+              {accountSummary?.online || 0}/{accountSummary?.total || 0} {t('online')}
+            </span>
           </div>
         </div>
+        <button type="button" className="wx-me-qr-btn" onClick={onOpenAccounts} aria-label={t('whatsappAccounts')}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h2v2h-2zM18 14h3v3h-3zM14 18h3v3h-3zM19 19h2v2h-2z" />
+          </svg>
+        </button>
       </header>
 
       <div className="wx-cell-group">
@@ -61,11 +74,14 @@ export default function MePage({
         <div className="wx-section-list wx-card-list">
           <button className="wx-setting-row link wx-account-entry" type="button" onClick={onOpenAccounts}>
             <span className="wx-setting-row-icon"><AccountsIcon /></span>
-            <span>{t('whatsappAccounts')}</span>
+            <span>
+              <strong>{t('whatsappAccounts')}</strong>
+              <small>{t('settingsSecuritySub')}</small>
+            </span>
             <span className="wx-setting-value">
               {accountSummary?.online || 0}/{accountSummary?.total || 0} {t('online')}
             </span>
-            <span aria-hidden="true">›</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
         </div>
       </div>
@@ -82,12 +98,12 @@ export default function MePage({
             <span className={`pill ${aiSummary?.configured ? 'ok' : 'muted'}`}>
               {aiSummary?.configured ? t('enabled') : t('notConfigured')}
             </span>
-            <span aria-hidden="true">›</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
-          <button className="wx-setting-row link" type="button" onClick={onOpenGlobalAi}>
+          <button className="wx-setting-row link" type="button" onClick={onOpenSettings}>
             <span>{t('autoTranslate')}</span>
             <span className="wx-setting-value">{autoTranslate ? t('statusOn') : t('statusOff')}</span>
-            <span aria-hidden="true">›</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
         </div>
       </div>
@@ -97,24 +113,41 @@ export default function MePage({
         <div className="wx-section-list wx-card-list">
           <button className="wx-setting-row link" type="button" onClick={onOpenPlugins}>
             <span className="wx-setting-row-icon"><PluginsIcon /></span>
-            <span>{t('pluginCenter')}</span>
-            <span aria-hidden="true">›</span>
+            <span>
+              <strong>{t('pluginCenter')}</strong>
+              <small>{t('pluginCenterSub')}</small>
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
-          <button className="wx-setting-row link" type="button" onClick={onOpenUserMgm}>
+          {isAdmin ? (
+            <button className="wx-setting-row link" type="button" onClick={onOpenUserMgm}>
+              <span className="wx-setting-row-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M4 21v-1a5 5 0 0110 0v1"/>
+                  <path d="M16 3.13a4 4 0 010 7.75"/>
+                  <path d="M21 21v-1a4 4 0 00-3-3.85"/>
+                </svg>
+              </span>
+              <span>
+                <strong>{t('userManagement')}</strong>
+                <small>{t('userManagementSub')}</small>
+              </span>
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
+            </button>
+          ) : null}
+          <button className="wx-setting-row link" type="button" onClick={onOpenSettings}>
             <span className="wx-setting-row-icon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <circle cx="9" cy="7" r="4"/>
-                <path d="M4 21v-1a5 5 0 0110 0v1"/>
-                <path d="M16 3.13a4 4 0 010 7.75"/>
-                <path d="M21 21v-1a4 4 0 00-3-3.85"/>
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19 12a7 7 0 0 0-.1-1.2l2.1-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.4-2.6h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2.1 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2L3 14.8l2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2.1-1.6c.1-.4.1-.8.1-1.2z"/>
               </svg>
             </span>
-            <span>{t('userManagement')}</span>
-            <span aria-hidden="true">›</span>
-          </button>
-          <button className="wx-setting-row link" type="button" onClick={onOpenSettings}>
-            <span>{t('settings')}</span>
-            <span aria-hidden="true">›</span>
+            <span>
+              <strong>{t('settings')}</strong>
+              <small>{t('settingsEntry')}</small>
+            </span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
         </div>
       </div>
@@ -156,7 +189,7 @@ export default function MePage({
         <div className="wx-section-list wx-card-list">
           <button className="wx-setting-row link danger" type="button" onClick={onLogout}>
             <span>{t('logout')}</span>
-            <span aria-hidden="true">›</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow"><path d="M9 6l6 6-6 6"/></svg>
           </button>
         </div>
       </div>

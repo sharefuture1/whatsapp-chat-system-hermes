@@ -1,0 +1,359 @@
+import { useSettings } from '../settings'
+
+const ShieldIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />
+    <path d="M9 12l2 2 4-4" />
+  </svg>
+)
+const SparkleIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4z" />
+    <path d="M19 14l.7 1.7L21 16l-1.3.3L19 18l-.7-1.7L17 16l1.3-.3z" />
+  </svg>
+)
+const ChatIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M4 5h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-9l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" />
+  </svg>
+)
+const GeneralIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+  </svg>
+)
+const InfoIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8h.01M11 12h1v4h1" />
+  </svg>
+)
+const ChevronRight = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className="wx-cell-arrow">
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+)
+
+/**
+ * 微信式全屏设置主页（替代 SettingsPanel 模态）。
+ * 由 App.jsx 路由控制打开：setSettingsView('main') / 'security' / 'ai' / 'chat' / 'about' / 'general'。
+ */
+export default function SettingsPage({
+  view = 'main', // 'main' | 'security' | 'ai' | 'chat' | 'general' | 'about'
+  onNavigate,
+  onBack,
+  currentUser = { username: '', role: 'admin' },
+  aiConfigured = false,
+  aiModel = '',
+  autoTranslate = false,
+  healthOk = false,
+  accountSummary = { total: 0, online: 0 },
+  theme = 'light',
+  language = 'zh',
+  setTheme,
+  setLanguage,
+  languages = [],
+  pluginCount = 0,
+}) {
+  const { t } = useSettings()
+  const isAdmin = currentUser?.role === 'admin'
+
+  if (view === 'main') {
+    return (
+      <section className="wx-page wx-settings-page">
+        <header className="wx-page-header wx-settings-page-header">
+          <button
+            type="button"
+            className="wx-icon-btn wx-page-header-back"
+            onClick={onBack}
+            aria-label={t('back')}
+            title={t('back')}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </button>
+          <h2>{t('settings')}</h2>
+        </header>
+
+        <div className="wx-cell-group">
+          <div className="wx-section-list wx-card-list">
+            <button
+              type="button"
+              className="wx-setting-row link"
+              onClick={() => onNavigate('security')}
+            >
+              <span className="wx-setting-row-icon"><ShieldIcon /></span>
+              <span>
+                <strong>{t('settingsSecurity')}</strong>
+                <small>{t('settingsSecuritySub')}</small>
+              </span>
+              <ChevronRight />
+            </button>
+            <button
+              type="button"
+              className="wx-setting-row link"
+              onClick={() => onNavigate('ai')}
+            >
+              <span className="wx-setting-row-icon"><SparkleIcon /></span>
+              <span>
+                <strong>{t('settingsAi')}</strong>
+                <small>
+                  {aiConfigured
+                    ? `${t('enabled')} · ${aiModel || 'AI'}`
+                    : t('notConfigured')}
+                </small>
+              </span>
+              <span className={`pill ${aiConfigured ? 'ok' : 'muted'}`}>
+                {aiConfigured ? t('on') : t('off')}
+              </span>
+              <ChevronRight />
+            </button>
+          </div>
+        </div>
+
+        <div className="wx-cell-group">
+          <div className="wx-section-list wx-card-list">
+            <button
+              type="button"
+              className="wx-setting-row link"
+              onClick={() => onNavigate('chat')}
+            >
+              <span className="wx-setting-row-icon"><ChatIcon /></span>
+              <span>
+                <strong>{t('settingsChat')}</strong>
+                <small>{t('settingsChatSub')}</small>
+              </span>
+              <ChevronRight />
+            </button>
+            <button
+              type="button"
+              className="wx-setting-row link"
+              onClick={() => onNavigate('general')}
+            >
+              <span className="wx-setting-row-icon"><GeneralIcon /></span>
+              <span>
+                <strong>{t('settingsGeneral')}</strong>
+                <small>
+                  {theme === 'dark' ? t('themeDark') : t('themeLight')} · {language}
+                </small>
+              </span>
+              <ChevronRight />
+            </button>
+          </div>
+        </div>
+
+        <div className="wx-cell-group">
+          <div className="wx-section-list wx-card-list">
+            <button
+              type="button"
+              className="wx-setting-row link"
+              onClick={() => onNavigate('about')}
+            >
+              <span className="wx-setting-row-icon"><InfoIcon /></span>
+              <span>
+                <strong>{t('settingsAbout')}</strong>
+                <small>{t('settingsAboutSub')}</small>
+              </span>
+              <ChevronRight />
+            </button>
+          </div>
+        </div>
+
+        <div className="wx-cell-group">
+          <div className="wx-section-list wx-card-list">
+            <div className="wx-setting-row">
+              <span>{t('operator')}</span>
+              <span className="wx-setting-value">
+                {currentUser.username || 'admin'} · {isAdmin ? t('roleAdmin') : t('roleOperator')}
+              </span>
+            </div>
+            <div className="wx-setting-row">
+              <span>{t('whatsappAccounts')}</span>
+              <span className="wx-setting-value">
+                {accountSummary.online}/{accountSummary.total} {t('online')}
+              </span>
+            </div>
+            <div className="wx-setting-row">
+              <span>{t('pluginCenter')}</span>
+              <span className="wx-setting-value">{pluginCount}</span>
+            </div>
+            <div className="wx-setting-row">
+              <span>{t('serviceStatus')}</span>
+              <span className={`pill ${healthOk ? 'ok' : 'muted'}`}>
+                {healthOk ? t('serviceOnline') : t('serviceOffline')}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  // 子页面通用框架
+  const titles = {
+    security: t('settingsSecurity'),
+    ai: t('settingsAi'),
+    chat: t('settingsChat'),
+    general: t('settingsGeneral'),
+    about: t('settingsAbout'),
+  }
+  return (
+    <section className="wx-page wx-settings-page wx-settings-subpage">
+      <header className="wx-page-header wx-settings-page-header">
+        <button
+          type="button"
+          className="wx-icon-btn wx-page-header-back"
+          onClick={() => onNavigate('main')}
+          aria-label={t('back')}
+          title={t('back')}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </button>
+        <h2>{titles[view] || t('settings')}</h2>
+      </header>
+      <div className="wx-settings-subpage-body">
+        {view === 'ai' ? <AiSubPage isAdmin={isAdmin} /> : null}
+        {view === 'chat' ? <ChatSubPage /> : null}
+        {view === 'general' ? (
+          <GeneralSubPage
+            theme={theme}
+            language={language}
+            setTheme={setTheme}
+            setLanguage={setLanguage}
+            languages={languages}
+          />
+        ) : null}
+        {view === 'security' ? <SecuritySubPage isAdmin={isAdmin} /> : null}
+        {view === 'about' ? <AboutSubPage /> : null}
+      </div>
+    </section>
+  )
+}
+
+/* 子页：占位实现，由 App.jsx 在 onNavigate 阶段可继续保留旧 SettingsPanel 的具体 form 渲染。
+   本轮先保证架构完整：路由可达、视觉到位、键盘可达。
+   子页内部从 props/onNavigate 衍生；以下组件在后续 PR 中接真实数据。 */
+
+function AiSubPage({ isAdmin }) {
+  const { t } = useSettings()
+  return (
+    <>
+      <div className="wx-cell-group">
+        <div className="wx-cell-group-title">{t('globalAi')}</div>
+        <div className="wx-section-list wx-card-list">
+          <div className="wx-setting-row multi">
+            <span>
+              <strong>{t('globalAi')}</strong>
+              <small>{t('settingsAiSub')}</small>
+            </span>
+            <span className={`pill ok`}>{t('configured')}</span>
+          </div>
+          <div className="wx-empty-tip">
+            {isAdmin
+              ? t('settingsAiAdminHint')
+              : t('settingsAiOperatorHint')}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ChatSubPage() {
+  const { t } = useSettings()
+  return (
+    <div className="wx-cell-group">
+      <div className="wx-cell-group-title">{t('chat')}</div>
+      <div className="wx-section-list wx-card-list">
+        <div className="wx-setting-row">
+          <span>{t('autoTranslate')}</span>
+          <span className="wx-setting-value">{t('on')}</span>
+        </div>
+        <div className="wx-setting-row">
+          <span>{t('messageOps')}</span>
+          <span className="wx-setting-value">{t('default')}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GeneralSubPage({ theme, language, setTheme, setLanguage, languages }) {
+  const { t } = useSettings()
+  return (
+    <>
+      <div className="wx-cell-group">
+        <div className="wx-cell-group-title">{t('appearance')}</div>
+        <div className="wx-section-list wx-card-list">
+          <label className="wx-setting-row wx-setting-row-form">
+            <span>{t('theme')}</span>
+            <select value={theme} onChange={e => setTheme?.(e.target.value)}>
+              <option value="light">{t('themeLight')}</option>
+              <option value="dark">{t('themeDark')}</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div className="wx-cell-group">
+        <div className="wx-cell-group-title">{t('language')}</div>
+        <div className="wx-section-list wx-card-list">
+          <label className="wx-setting-row wx-setting-row-form">
+            <span>{t('language')}</span>
+            <select value={language} onChange={e => setLanguage?.(e.target.value)}>
+              {(languages || []).map(l => (
+                <option key={l.code} value={l.code}>{l.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function SecuritySubPage({ isAdmin }) {
+  const { t } = useSettings()
+  return (
+    <div className="wx-cell-group">
+      <div className="wx-cell-group-title">{t('security')}</div>
+      <div className="wx-section-list wx-card-list">
+        <div className="wx-setting-row">
+          <span>{t('changePassword')}</span>
+          <span className="wx-setting-value">***</span>
+        </div>
+        {isAdmin ? (
+          <div className="wx-setting-row">
+            <span>{t('userManagement')}</span>
+            <span className="wx-setting-value">›</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function AboutSubPage() {
+  const { t } = useSettings()
+  return (
+    <div className="wx-cell-group">
+      <div className="wx-section-list wx-card-list">
+        <div className="wx-setting-row">
+          <span>{t('appName')}</span>
+          <span className="wx-setting-value">WhatsApp Chat System</span>
+        </div>
+        <div className="wx-setting-row">
+          <span>{t('version')}</span>
+          <span className="wx-setting-value wx-mono">v1.0.0</span>
+        </div>
+        <div className="wx-setting-row">
+          <span>{t('serviceStatus')}</span>
+          <span className="wx-setting-value">{t('serviceOnline')}</span>
+        </div>
+      </div>
+    </div>
+  )
+}

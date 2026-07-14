@@ -291,3 +291,11 @@
 - [x] 前端 UX 优化（compose bar / tab bar / 空状态）
 - [x] CLAUDE.md / AGENTS.md 建立
 - [x] 文档体系完善（PROJECT_MEMORY / DECISIONS / CHANGELOG / TODO）
+- [x] 媒体全屏预览 lightbox + 加载占位 + 失败状态
+- [x] 聊天头部在线状态圆点（绿/黄/灰）+ 自动回复徽标
+- [x] 移动端 760px 断点自适应列表/聊天单列切换
+- [x] 联系人 AI 覆盖 auto_reply_enabled 复选框 + 设置页每联系人配置
+- [x] /api/v1/me 端点 + 角色权限边界（admin 字段隐藏）
+- [x] 消息 200 条窗口渲染（全量状态保留）+ 滚动锚定
+- [x] 联系人选择器 datalist 自动补全 + 当前会话一键添加
+- [x] 设置页侧边导航 hint 提示、联系人配置分组优化

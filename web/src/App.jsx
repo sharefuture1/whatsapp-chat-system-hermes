@@ -16,6 +16,7 @@ import MePage from './components/MePage'
 import PluginCenterPage from './components/PluginCenterPage'
 import SchedulerCenterPage from './components/SchedulerCenterPage'
 import SettingsPanel from './components/SettingsPanel'
+import SettingsPage from './components/SettingsPage'
 import TabBar from './components/TabBar'
 import UserManagementPage from './components/UserManagementPage'
 
@@ -91,6 +92,13 @@ function AppInner() {
   const [accountFilter, setAccountFilter] = useState('all')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState('reply')
+  // 全屏“设置”路由：null 表示未进入；'main' 是设置主页，子页 = security/ai/chat/general/about
+  const [settingsView, setSettingsView] = useState(null)
+  const openSettingsView = useCallback((view = 'main') => {
+    setSettingsView(view)
+    setSettingsOpen(false) // 关闭旧 modal，避免重叠
+  }, [])
+  const closeSettingsView = useCallback(() => setSettingsView(null), [])
   const [activeTab, setActiveTab] = useState('chats')
   const [accountCenterOpen, setAccountCenterOpen] = useState(false)
   const [pluginCenterOpen, setPluginCenterOpen] = useState(false)
@@ -695,20 +703,41 @@ function AppInner() {
           <DiscoverPage dashboard={dashboard} channels={settings.channels || []} conversations={conversations} />
         )}
 
-        {activeTab === 'me' && !accountCenterOpen && !pluginCenterOpen && !userMgmOpen && (
+        {activeTab === 'me' && !accountCenterOpen && !pluginCenterOpen && !userMgmOpen && !settingsView && (
           <MePage
             health={health}
-            onOpenSettings={() => { setSettingsInitialTab('ui'); setSettingsOpen(true) }}
-            onOpenGlobalAi={() => { setSettingsInitialTab('ai'); setSettingsOpen(true) }}
+            onOpenSettings={() => openSettingsView('main')}
+            onOpenGlobalAi={() => openSettingsView('ai')}
             onOpenAccounts={() => setAccountCenterOpen(true)}
             onOpenPlugins={() => setPluginCenterOpen(true)}
             onOpenUserMgm={() => setUserMgmOpen(true)}
             onLogout={logout}
             autoTranslate={autoTranslate}
+            currentUser={currentUser}
             accountSummary={accountsController.summary}
             aiSummary={{ configured: !!apiSettings.api_key_configured, model: apiSettings.default_model || settings.web_settings?.reply?.ai_model || '' }}
           />
         )}
+
+        {activeTab === 'me' && settingsView ? (
+          <SettingsPage
+            view={settingsView}
+            onNavigate={setSettingsView}
+            onBack={closeSettingsView}
+            currentUser={currentUser}
+            aiConfigured={!!apiSettings.api_key_configured}
+            aiModel={apiSettings.default_model || settings.web_settings?.reply?.ai_model || ''}
+            autoTranslate={autoTranslate}
+            healthOk={!!health?.ok}
+            accountSummary={accountsController.summary}
+            theme={settingsApi.theme}
+            language={settingsApi.language}
+            setTheme={settingsApi.setTheme}
+            setLanguage={settingsApi.setLanguage}
+            languages={settingsApi.languages}
+            pluginCount={dashboard?.plugins_enabled ?? 0}
+          />
+        ) : null}
 
         {activeTab === 'me' && pluginCenterOpen && (
           <PluginCenterPage
