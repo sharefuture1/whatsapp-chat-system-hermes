@@ -138,3 +138,10 @@ V2 create/status/stop             200
 - 权威入口：`docs/sdd/README.md`。
 - 需求/架构/API/优化状态只能在 SDD 中修改。
 - 按 requirement ID、计划、RED→GREEN→REFACTOR、双阶段审查、全量门禁、真实部署验证执行。
+
+## 最近变更
+
+- **2026-07-14 SDD-P1-11 我页 → 设置二级页**：`SettingsPage` 替代 5-tab `SettingsPanel` 模态，全屏 5 个 cell 入口（账号与安全/AI 助手/聊天与翻译/通用/关于），角色权限边界已实装；MePage 顶部 hero 显示真实登录名 + 角色 + 状态 pills + QR 入口。`/api/v1/me` 提供 `{username, role}` 数据源。
+- **2026-07-14 SDD-P1-07 联系人自动回复控制面**：聊天页 `auto_reply_enabled` 开关 + `PATCH /api/v1/conversations/{id}/auto-reply` 端点已闭环。
+- **2026-07-14 SDD-P0-09 AI 自动回复 24x7**：`AutoReplyWorker` lease/heartbeat/dead；`/api/v1/automation/health` 已接线。
+

@@ -1,3 +1,14 @@
+## 2026-07-14：微信式设置全屏二级页（SDD-P1-11）
+
+- 新增 `web/src/components/SettingsPage.jsx`：全屏微信式设置主页，5 个 cell 入口路由到子页（账号与安全/AI 助手/聊天与翻译/通用/关于），取代原 5-tab `SettingsPanel` 模态。
+- `App.jsx` 引入 `settingsView` state：`null`（未进入）/ `'main'`（设置主页）/ `'security' | 'ai' | 'chat' | 'general' | 'about'`（子页），由 MePage 入口触发。
+- `MePage` 顶部 hero 重构：显示真实登录用户名、当前角色（管理员/操作员）、服务状态/自动翻译/在线账号 3 个状态 pill，右上角 QR 入口按钮跳到账号中心。
+- 每个 cell row 升级为微信 cell 风格：左图标 + 中标题副标题 + 右值/箭头；非管理员隐藏「用户管理」行；自动翻译行使用 settings 入口而非 AI 入口。
+- CSS：`.wx-settings-page` 全屏壳、`.wx-page-header-back` 返回按钮、`.wx-me-qr-btn` QR 入口、`.wx-setting-row:focus-visible` 键盘可达、暗色模式 pill 配色。
+- i18n：新增 23 个 key（settingsSecurity、settingsAi、settingsChat、settingsGeneral、settingsAbout、roleAdmin、roleOperator、configured、appName、version、serviceStatus、default、chat、changePassword、settingsAiAdminHint、settingsAiOperatorHint 等），全部覆盖 en/zh/th/lo。
+- 质量门禁：i18n 一致性测试 2 passed、Python 243 passed、Vite build PASS、production health 200。
+- 已提交：`95fcdb6` 已推送 main。
+
 ## 2026-07-14：继续全面优化：Standalone 插件 V1、AI runtime 解耦与多语言修复
 
 - 修复 `PluginCenterPage`：插件列表、toggle、disable 全部切换到 `/api/v1/plugins`；原 `/api/plugins` 在 Standalone 下会返回前端 HTML。
