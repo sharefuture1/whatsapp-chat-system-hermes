@@ -6,6 +6,7 @@
 - `/api/v1/conversations/{conversation_id}/messages` 已开始返回 `translated / translation_status / translation_updated_at`，前端可逐步切换到数据库真源展示。
 - 新增 `POST /api/v1/conversations/{conversation_id}/translations`：返回 `202 queued`、`batch_id`、`queued_message_ids`、`cached_message_ids`，为后续真正异步 Worker/SSE 铺路。
 - `TranslationDispatcher` 已接入 Standalone lifespan：轮询 `translation_batches.pending`，按锚点消息窗口执行翻译，并回填 `message_translations`。
+- Dispatcher 现优先走“单次窗口批量翻译”JSON 调用；若批量返回解析失败，再回退到逐条翻译，兼顾 SDD 方向与线上稳态。
 - `/api/health` 与 `/api/v1/automation/health` 已暴露 `translation_dispatcher` 心跳与 processed/failed 计数。
 
 ## 2026-07-14：P0-09 自动回复可靠性补全（执行前竞态取消 + lease recovery + backoff）

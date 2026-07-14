@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -72,6 +73,7 @@ class TranslationDispatcher:
         ).order_by(func.coalesce(Message.occurred_at, Message.created_at).desc(), Message.id.desc()).limit(batch.window_size)).all()
         rows.reverse()
         worker = self._rewriter()
+        pending_items: list[dict[str, Any]] = []
         for message in rows:
             text = (message.content or '').strip()
             if not text:
@@ -89,15 +91,82 @@ class TranslationDispatcher:
             if source_lang == 'Chinese':
                 self._upsert_translation(session, message, batch, source_lang=source_lang, translated_text=None, status='completed')
                 continue
-            result = worker.translate_to_zh_result(text, source_lang)
-            if result.error:
-                self._upsert_translation(session, message, batch, source_lang=source_lang, translated_text=None, status='failed', error_code='translate_failed', error_message=str(result.error))
-            else:
-                self._upsert_translation(session, message, batch, source_lang=source_lang, translated_text=result.message or None, status='completed')
+            pending_items.append({
+                'message': message,
+                'text': text,
+                'source_lang': source_lang,
+            })
+        if pending_items:
+            batch_result = self._translate_window(worker, pending_items)
+            for item in pending_items:
+                message = item['message']
+                result = batch_result.get(message.id)
+                if result is None:
+                    fallback = worker.translate_to_zh_result(item['text'], item['source_lang'])
+                    if fallback.error:
+                        self._upsert_translation(session, message, batch, source_lang=item['source_lang'], translated_text=None, status='failed', error_code='translate_failed', error_message=str(fallback.error))
+                    else:
+                        self._upsert_translation(session, message, batch, source_lang=item['source_lang'], translated_text=fallback.message or None, status='completed')
+                    continue
+                if result.get('error'):
+                    self._upsert_translation(session, message, batch, source_lang=str(result.get('source_lang') or item['source_lang']), translated_text=None, status='failed', error_code='translate_failed', error_message=str(result['error']))
+                else:
+                    self._upsert_translation(session, message, batch, source_lang=str(result.get('source_lang') or item['source_lang']), translated_text=str(result.get('translated_text') or '') or None, status='completed')
         batch.status = 'completed'
         batch.error_code = None
         batch.error_message = None
         batch.completed_at = datetime.now(timezone.utc)
+
+    def _translate_window(self, worker: Rewriter, pending_items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        phrase_dict = worker.phrase_dict
+        context_block = ''
+        if phrase_dict:
+            entries = list(phrase_dict.items())[:120]
+            dict_section = '\n'.join(f'  "{k}" → "{v}"' for k, v in entries)
+            context_block = f"# 已知正确翻译\n{dict_section}\n\n"
+        payload_items = [
+            {
+                'message_id': item['message'].id,
+                'source_lang': item['source_lang'],
+                'text': item['text'],
+            }
+            for item in pending_items
+        ]
+        prompt = (
+            "你是一个高精度聊天翻译器。请把输入 items 中每条消息翻译成简体中文。\n"
+            "要求：\n"
+            "1. 保留语气、情感、emoji。\n"
+            "2. 不要合并消息，不要漏项。\n"
+            "3. 若原文已经是中文，zh 置为空字符串。\n"
+            "4. 只输出合法 JSON：{\"items\":[{\"message_id\":\"...\",\"source_lang\":\"...\",\"zh\":\"...\"}]}。\n\n"
+            + context_block
+            + json.dumps({'items': payload_items}, ensure_ascii=False)
+        )
+        try:
+            result = worker.ai_service.chat(
+                messages=[
+                    {'role': 'system', 'content': '你只返回合法 JSON，不要输出解释。'},
+                    {'role': 'user', 'content': prompt},
+                ],
+                account_model=worker._account_model(),
+                temperature=0.1,
+                response_format={'type': 'json_object'},
+            )
+            parsed = json.loads(result.result.content)
+            items = parsed.get('items') or []
+            output: dict[str, dict[str, Any]] = {}
+            for row in items:
+                message_id = str(row.get('message_id') or '').strip()
+                if not message_id:
+                    continue
+                output[message_id] = {
+                    'source_lang': str(row.get('source_lang') or ''),
+                    'translated_text': str(row.get('zh') or '').strip() or None,
+                }
+            return output
+        except Exception as exc:
+            logger.warning('Translation window batch call failed; falling back to per-message translate', extra={'error': str(exc), 'items': len(pending_items)})
+            return {}
 
     def _rewriter(self) -> Rewriter:
         class _DummyAppPaths:

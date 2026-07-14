@@ -141,7 +141,7 @@ V2 create/status/stop             200
 
 ## 最近变更
 
-- **2026-07-14 SDD-P1-05 翻译数据库真源 Phase 1**：新增 `message_translations`、`translation_batches` 数据表与 `0005` 迁移；消息级翻译 API 优先读写数据库真源，消息列表开始返回 `translated / translation_status / translation_updated_at`；新增会话级 `POST /api/v1/conversations/{id}/translations` 批入口，并已接入进程内 `TranslationDispatcher` 自动处理 pending batch；SSE 与管理员窗口策略仍未完成。
+- **2026-07-14 SDD-P1-05 翻译数据库真源 Phase 1**：新增 `message_translations`、`translation_batches` 数据表与 `0005` 迁移；消息级翻译 API 优先读写数据库真源，消息列表开始返回 `translated / translation_status / translation_updated_at`；新增会话级 `POST /api/v1/conversations/{id}/translations` 批入口，并已接入进程内 `TranslationDispatcher` 自动处理 pending batch；Dispatcher 现优先使用单次窗口批量翻译 JSON 调用，失败时回退逐条翻译；SSE 与管理员窗口策略仍未完成。
 - **2026-07-14 SDD-P1-07 联系人自动回复控制面**：聊天页 `auto_reply_enabled` 开关 + `PATCH /api/v1/conversations/{id}/auto-reply` 端点已闭环。
 - **2026-07-14 SDD-P0-09 自动回复可靠性补全**：enqueue 显式过滤 system message；idempotency key 纳入 `account_id`；worker 执行前再次检查联系人 override 与人工 outbound 竞态，若人工已回复则取消 job；lease recovery 每 30 秒接入主循环；retry 退避升级为指数 backoff + jitter；`/api/v1/automation/health` 新增 `recovered_leases`。
 
