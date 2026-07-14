@@ -4,6 +4,7 @@
 
 ## 当前结论
 
+- 工程化重构 Phase 1 已批准：先做统一 API client、请求去重/缓存失效、feature 数据边界和 cursor 同步，再推进 SSE、数据库翻译批处理、AI Job、媒体代理与可观测性；不再在 App.jsx 继续堆叠跨域业务逻辑。
 - 受控 AI 人设 P0（SDD-P0-08 / FR-PLG-007/008 / FR-AI-012）已进入 **Implemented**：V1 API `GET/PUT /api/v1/personas`、`PUT /api/v1/contacts/{contact_id}/persona`；前端 `DiscoverPage` AI 人设分类与 `ChatPane` picker 已接 V1；聊天页头部 `…` 菜单切换人设、预览条同步显示；受控目录仅含 `default / tong-jincheng / professional-service / mature-uncle`，prompt 不下发到客户端，UI 严禁显示任何外部源/仓库信息。
 - 人设切换/卸载/未知/插件关闭任一情况，重写器立即回退默认策略；router 与 admin_router 都读 `contact_profiles[contact_id].persona_id`。Legacy V1 注册与鉴权已由回归测试固定；前端人设目录统一走携带 session token 的 API 客户端，不会再将 401 静默伪装成空目录。“童锦程·直球关系顾问”是审计后的通用关系沟通风格；智能/翻译输入工具面板的预览只执行 `preview_only`，不发送消息，且响应展示当前安全人设元数据。
 - PC 端 `.wx-sidebar-nav` 桌面 768px+ 真正可见（补齐 `display:flex`），宽度 72px，按钮 52×56，深色模式一致。

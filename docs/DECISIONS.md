@@ -1,4 +1,11 @@
-## 2026-07-14: Standalone 插件 API 与 AI runtime 解耦
+## 2026-07-14：工程化重构路线冻结
+
+**决策**：停止继续在单体 `App.jsx` 中堆叠功能，按数据层、同步、翻译/AI Job、媒体、可观测性分阶段重构。第一阶段先稳定统一 `/api/v1` client、认证、single-flight、短 TTL 缓存、mutation 失效和 feature 边界；后续再引入 SSE/cursor、数据库批量翻译、异步 AI Job 与媒体代理。
+
+**原因**：当前原型的主要风险不是页面数量，而是请求来源、状态真源、重试、权限和外部事件边界分散，导致同步/AI/媒体问题难以定位。任何新功能必须先有 SDD 需求 ID、失败测试和真实部署验证。
+
+**关联**：`SDD-P1-05`、`SDD-P0-02`、`QA-001`、`NFR-PERF-001`。
+
 
 **决策**：插件中心正式使用 `/api/v1/plugins`，不再依赖 standalone 下不存在的 legacy `/api/plugins`；插件 catalog 由 V1 后端返回，`available=false` 是硬能力门禁，启用请求返回结构化 409。Standalone AI runtime manager 放在独立 runtime 模块中，禁止通过导入 Legacy `web_api` 传递配置。
 

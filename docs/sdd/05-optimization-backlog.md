@@ -216,7 +216,30 @@
 - 剩余阻塞：仍需真实 WhatsApp 断线重连、批量历史、乱序/重复事件和 Bridge V2 多账号数据才能完成端到端 `Verified`。
 - 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap；网页直发成功后刷新仍能看到同一条消息。
 
-## 4. P2：UX、视觉和工程质量
+## 3. 工程化重构路线（2026-07-14 批准）
+
+### Phase 1：数据层与同步边界
+
+- 统一 `/api/v1` API client、认证、请求去重、短 TTL 缓存和 mutation 失效。
+- App/页面不直接裸调用 fetch；feature hooks 负责 query/mutation。
+- 会话与消息使用稳定 query key、cursor 和服务端数据真源。
+- 关联计划：`docs/plans/2026-07-14-engineering-phase1-data-layer.md`。
+
+### Phase 2：事件驱动同步
+
+- SSE/WebSocket 增量事件、cursor 恢复、前端缓存精确更新。
+- 轮询只作为断线补偿，不作为主要实时同步机制。
+
+### Phase 3：翻译与 AI Job
+
+- 数据库译文表、最近 10 条上下文批处理、结构化 AI 输出、管理员策略和普通用户只读策略。
+- AI 生成与 Outbox 投递拆成可追踪任务，支持 retry/dead/cancel。
+
+### Phase 4：媒体与可观测性
+
+- 媒体下载、权限代理、Range、对象存储；统一 request/job/event 指标与告警。
+
+
 
 ### SDD-P2-01 CSS 治理
 

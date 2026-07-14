@@ -8,7 +8,12 @@
 - 质量门禁：Python `241 passed`、Web `87 passed`、Bridge `74 passed`、Bridge lint PASS、Vite build PASS。
 
 
-## 2026-07-14：全局 AI 设置页测试按钮 + 翻译端点修复
+## 2026-07-14：工程化重构 Phase 1 启动
+
+- 新增 `docs/plans/2026-07-14-engineering-phase1-data-layer.md`，冻结数据层和性能重构边界。
+- 更新 `docs/sdd/05-optimization-backlog.md`：明确 Phase 1 数据层、Phase 2 SSE/cursor、Phase 3 翻译/AI Job、Phase 4 媒体/可观测性。
+- 当前重点从继续堆 UI 转为统一 API client、请求预算、状态真源和可验证的同步链路。
+
 
 ### 前端 UI 优化
 

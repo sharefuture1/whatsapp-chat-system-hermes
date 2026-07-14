@@ -8,7 +8,16 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
-### P0 — 消息与翻译同步可靠性
+### P0 — 工程化重构 Phase 1
+
+- [>] **统一前端数据层与性能预算**
+  - [x] SDD 与实施计划已建立：`docs/plans/2026-07-14-engineering-phase1-data-layer.md`
+  - [x] 统一 client 已支持认证、GET 短 TTL、single-flight 和 mutation 失效
+  - [ ] App 页面 API 调用迁移到 feature hooks
+  - [ ] cursor/SSE 增量同步
+  - [ ] 翻译数据库批处理与管理员策略
+  - [ ] 媒体代理、AI Job、可观测性
+
 
 - [x] Legacy AI assistant 消息 delta 同会话 single-flight/coalescing，慢响应不再被后续 tick 丢弃
 - [x] 相同消息 ID upsert、optimistic 状态对账、真实新增消息精确计数
