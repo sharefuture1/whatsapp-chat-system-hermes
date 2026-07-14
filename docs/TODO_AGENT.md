@@ -12,11 +12,12 @@
 
 - [>] **持久化 AI 自动回复闭环（SDD-P0-09）**
   - [x] 规格和实施计划已建立
-  - [ ] 入站消息触发 Job（账号/会话/联系人策略）
-  - [ ] AI Job Worker：claim、lease、retry、dead、heartbeat
-  - [ ] Job 完成后幂等写入 Outbox，Bridge 真实回执对账
+  - [x] 入站消息触发 Job（账号/会话/联系人策略）
+  - [x] AI Worker：claim、lease、retry、dead、heartbeat
+  - [x] Job 完成后幂等写入 Outbox，Bridge 真实回执对账
   - [ ] 管理员策略、暂停、限速、预算和熔断
-  - [ ] `/api/v1/automation/health` 和 24 小时真实账号验收
+  - [x] `/api/v1/automation/health` 已接线
+  - [ ] 24 小时真实账号验收
 
 
 - [>] **统一前端数据层与性能预算**

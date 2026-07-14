@@ -10,7 +10,7 @@
 
 ## 2026-07-14：24x7 AI 自动回复工程化规格建立
 
-- 审计确认：Standalone 已有 `OutboxDispatcher` 和 `analysis_jobs` 数据/Repository，但 `message.upsert` 尚未创建自动回复 Job；当前不能保证无人值守自动回复。
+- 当前已完成 AI Worker 的第一版闭环：入站事件按策略创建 `analysis_jobs`，Standalone Worker 负责 claim/AI/complete 或 retry/dead，成功后幂等写入 Outbox；`/api/v1/automation/health` 已在生产返回 200。尚未达到 Verified：限速/熔断、管理员策略 API、真实 WhatsApp 收发与连续 24 小时测试仍待完成。
 - 新增 `SDD-P0-09` 与实施计划 `docs/plans/2026-07-14-engineering-phase2-auto-reply.md`。
 - 明确自动回复必须满足：账号/会话/联系人策略、幂等、AI Job lease/retry/dead、Outbox 回执、限速/预算/熔断、管理员暂停、health API 和真实 24 小时验收。
 

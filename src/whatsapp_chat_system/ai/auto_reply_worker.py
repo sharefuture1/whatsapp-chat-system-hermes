@@ -8,12 +8,12 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from .ai.job_repository import AnalysisJobRepository, JobLease, claim_next_committed
-from .ai.provider import AIProvider, AIProviderError
-from .ai.service import AIService
-from .db.models import Conversation, Message, WhatsAppAccount
-from .outbox import enqueue_outbox_message
-from .settings import AISettings
+from .job_repository import AnalysisJobRepository, JobLease, claim_next_committed
+from .provider import AIProvider, AIProviderError
+from .service import AIService
+from ..db.models import Conversation, Message, WhatsAppAccount
+from ..outbox import enqueue_outbox_message
+from ..settings import AISettings
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class AutoReplyWorker:
     def _provider(self, settings: AISettings) -> AIProvider:
         if self.provider_factory is not None:
             return self.provider_factory(settings)
-        from .ai.provider import WendingAIProvider
+        from .provider import WendingAIProvider
         return WendingAIProvider(settings)
 
     def run_once(self) -> bool:
