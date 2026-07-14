@@ -178,6 +178,15 @@ export default function SettingsPanel({
     { id: 'security', label: t('security'), hint: t('newPassword') },
   ]
 
+  const contactsForPicker = useMemo(() => {
+    if (!selectedConversation) return []
+    const userId = selectedConversation.user_id
+    if (!userId) return []
+    const existing = userOverrides.map(u => String(u.user_id || '').trim()).filter(Boolean)
+    if (!existing.includes(userId)) return [selectedConversation]
+    return []
+  }, [selectedConversation, userOverrides])
+
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t('settings')} onClick={onClose}>
       <div className="modal wx-settings-modal" onClick={e => e.stopPropagation()}>
@@ -198,7 +207,7 @@ export default function SettingsPanel({
                 onClick={() => setTab(item.id)}
               >
                 <span>{item.label}</span>
-                <small>{item.hint}</small>
+                {item.hint ? <em>{item.hint}</em> : null}
               </button>
             ))}
           </div>
@@ -293,6 +302,19 @@ export default function SettingsPanel({
                     </div>
                     <button className="ghost-btn" type="button" onClick={addUserOverride}>+ {t('addContactRule')}</button>
                   </div>
+                  {contactsForPicker.length > 0 ? (
+                    <div className="wx-contact-picker-hint">
+                      {t('addRuleForContact')}: <strong>{contactsForPicker[0].user_name || contactsForPicker[0].user_id}</strong>
+                      <button className="ghost-btn" type="button" onClick={() => {
+                        const c = contactsForPicker[0]
+                        addUserOverride()
+                        setTimeout(() => {
+                          const inputs = document.querySelectorAll('.platform-card:last-child input[id^="contact-id-"]')
+                          if (inputs.length) inputs[inputs.length - 1].value = c.user_id || ''
+                        }, 50)
+                      }}>+ {t('addRule')}</button>
+                    </div>
+                  ) : null}
                   {userOverrides.length === 0 ? (
                     <div className="subtle platform-empty">{t('noContactRules')}</div>
                   ) : null}
@@ -302,10 +324,15 @@ export default function SettingsPanel({
                         <label>
                           <span>{t('contactId')}</span>
                           <input
+                            id={`contact-id-${idx}`}
                             value={item.user_id || ''}
                             onChange={e => updateUserOverride(idx, 'user_id', e.target.value)}
                             placeholder="123456@lid"
+                            list={`contact-suggest-${idx}`}
                           />
+                          <datalist id={`contact-suggest-${idx}`}>
+                            {contactsForPicker.map(c => <option key={c.user_id} value={c.user_id} label={c.user_name || c.user_id} />)}
+                          </datalist>
                         </label>
                         {currentUser.role === 'admin' ? (
                         <>

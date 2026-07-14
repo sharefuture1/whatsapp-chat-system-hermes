@@ -759,42 +759,46 @@ export default function ChatPane({
           ) : null}
           {allowLocalHide && hiddenCount ? <div className="wx-hidden-note">{hiddenCount} {t('hiddenMessages')}</div> : null}
           {!initialLoading && messages.length === 0 ? <div className="wx-empty">{t('noMessages')}</div> : null}
-          {grouped.map((item, idx) => {
-            if (item.type === 'day') {
-              return <div className="wx-day-separator" key={`day-${item.key}-${idx}`}><span>{item.label}</span></div>
-            }
-            const isOut = item.role === 'assistant'
-            const pending = item.pending
-            const failed = item.failed
-            const statusLabel = failed ? t('sendFailed') : pending ? t('sending') : item.sent ? t('sent') : ''
-            const hideTranslation = hiddenTranslations[item.message_id]
-            const effectiveHidden = allowLocalHide && item.hidden
-            const nextItem = nextMessageInGrouped(grouped, idx)
-            const showTime = shouldShowBubbleTime(item, nextItem)
-            const translatedText = String(item.translated || '').trim()
-            const contentText = String(item.content || '').trim()
-            const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
-            return (
-              <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${idx}`} onClick={() => setActiveMessageId(item.message_id)}>
-                <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? t('operator') : userName)}</div>
-                <div>
-                  <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
-                    <div className="wx-bubble-content">
-                      {effectiveHidden ? t('hiddenPlaceholder') : <><MessageMedia message={item} onOpenMedia={setLightbox} />{item.content}</>}
-                    </div>
-                    {showTranslation ? (
-                      <div className="wx-bubble-translation">
-                        <span>{translatedText}</span>
-                        <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
+          {(() => {
+            // Window to last WINDOW_SIZE messages for rendering perf.
+            // Full messages array is preserved in state for scroll/pagination.
+            const WINDOW = 200
+            const windowed = grouped.length > WINDOW ? grouped.slice(-WINDOW) : grouped
+            return windowed.map((item, idx) => {
+              const realIdx = grouped.length > WINDOW ? grouped.length - WINDOW + idx : idx
+              const isOut = item.role === 'assistant'
+              const pending = item.pending
+              const failed = item.failed
+              const statusLabel = failed ? t('sendFailed') : pending ? t('sending') : item.sent ? t('sent') : ''
+              const hideTranslation = hiddenTranslations[item.message_id]
+              const effectiveHidden = allowLocalHide && item.hidden
+              const nextItem = nextMessageInGrouped(grouped, realIdx + 1)
+              const showTime = shouldShowBubbleTime(item, nextItem)
+              const translatedText = String(item.translated || '').trim()
+              const contentText = String(item.content || '').trim()
+              const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
+              return (
+                <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${realIdx}`} onClick={() => setActiveMessageId(item.message_id)}>
+                  <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? t('operator') : userName)}</div>
+                  <div>
+                    <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
+                      <div className="wx-bubble-content">
+                        {effectiveHidden ? t('hiddenPlaceholder') : <><MessageMedia message={item} onOpenMedia={setLightbox} />{item.content}</>}
                       </div>
-                    ) : null}
+                      {showTranslation ? (
+                        <div className="wx-bubble-translation">
+                          <span>{translatedText}</span>
+                          <button className="wx-bubble-action wx-translation-hide" onClick={(e) => { e.stopPropagation(); setHiddenTranslations(prev => ({ ...prev, [item.message_id]: true })) }}>{t('hideTranslation')}</button>
+                        </div>
+                      ) : null}
+                    </div>
+                    {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}{failed && item.retryable !== false ? <button type="button" className="wx-retry-btn" onClick={e => { e.stopPropagation(); retryMessage(item) }}>{t('retry') || '重试'}</button> : null}</div> : null}
                   </div>
-                  {(showTime || statusLabel) ? <div className="wx-bubble-meta">{showTime ? <span>{fmtClock(item.timestamp)}</span> : null}{statusLabel ? <span className={`wx-bubble-status ${failed ? 'failed' : ''}`}>{showTime ? '· ' : ''}{statusLabel}</span> : null}{failed && item.retryable !== false ? <button type="button" className="wx-retry-btn" onClick={e => { e.stopPropagation(); retryMessage(item) }}>{t('retry') || '重试'}</button> : null}</div> : null}
+                  {allowLocalHide && !effectiveHidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={(e) => { e.stopPropagation(); onHideMessage(item.message_id) }}>{t('hide')}</button></div> : null}
                 </div>
-                {allowLocalHide && !effectiveHidden ? <div className="wx-bubble-actions"><button className="wx-bubble-action" onClick={(e) => { e.stopPropagation(); onHideMessage(item.message_id) }}>{t('hide')}</button></div> : null}
-              </div>
-            )
-          })}
+              )
+            })
+          })()}
         </div>
         {newMessageCount > 0 ? <button type="button" className="wx-new-message-btn" onClick={scrollToLatest}>{newMessageCount} {t('newMessages') || '条新消息'} ↓</button> : null}
       </div>
