@@ -1,5 +1,13 @@
 # CHANGELOG_AGENT.md — Agent 变更记录
 
+## 2026-07-13：Standalone 可靠性分支合并（Implemented，待独立生产切流验收）
+
+- 合并 `fix/standalone-reliability-ux-20260713`：Standalone V1 完成可靠 Outbox Dispatcher、lease ownership 防旧 Worker 覆盖、Bridge idempotency key 与 receipt 持久化/恢复。
+- Standalone 新增 `/api/v1/schedule`、`/api/v1/broadcast`、`/api/v1/outbox`；写入统一返回 `202 queued`，定时通过 `available_at` 执行，群发按目标拆分 Outbox 并返回逐项 queued/rejected。
+- 安全与可靠性：Standalone CORS 显式 origin、登录限流、AI runtime retry 覆盖、历史消息稳定 cursor 分页、迁移期前端只对已知 Legacy 410 安全降级。
+- 质量门禁：新增 GitHub Actions Python/Web/Bridge/whitespace gates；合并后 Python `234 passed`、Web `83 passed` + Vite build、Bridge `74 passed` + lint、`git diff --check` 均通过。
+- 未完成：独立 systemd 切流、真实 WhatsApp 账号 Outbox 收发/回执/重启恢复、多 Worker claim、群发限速/暂停/续跑；这些前不得标记 Verified。
+
 ## 2026-07-13：插件中心可观察性与任务中心落地（Implemented）
 
 - `PLUGIN_CATALOG` 升级为带 `available / unavailable_reason / status_when_on / hooks` 的真值：

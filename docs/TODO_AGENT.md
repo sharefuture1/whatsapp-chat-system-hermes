@@ -79,10 +79,11 @@
   - [ ] 再创建并扫码第二个 V2 业务账号，验证两个账号同时在线
   - [ ] 验证 A 断线、登出、发送不影响 B；相同 JID 数据和 socket 严格隔离
 - [>] **Phase 5：Outbox、定时与群发 Worker（SDD-P0-05/06/07）**
-  - [x] UI 已收敛为插件中心二级任务页；未接线能力会显示原因，写接口返回 503，不伪装为已发送
-  - [ ] Outbox 持久化、幂等 key、状态机与 Worker 重启恢复
-  - [ ] 定时到点执行、取消、离线重试与可追踪状态
-  - [ ] 群发分片、账号级限速与抖动、进度、暂停/取消/续跑、逐项结果
+  - [x] Standalone `OutboxDispatcher` 已入 lifespan：消息/Outbox 原子入队、lease、幂等、Bridge receipt 持久化、重试与重启恢复均有回归测试
+  - [x] Standalone `POST /api/v1/schedule` 与 `POST /api/v1/broadcast` 返回 202 queued；Scheduler / Broadcast 二级页仍保留作为迁移期入口
+  - [ ] 切换前让前端按 runtime mode 使用 V1 任务 API；Legacy API 仍应保持 503
+  - [ ] 定时真实生产账号到点发送、离线重试、重启恢复验收；多 Worker 分布式 claim 验收
+  - [ ] 群发账号级限速/抖动、暂停/取消/续跑、独立 job/recipient 模型和真实生产验收
 - [>] **Phase 6：前端 WhatsApp 账号中心**
   - [x] 真实账号 API 驱动的列表、详情、状态、高危删除 UI
   - [x] 用户可见设置移除 Hermes profile/path/CLI 入口

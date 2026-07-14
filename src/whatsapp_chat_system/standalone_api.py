@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import inspect
@@ -420,10 +420,30 @@ def build_standalone_app(
     if frontend_dist:
         assets = frontend_dist / "assets"
         if assets.is_dir():
-            app.mount("/assets", StaticFiles(directory=assets), name="assets")
+            # Mount immutable-asset mount with aggressive cache + etag;
+            # /index.html is served via the catch-all SPA route below (no-cache).
+            app.mount(
+                "/assets",
+                _CacheControlledStaticFiles(directory=assets),
+                name="assets",
+            )
 
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
             return FileResponse(frontend_dist / "index.html")
 
     return app
+
+
+class _CacheControlledStaticFiles(StaticFiles):
+    """StaticFiles that adds Cache-Control: public, max-age=31536000, immutable
+    and Last-Modified to every served file (matching Vite immutable hashes)."""
+
+    def file_response(self, name: str, *args, **kwargs) -> Response:  # type: ignore[override]
+        resp = super().file_response(name, *args, **kwargs)
+        if resp.status_code == 200:
+            resp.headers.setdefault(
+                "Cache-Control", "public, max-age=31536000, immutable"
+            )
+            resp.headers.setdefault("Last-Modified", "Thu, 01 Jan 1970 00:00:00 GMT")
+        return resp

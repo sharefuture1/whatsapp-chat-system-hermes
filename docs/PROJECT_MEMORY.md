@@ -12,7 +12,7 @@
 - standalone 认证仅首启需要至少 12 字符 bootstrap password；已持久化的认证记录可无 bootstrap secret 重启。运行态 JSON 为 0700/0600 原子持久化，配置损坏/认证记录无效会 fail-closed。
 - 这是代码与测试层实现，不是已切流结论：生产仍有 Legacy 服务/数据面，独立 Bridge、历史迁移、前端 V1 单源和真实 WhatsApp 收发验收仍待完成。
 
-- 插件系统遵循“真实接线才可启用”边界：`auto_translate`/`quick_reply` 可用；尚未拥有可靠 Worker/Hook 的定时、群发、TTS、媒体、自动标签、跟进均返回 `available=false`，前后端均拒绝误导性启用。
+- Standalone 可靠性分支已合并到 main（代码/测试层）：`OutboxDispatcher` 在 Standalone lifespan 中运行，业务消息/Outbox 原子入队，lease owner、Bridge idempotency key、receipt 持久化恢复、retry/dead 状态均有回归。Standalone V1 有 `/api/v1/schedule`、`/api/v1/broadcast`、`/api/v1/outbox`，写入为 202 queued；Legacy API 继续保持 503 直至生产切流。群发尚缺限速、暂停/续跑和独立 job/recipient 模型；真实 WhatsApp Outbox 收发和多 Worker 验收尚未完成。
 - 插件目录（发现页与 Settings→Tools）现显示操作状态、不可用 Worker 原因、busy/error/empty/refresh 状态，并禁用不可用开关和隐藏不真实的删除动作。
 - 中文 locale 已由静态覆盖测试守护：首次访问/未知语言/缺失 key 默认回退中文，中文界面不允许残留未翻译英文（WhatsApp、Hermes、AI、API 等协议/产品专有名词除外）。联系人显示名为“人工备注 → WhatsApp 同步 display_name/push_name → 会话标题 → 远端 ID”，同步名称不得被低优先级聊天标题覆盖。
 - AnalysisJobRepository 的生产语义未改；其测试固定时间已显式传递 `available_at=now`，消除实际日期推进造成的 false negative。

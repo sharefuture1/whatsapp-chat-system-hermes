@@ -332,7 +332,7 @@ export default function SettingsPanel({
                   </span>
                   <span>{apiSettings.default_model || t('notConfigured')}</span>
                 </div>
-                <div className="settings-grid">
+                <div className="wx-ai-form">
                   <label className="full-span">
                     <span>{t('apiKey')}</span>
                     <input
@@ -366,16 +366,8 @@ export default function SettingsPanel({
                       placeholder={apiSettings.base_url || 'https://wendingai.future1.us/v1'}
                     />
                   </label>
-                  <label className="checkbox full-span">
-                    <input
-                      type="checkbox"
-                      checked={!!messageOps.auto_translate}
-                      onChange={e => setMessageOps(prev => ({ ...prev, auto_translate: e.target.checked }))}
-                    />
-                    {t('autoTranslate')}
-                  </label>
                 </div>
-                {aiSaved ? <div className="wx-ai-saved">{t('saved')}</div> : null}
+                {aiSaved ? <div className="wx-ai-saved visible">{t('saved')}</div> : <div className="wx-ai-saved" />}
                 <div className="wx-ai-actions">
                   <button className="wx-primary-btn" type="button" onClick={saveAiSettings} disabled={aiSaving}>
                     {aiSaving ? t('saving') : t('save')}
@@ -383,7 +375,6 @@ export default function SettingsPanel({
                 </div>
               </section>
             )}
-
             {tab === 'ui' && (
               <section className="settings-section">
                 <h3>{t('uiBehavior')}</h3>

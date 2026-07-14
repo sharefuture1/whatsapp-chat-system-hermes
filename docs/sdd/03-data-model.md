@@ -238,28 +238,11 @@ created_at/updated_at
 
 ### 2.9 定时与群发
 
-`scheduled_messages`：
+Standalone 当前实现复用 `outbox_messages`，而非另建平行表：
 
-```text
-id, account_id, conversation_id/target_jid, content, run_at,
-status(pending, claimed, sent, failed, cancelled),
-idempotency_key, lease_owner, lease_expires_at, last_error
-```
-
-`broadcast_jobs`：
-
-```text
-id, account_id, content, status(draft, queued, running, paused, completed, failed, cancelled),
-total_count, queued_count, sent_count, failed_count, created_by, created_at
-```
-
-`broadcast_recipients`：
-
-```text
-id, job_id, contact_id/target_jid, status, attempts, wa_message_id,
-last_error, sent_at
-UNIQUE(job_id, contact_id/target_jid)
-```
+- 定时任务使用 `idempotency_key` 前缀 `schedule:`，`available_at` 即 `run_at`；取消将未完成 Outbox 标记为 `dead` 并记录 `schedule_cancelled`；
+- 群发使用 `broadcast:{batch_id}:{conversation_id}`，每个目标一个 Outbox 记录；读取按 `batch_id` 聚合逐项状态；
+- `broadcast_jobs / broadcast_recipients` 仍是 P1 目标模型：待支持暂停、续跑、限速、审计和大批量 keyset 分页后再引入，不能与当前实现混淆。
 
 ### 2.10 插件与审计
 

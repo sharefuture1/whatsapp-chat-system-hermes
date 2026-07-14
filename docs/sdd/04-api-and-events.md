@@ -377,17 +377,27 @@ Claim PATCH 必须携带 `If-Match: <version>`，服务端以 optimistic version
 }
 ```
 
-## 7. 定时和群发 API
+## 7. 定时、群发与 Outbox API
 
-- `GET/POST /api/v1/scheduled-messages`
-- `DELETE /api/v1/scheduled-messages/{id}`
-- `GET/POST /api/v1/broadcasts`
-- `POST /api/v1/broadcasts/{id}/pause`
-- `POST /api/v1/broadcasts/{id}/resume`
-- `POST /api/v1/broadcasts/{id}/cancel`
-- `GET /api/v1/broadcasts/{id}/recipients`
+Standalone V1 当前接口：
 
-创建群发必须指定 `account_id`、目标集合和限速策略。
+| 方法 | 路径 | 语义 |
+|---|---|---|
+| `GET` | `/api/v1/schedule` | 列出 `schedule:` Outbox 任务及状态 |
+| `POST` | `/api/v1/schedule` | 未来 UTC 时间入队，返回 `202` |
+| `DELETE` | `/api/v1/schedule/{outbox_id}` | 取消尚未完成的定时任务 |
+| `GET` | `/api/v1/broadcast` | 按 batch 聚合目标及逐项状态 |
+| `POST` | `/api/v1/broadcast` | 每个有效目标独立入队，返回 `202` 与 queued/rejected 明细 |
+| `GET` | `/api/v1/outbox` | 仅诊断用途的最近 Outbox 状态 |
+
+所有写操作的投递语义：
+
+- 业务消息和 Outbox 在同一事务创建；API 返回 `queued`，不得提前返回 `sent`；
+- 请求可携带 `idempotency_key`；同 key 必须返回同一逻辑消息，不重复调用 Bridge；
+- Dispatcher 只可由当前 lease owner 完成/失败；Bridge 成功必须携带真实 WhatsApp `message_id`；
+- 迁移期 Legacy `/api/schedule` 与 `/api/broadcast` 保持 503，客户端必须按 runtime mode 选择 V1 接口。
+
+P1 扩展（尚未完成）：`broadcast_jobs`、暂停/续跑、账号限速/抖动、大批量 keyset recipients API。
 
 ## 8. Bridge V2 API
 

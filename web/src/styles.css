@@ -205,7 +205,14 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-chat-header-right .wx-icon-btn { width: 34px; height: 34px; border-radius: 6px; background: transparent; }
 .wx-chat-account-badge { height: 18px; padding: 0 6px; border-radius: 4px; background: var(--wx-brand-soft); color: var(--wx-brand); display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; }
 .wx-chat-empty svg { width: 70px; height: 70px; stroke: var(--wx-text-faint); fill: none; stroke-width: 1.4; margin-bottom: 12px; }
-.wx-chat-empty strong { font-size: 16px; color: var(--wx-text); font-weight: 500; }
+.wx-ai-form { display: grid; gap: 12px; }
+.wx-ai-form label { display: grid; gap: 6px; font-size: 13px; }
+.wx-ai-form input { width: 100%; background: var(--wx-panel); border: 1px solid var(--wx-divider); border-radius: 8px; padding: 9px 10px; font-size: 13px; outline: none; }
+.wx-ai-form input:focus { border-color: var(--wx-brand); }
+:root[data-theme="dark"] .wx-ai-form input { background: #262629; border-color: #2f2f33; color: var(--wx-text); }
+.wx-ai-saved { display: none; font-size: 13px; color: var(--wx-brand); font-weight: 500; }
+.wx-ai-saved.visible { display: block; }
+.wx-ai-actions { padding-top: 8px; }
 .wx-chat-empty span { font-size: 12px; }
 :root[data-theme="dark"] .wx-chat-header-right .wx-icon-btn { background: #262629; }
 .wx-chat-header-right .wx-icon-btn:hover { background: var(--wx-list-hover); }

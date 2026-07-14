@@ -80,34 +80,44 @@
 
 ### SDD-P0-05 Outbox 可靠发送
 
-- 状态：`Approved`
-- 需求：FR-MSG-004~006
-- 已完成边界：Legacy UI 已移除伪发送入口；Scheduler / Broadcast 仅在“我 → 插件中心”提供任务可见性二级页。无 Worker 时写接口返回结构化 503，插件 catalog `available=false`，不会报告已发送。
+- 状态：`Implemented`（代码、单机 Worker 与自动化回归已落地；独立生产切流和真实 WhatsApp 投递尚未验收，不得标记 `Verified`）。
+- 需求：FR-MSG-004~006、MSG-OUTBOX-001~005。
+- 当前实现：
+  - `outbox_messages` 与业务 `messages` 在同一事务创建；回复、定时和群发统一返回 `202 queued`，不提前声明 `sent`；
+  - `idempotency_key` 全局唯一，同 key 重试返回原业务消息和 Outbox 记录，不会再次投递；
+  - `OutboxDispatcher` 在 Standalone lifespan 内轮询，使用 lease owner/expiry claim、Bridge idempotency key、真实 WhatsApp `message_id` 与指数退避；
+  - 过期 lease 可回收；旧 Worker 不能覆盖新 owner 的最终状态；Bridge receipt 持久化可跨重启恢复。
 - 验收：
-  - API 返回 queued，而非提前 sent；
-  - Worker 重启后继续 pending 任务；
-  - 幂等 key 防重复发送；
-  - 状态机和失败重试测试覆盖。
+  - [x] API 返回 queued，而非提前 sent；
+  - [x] Worker 重启后 pending/receipt 可恢复；
+  - [x] 幂等 key 防重复发送；
+  - [x] lease、失败重试和 Bridge receipt 有自动化测试；
+  - [ ] 独立生产 Worker 的真实 WhatsApp 发送、回执和重启恢复验收。
 
 ### SDD-P0-06 定时任务真实 Worker
 
-- 状态：`Approved`
-- 当前状态：`GET /api/schedule` 保持安全空列表/历史读取；`POST` 和 `DELETE` 在 Worker 未部署前返回 `503 scheduler_not_connected`。前端仅在插件中心的 Scheduler 二级页展示任务与创建向导，明确提示不会提交为已执行。
+- 状态：`Implemented`（Standalone V1 实现与自动化回归已落地；多实例和真实生产账号验收待完成）。
+- 当前实现：
+  - `GET/POST/DELETE /api/v1/schedule` 基于 Outbox；创建仅接受未来 UTC 时间，返回 `202`；取消会终止未完成任务；
+  - `available_at` 到点后由 Outbox Dispatcher 投递；账号离线/Bridge 瞬态错误进入可检查的 pending/dead 与 `last_error` 状态；
+  - 迁移期 Legacy `/api/schedule` 仍保持 503，前端只有检测到 Standalone V1 能力后才应启用真实创建入口。
 - 验收：
-  - 到点真实发送；
-  - 多 Worker 不重复；
-  - 可取消；
-  - 账号离线时进入可追踪失败/重试状态。
+  - [x] 到点进入真实 Outbox 投递路径；
+  - [x] 可取消且有追踪状态；
+  - [x] 离线/暂态错误可重试并保留错误原因；
+  - [ ] 多 Worker 分布式 claim 验收；
+  - [ ] 真实生产账号到点发送、重启恢复验收。
 
 ### SDD-P0-07 群发后台任务
 
-- 状态：`Approved`
-- 当前状态：`GET /api/broadcast` 保持安全空列表/历史读取；`POST` 在 Worker 未部署前返回 `503 broadcast_not_connected`。前端仅在插件中心的 Broadcast 二级页展示任务与创建向导，明确提示不会投递。
-- 验收：
-  - 后台分片执行；
+- 状态：`In Progress`。
+- 当前实现：`POST /api/v1/broadcast` 对每个有效目标创建独立的 Outbox 记录，返回 `202`、queued/rejected 明细；`GET /api/v1/broadcast` 按 batch 聚合每个目标的完成/失败状态。迁移期 Legacy `/api/broadcast` 仍返回 503。
+- 已完成验收：后台异步投递、逐项结果、重复目标去重、单目标 idempotency key。
+- 剩余验收：
   - 账号级限速和抖动；
-  - 进度、暂停、取消、续跑、逐项结果；
-  - 重试不重复发送已成功目标。
+  - 显式暂停、取消、续跑；
+  - 独立 `broadcast_jobs / broadcast_recipients` 状态模型和大批量分页；
+  - 多 Worker 与真实生产账号的端到端验收。
 
 ### SDD-P0-08 受控内置 AI 人设
 
