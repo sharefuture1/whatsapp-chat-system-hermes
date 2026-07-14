@@ -736,6 +736,14 @@ function AppInner() {
             setLanguage={settingsApi.setLanguage}
             languages={settingsApi.languages}
             pluginCount={dashboard?.plugins_enabled ?? 0}
+            webSettings={settings.web_settings || {}}
+            channels={settings.channels || []}
+            saving={saving}
+            onSaveSettings={saveSettings}
+            onSaveAiSettings={saveAiSettings}
+            apiSettings={apiSettings}
+            onOpenAccounts={() => setAccountCenterOpen(true)}
+            onOpenUserMgm={() => setUserMgmOpen(true)}
           />
         ) : null}
 

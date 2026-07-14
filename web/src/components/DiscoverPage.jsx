@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../settings'
 import { api } from '../api'
-import { fetchPersonaCatalog } from '../personas'
 
 export default function DiscoverPage({ dashboard, channels, conversations }) {
   const { t } = useSettings()
-  const [personas, setPersonas] = useState({ items: [], available: false, plugin_enabled: true })
   const [stats, setStats] = useState(dashboard?.stats ?? {})
   const [pluginsEnabled, setPluginsEnabled] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -14,21 +12,13 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
   const refresh = async () => {
     setError(null)
     try {
-      const [summary, personaCatalog] = await Promise.all([
-        api.get('/v1/dashboard'),
-        fetchPersonaCatalog(),
-      ])
+      const summary = await api.get('/v1/dashboard')
       if (summary?.stats) {
         setStats(summary.stats)
         if (typeof summary.plugins_enabled === 'number') {
           setPluginsEnabled(summary.plugins_enabled)
         }
       }
-      setPersonas({
-        items: personaCatalog.items,
-        available: personaCatalog.available,
-        plugin_enabled: personaCatalog.plugin_enabled,
-      })
     } catch (e) {
       setError(e.message || t('error'))
     }
@@ -66,35 +56,22 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
         </div>
       </div>
 
-      <div className="wx-cell-group wx-persona-library">
-        <div className="wx-cell-group-title">{t('personaLibrary')}</div>
-        {loading ? <div className="wx-empty-pill">{t('personaLoading')}</div> : null}
-        {!loading && error ? (
-          <div className="wx-empty-pill wx-discover-error">{t('personaLoadFailed')}</div>
-        ) : null}
-        {!loading && !error ? (
-          <>
-            <div className="wx-persona-library-status">
-              {personas.available ? t('personaAvailable') : t('personaUnavailable')}
-            </div>
-            <div className="wx-persona-grid">
-              {personas.items.map(persona => (
-                <article className="wx-persona-card" key={persona.id}>
-                  <strong>{persona.name}</strong>
-                  <p>{persona.description}</p>
-                  <button
-                    type="button"
-                    className="wx-inline-btn"
-                    disabled={!personas.available}
-                  >
-                    {personas.available ? t('personaUse') : t('personaUnavailable')}
-                  </button>
-                </article>
-              ))}
-            </div>
-          </>
-        ) : null}
+      <div className="wx-cell-group">
+        <div className="wx-cell-group-title">{t('servicesTitle')}</div>
+        <div className="wx-section-list wx-card-list">
+          <div className="wx-setting-row">
+            <span>{t('pluginsEnabled')}</span>
+            <span className="wx-setting-value">{pluginsEnabled}</span>
+          </div>
+          <div className="wx-setting-row">
+            <span>{t('whatsappAccounts')}</span>
+            <span className="wx-setting-value">{channels?.length ?? 0}</span>
+          </div>
+        </div>
       </div>
+
+      {loading ? <div className="wx-cell-group"><div className="wx-empty-pill">{t('loading')}</div></div> : null}
+      {!loading && error ? <div className="wx-cell-group"><div className="wx-empty-pill wx-discover-error">{error}</div></div> : null}
     </section>
   )
 }

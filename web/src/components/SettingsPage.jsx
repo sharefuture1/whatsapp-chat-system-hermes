@@ -55,6 +55,14 @@ export default function SettingsPage({
   setLanguage,
   languages = [],
   pluginCount = 0,
+  webSettings = {},
+  channels = [],
+  saving = false,
+  onSaveSettings,
+  onSaveAiSettings,
+  apiSettings = {},
+  onOpenAccounts,
+  onOpenUserMgm,
 }) {
   const { t } = useSettings()
   const isAdmin = currentUser?.role === 'admin'
@@ -216,8 +224,21 @@ export default function SettingsPage({
         <h2>{titles[view] || t('settings')}</h2>
       </header>
       <div className="wx-settings-subpage-body">
-        {view === 'ai' ? <AiSubPage isAdmin={isAdmin} /> : null}
-        {view === 'chat' ? <ChatSubPage /> : null}
+        {view === 'ai' ? (
+          <AiSubPage
+            isAdmin={isAdmin}
+            apiSettings={apiSettings}
+            onSaveAiSettings={onSaveAiSettings}
+          />
+        ) : null}
+        {view === 'chat' ? (
+          <ChatSubPage
+            webSettings={webSettings}
+            channels={channels}
+            saving={saving}
+            onSaveSettings={onSaveSettings}
+          />
+        ) : null}
         {view === 'general' ? (
           <GeneralSubPage
             theme={theme}
@@ -227,7 +248,17 @@ export default function SettingsPage({
             languages={languages}
           />
         ) : null}
-        {view === 'security' ? <SecuritySubPage isAdmin={isAdmin} /> : null}
+        {view === 'security' ? (
+          <SecuritySubPage
+            isAdmin={isAdmin}
+            webSettings={webSettings}
+            channels={channels}
+            saving={saving}
+            onSaveSettings={onSaveSettings}
+            onOpenAccounts={onOpenAccounts}
+            onOpenUserMgm={onOpenUserMgm}
+          />
+        ) : null}
         {view === 'about' ? <AboutSubPage /> : null}
       </div>
     </section>
@@ -238,44 +269,133 @@ export default function SettingsPage({
    本轮先保证架构完整：路由可达、视觉到位、键盘可达。
    子页内部从 props/onNavigate 衍生；以下组件在后续 PR 中接真实数据。 */
 
-function AiSubPage({ isAdmin }) {
+function AiSubPage({ isAdmin, apiSettings = {}, onSaveAiSettings }) {
   const { t } = useSettings()
+  const [baseUrl, setBaseUrl] = useState(apiSettings.base_url || '')
+  const [model, setModel] = useState(apiSettings.default_model || '')
+  const [apiKey, setApiKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    setBaseUrl(apiSettings.base_url || '')
+    setModel(apiSettings.default_model || '')
+    setApiKey('')
+    setSaved(false)
+  }, [apiSettings])
+
+  const save = async () => {
+    if (!isAdmin || !onSaveAiSettings) return
+    setSaving(true)
+    setSaved(false)
+    try {
+      await onSaveAiSettings({ base_url: baseUrl || null, default_model: model || null, api_key: apiKey || null })
+      setApiKey('')
+      setSaved(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <>
       <div className="wx-cell-group">
         <div className="wx-cell-group-title">{t('globalAi')}</div>
         <div className="wx-section-list wx-card-list">
-          <div className="wx-setting-row multi">
-            <span>
-              <strong>{t('globalAi')}</strong>
-              <small>{t('settingsAiSub')}</small>
-            </span>
-            <span className={`pill ok`}>{t('configured')}</span>
-          </div>
-          <div className="wx-empty-tip">
-            {isAdmin
-              ? t('settingsAiAdminHint')
-              : t('settingsAiOperatorHint')}
-          </div>
+          {isAdmin ? (
+            <>
+              <label className="wx-setting-row wx-setting-row-form multi">
+                <span>
+                  <strong>{t('baseUrl') || 'Base URL'}</strong>
+                  <small>{t('settingsAiSub')}</small>
+                </span>
+                <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://wendingai.future1.us/v1" />
+              </label>
+              <label className="wx-setting-row wx-setting-row-form multi">
+                <span>
+                  <strong>{t('model')}</strong>
+                  <small>{t('settingAiModelInherit') || 'Model'}</small>
+                </span>
+                <input value={model} onChange={e => setModel(e.target.value)} placeholder="gpt-5.3-codex-spark" />
+              </label>
+              <label className="wx-setting-row wx-setting-row-form multi">
+                <span>
+                  <strong>{t('apiKey') || 'API Key'}</strong>
+                  <small>{t('apiKeyKeep') || 'Leave blank to keep current key'}</small>
+                </span>
+                <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={t('apiKeyInput') || 'Paste new API key'} />
+              </label>
+              <div className="wx-setting-row">
+                <span>{t('configured')}</span>
+                <span className="wx-setting-value">{apiSettings.api_key_configured ? t('yes') || 'Yes' : t('no') || 'No'}</span>
+              </div>
+              <div className="wx-setting-row">
+                <button type="button" className="ghost-btn" onClick={save} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}</button>
+                {saved ? <span className="pill ok">{t('saved') || 'Saved'}</span> : null}
+              </div>
+            </>
+          ) : (
+            <div className="wx-empty-tip">{t('settingsAiOperatorHint')}</div>
+          )}
         </div>
       </div>
     </>
   )
 }
 
-function ChatSubPage() {
+function ChatSubPage({ webSettings = {}, channels = [], saving = false, onSaveSettings }) {
   const { t } = useSettings()
+  const [autoTranslate, setAutoTranslate] = useState(!!webSettings?.message_ops?.auto_translate)
+  const [previewDebounce, setPreviewDebounce] = useState(Number(webSettings?.reply?.preview_debounce_ms || 320))
+  const [smartMax, setSmartMax] = useState(Number(webSettings?.reply?.smart_max_length || 40))
+  const [translateMax, setTranslateMax] = useState(Number(webSettings?.reply?.translate_max_length || 60))
+
+  useEffect(() => {
+    setAutoTranslate(!!webSettings?.message_ops?.auto_translate)
+    setPreviewDebounce(Number(webSettings?.reply?.preview_debounce_ms || 320))
+    setSmartMax(Number(webSettings?.reply?.smart_max_length || 40))
+    setTranslateMax(Number(webSettings?.reply?.translate_max_length || 60))
+  }, [webSettings])
+
+  const save = () => onSaveSettings?.({
+    channels,
+    web_settings: {
+      ...webSettings,
+      reply: {
+        ...(webSettings.reply || {}),
+        preview_debounce_ms: previewDebounce,
+        smart_max_length: smartMax,
+        translate_max_length: translateMax,
+      },
+      message_ops: {
+        ...(webSettings.message_ops || {}),
+        auto_translate: autoTranslate,
+      },
+    },
+  })
+
   return (
     <div className="wx-cell-group">
       <div className="wx-cell-group-title">{t('chat')}</div>
       <div className="wx-section-list wx-card-list">
-        <div className="wx-setting-row">
+        <label className="wx-setting-row wx-setting-row-form">
           <span>{t('autoTranslate')}</span>
-          <span className="wx-setting-value">{t('on')}</span>
-        </div>
+          <input type="checkbox" checked={autoTranslate} onChange={e => setAutoTranslate(e.target.checked)} />
+        </label>
+        <label className="wx-setting-row wx-setting-row-form">
+          <span>{t('settingPreviewDebounce')}</span>
+          <input type="number" value={previewDebounce} onChange={e => setPreviewDebounce(Number(e.target.value) || 320)} />
+        </label>
+        <label className="wx-setting-row wx-setting-row-form">
+          <span>{t('settingSmartMax')}</span>
+          <input type="number" value={smartMax} onChange={e => setSmartMax(Number(e.target.value) || 40)} />
+        </label>
+        <label className="wx-setting-row wx-setting-row-form">
+          <span>{t('settingTranslateMax')}</span>
+          <input type="number" value={translateMax} onChange={e => setTranslateMax(Number(e.target.value) || 60)} />
+        </label>
         <div className="wx-setting-row">
-          <span>{t('messageOps')}</span>
-          <span className="wx-setting-value">{t('default')}</span>
+          <button type="button" className="ghost-btn" onClick={save} disabled={saving}>{saving ? (t('saving') || 'Saving...') : (t('save') || 'Save')}</button>
         </div>
       </div>
     </div>
@@ -315,7 +435,7 @@ function GeneralSubPage({ theme, language, setTheme, setLanguage, languages }) {
   )
 }
 
-function SecuritySubPage({ isAdmin }) {
+function SecuritySubPage({ isAdmin, onOpenAccounts, onOpenUserMgm }) {
   const { t } = useSettings()
   return (
     <div className="wx-cell-group">
@@ -323,13 +443,17 @@ function SecuritySubPage({ isAdmin }) {
       <div className="wx-section-list wx-card-list">
         <div className="wx-setting-row">
           <span>{t('changePassword')}</span>
-          <span className="wx-setting-value">***</span>
+          <span className="wx-setting-value">{t('settingsSecuritySub')}</span>
         </div>
+        <button type="button" className="wx-setting-row link" onClick={() => onOpenAccounts?.()}>
+          <span>{t('whatsappAccounts')}</span>
+          <span className="wx-setting-value">›</span>
+        </button>
         {isAdmin ? (
-          <div className="wx-setting-row">
+          <button type="button" className="wx-setting-row link" onClick={() => onOpenUserMgm?.()}>
             <span>{t('userManagement')}</span>
             <span className="wx-setting-value">›</span>
-          </div>
+          </button>
         ) : null}
       </div>
     </div>

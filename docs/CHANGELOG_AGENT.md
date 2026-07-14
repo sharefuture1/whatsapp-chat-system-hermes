@@ -1,4 +1,4 @@
-## 2026-07-14：微信式设置全屏二级页（SDD-P1-11）
+## 2026-07-14：微信式设置全屏二级页（SDD-P1-11，完成真实接线）
 
 - 新增 `web/src/components/SettingsPage.jsx`：全屏微信式设置主页，5 个 cell 入口路由到子页（账号与安全/AI 助手/聊天与翻译/通用/关于），取代原 5-tab `SettingsPanel` 模态。
 - `App.jsx` 引入 `settingsView` state：`null`（未进入）/ `'main'`（设置主页）/ `'security' | 'ai' | 'chat' | 'general' | 'about'`（子页），由 MePage 入口触发。
