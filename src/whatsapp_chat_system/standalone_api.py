@@ -44,6 +44,7 @@ from .runtime import (
     is_authenticated as _is_authenticated,
     verify_password as _verify_password,
     save_runtime_settings,
+    session_info as _session_info,
 )
 from .security.internal_auth import InternalAuthError, verify_internal_token
 
