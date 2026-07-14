@@ -259,6 +259,15 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-bubble-action:hover { color: var(--wx-text); background: var(--wx-list-hover); }
 .wx-bubble-status { font-size: 10px; color: var(--wx-text-muted); }
 .wx-bubble-status.failed { color: var(--wx-danger); }
+.wx-message-media {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
 .wx-bubble-content { min-width: 0; }
 .wx-bubble-translation { margin-top: 7px; padding-top: 7px; border-top: 1px solid rgba(0,0,0,.10); display: grid; gap: 5px; color: var(--wx-text-secondary); font-size: 12px; line-height: 1.45; text-align: left; position: relative; }
 .wx-bubble.out .wx-bubble-translation { border-top-color: rgba(0,0,0,.09); }

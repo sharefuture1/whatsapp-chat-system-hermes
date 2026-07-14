@@ -117,6 +117,15 @@ export class EventSink {
       return false;
     }
 
+    if (response.status === 409) {
+      let body = null;
+      try { body = await response.json(); } catch {}
+      if (body?.error?.code === 'event_conflict') {
+        await this.spool.deadLetter(claim, { error: 'event_conflict' });
+        return false;
+      }
+    }
+
     await this.#retain(claim, `HTTP ${response.status}`);
     return false;
   }

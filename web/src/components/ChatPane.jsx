@@ -32,6 +32,18 @@ function initials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
+function mediaUrl(metadata = {}) {
+  return metadata.url || metadata.media_url || metadata.thumbnail_url || null
+}
+
+function MessageMedia({ message }) {
+  const type = String(message.message_type || '').toLowerCase()
+  const url = mediaUrl(message.media_metadata)
+  if (!url || !['image', 'video'].includes(type)) return null
+  if (type === 'image') return <img className="wx-message-media" src={url} alt="" loading="lazy" />
+  return <video className="wx-message-media" src={url} controls preload="metadata" />
+}
+
 function avatarColor(name) {
   const colors = ['#5b8def', '#07c160', '#fa9d3b', '#f44c4c', '#9b59b6', '#16a085', '#e67e22', '#2ecc71']
   let h = 0
@@ -717,7 +729,9 @@ export default function ChatPane({
                 <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? t('operator') : userName)}</div>
                 <div>
                   <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
-                    <div className="wx-bubble-content">{effectiveHidden ? t('hiddenPlaceholder') : item.content}</div>
+                    <div className="wx-bubble-content">
+                      {effectiveHidden ? t('hiddenPlaceholder') : <><MessageMedia message={item} />{item.content}</>}
+                    </div>
                     {showTranslation ? (
                       <div className="wx-bubble-translation">
                         <span>{translatedText}</span>

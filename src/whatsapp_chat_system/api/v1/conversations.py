@@ -455,6 +455,7 @@ def create_conversations_router(
                 "direction": message.direction,
                 "content": message.content or "",
                 "message_type": message.message_type,
+                "media_metadata": message.media_metadata or {},
                 "status": message.status,
                 "pending": message.status in {"queued", "sending"},
                 "failed": message.status == "failed",
