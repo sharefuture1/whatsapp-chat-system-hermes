@@ -35,6 +35,7 @@ class Rewriter:
         logger: Callable[..., None],
         *,
         ai_service: AIService | None = None,
+        runtime_manager: Any = None,
     ) -> None:
         self.config = config
         self.logger = logger
@@ -44,6 +45,9 @@ class Rewriter:
             settings,
             audit_logger=logger,
         )
+        # Inject runtime manager so provider uses live DB-backed credentials
+        if runtime_manager is not None:
+            self.ai_service.provider.set_runtime_manager(runtime_manager)
         self._translation_memory: TranslationMemory | None = None
 
     @property
