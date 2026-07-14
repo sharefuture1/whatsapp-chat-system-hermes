@@ -9,6 +9,24 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
+### P0 — 性能快赢包（SDD-P0-10，规格：`docs/sdd/09-performance-and-realtime.md`）
+
+- [ ] PERF-001 前端刷新间隔解除 30s 钳制，默认 5s，越界钳 [3,300]
+- [ ] PERF-002 轮询拆除 contacts、conversations+dashboard 并行、`updated_since` 增量
+- [ ] PERF-003 翻译/预览复用 app 级 AI Provider 单例（禁止请求内新建 Rewriter/Session）
+- [ ] PERF-005 SQLite `journal_mode=WAL` + `busy_timeout=5000`
+- [ ] PERF-006 AutoReplyWorker 改为"短事务读 → 无 session 调 AI → 短事务写回"
+- [ ] PERF-008 `mergeFreshMessages` 引用稳定；localStorage 写入移出关键路径；缓存不短路网络请求
+
+### P1 — 实时通道与 Vercel 部署（新规格已批准）
+
+- [ ] **SDD-P1-12 SSE 实时事件通道**（RT-001/002/003 + PERF-004 翻译入库 + PERF-007 索引对齐）
+- [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
+  - [ ] `api.js` 接入 `VITE_API_BASE_URL`（自托管行为不变）
+  - [ ] API CORS allowlist 加入 Vercel 生产域；nginx SSE `proxy_buffering off`
+  - [ ] Vercel 环境变量矩阵（Preview 禁止指向生产 API）
+  - [ ] 版本哈希验证 + rollback 演练
+
 ### P0 — 24x7 AI 自动回复
 
 - [>] **持久化 AI 自动回复闭环（SDD-P0-09）**

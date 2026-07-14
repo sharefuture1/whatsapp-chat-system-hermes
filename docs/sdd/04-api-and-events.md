@@ -226,6 +226,12 @@ Body：
 }
 ```
 
+### `GET /api/v1/events/stream`
+
+- `text/event-stream` SSE 事件流；复用外部 Web 鉴权，未认证 401。
+- 事件类型、`Last-Event-ID` 续传、心跳与降级契约见 `09-performance-and-realtime.md` RT-001/002。
+- 事件必须在数据库事务提交后发布；断流客户端回退为受控增量轮询（`NFR-PERF-002`）。
+
 ### `POST /api/v1/messages/{message_id}/translate`
 
 异步情况下返回 `202 task_id`；已有缓存可返回 `200`。

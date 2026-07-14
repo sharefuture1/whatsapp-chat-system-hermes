@@ -143,7 +143,12 @@
 - **待完成**：管理员策略/暂停/限速/预算/熔断配置面、真实 WhatsApp 收发、连续 24 小时生产验收。
 - 验收：服务停止/重启后 Job 可恢复；重复 webhook 不重复回复；AI 超时可重试；Bridge 离线进入 retry；管理员暂停立即阻止新任务；真实账号 24 小时运行观测无永久 pending/dead 增长。
 
-## 3. P1：产品可用性
+### SDD-P0-10 性能快赢包（2026-07-14 审计）
+
+- 状态：`Approved`
+- 权威规格：`docs/sdd/09-performance-and-realtime.md`（PERF-001/002/003/005/006/008）
+- 内容：前端刷新间隔解除 30s 钳制并给出安全默认；工作台轮询拆除 contacts、并行化、`updated_since` 增量；翻译/预览路径复用 app 级 AI Provider 单例；SQLite WAL + busy_timeout；Worker 不得持有 DB 事务调用外部服务；`mergeFreshMessages` 引用稳定与 localStorage idle 写入。
+- 验收：见 09 号文档各需求 ID；全部三端测试与构建门禁通过。
 
 ### SDD-P0-08 受控 AI 人设（Code Implemented，待生产切流验收）
 
@@ -160,6 +165,8 @@
   - 重写器在选中/卸载/未知/插件关闭任一情况下都不注入未授权 prompt
   - 默认策略（不选人设）走 `default` 且不引入额外延迟
 - 未完成：未在生产启用；未与真实 WhatsApp 账号联动验收
+
+## 3. P1：产品可用性
 
 ### SDD-P1-01 前端 WhatsApp 账号中心
 
@@ -274,7 +281,9 @@
 - 剩余阻塞：仍需真实 WhatsApp 断线重连、批量历史、乱序/重复事件和 Bridge V2 多账号数据才能完成端到端 `Verified`。
 - 验收：断线重连、批量历史同步、乱序事件和重复事件均无永久 gap；网页直发成功后刷新仍能看到同一条消息。
 
-### SDD-P1-07 联系人自动回复控制面
+### SDD-P1-14 联系人自动回复控制面
+
+> 编号修正：本条原误用已被"认证升级"占用的 `SDD-P1-07`，2026-07-14 起更名为 `SDD-P1-14`。
 
 - 聊天详情必须展示联系人级自动回复开关、当前状态和保存结果。
 - 开关写入 `ContactAIOverride.auto_reply_enabled`，账号必须在线且全局 `auto_reply_mode=auto` 才会实际触发；关闭后新入站消息不得创建 AI Job。
@@ -282,30 +291,48 @@
 - 高级模型/Prompt 配置仅管理员可见；普通用户只可使用授权的联系人自动回复开关。
 - 验收：打开/关闭持久化、刷新保持、无联系人会话返回明确 409、跨账号不能读写、Worker 遵循开关。
 
+### SDD-P1-12 SSE 实时事件通道
 
+- 状态：`Approved`
+- 权威规格：`docs/sdd/09-performance-and-realtime.md`（RT-001/002/003、PERF-004、PERF-007）
+- 内容：`GET /api/v1/events/stream` 事件流（message.created / conversation.updated / translation.completed / account.status）、Last-Event-ID 续传、前端 EventSource 精确失效、轮询降级为兜底；翻译结果数据库化；消息排序索引对齐。
+- 依赖：SDD-P0-10 先行；即 SDD-P1-05 剩余验收与工程化重构 Phase 2 的正式规格。
+- 验收：真实消息从 webhook 落库到页面可见 ≤ 3s；SSE 断线自动降级轮询无消息丢失。
 
-### Phase 1：数据层与同步边界
+### SDD-P1-13 前端 Vercel 部署
+
+- 状态：`Approved`
+- 权威规格：`docs/sdd/10-frontend-vercel-deployment.md`（VCL-001~006）
+- 内容：Vercel 托管静态 SPA；`VITE_API_BASE_URL` 直连自托管 API；CORS 显式 allowlist；SSE 直连不经 Vercel 代理；Preview 与生产环境隔离；缓存/版本验证与双回滚路径。
+- 依赖：VCL-004 依赖 SDD-P1-12 的 SSE 端点（其余条目可先行）；生产域名切换遵循 MIG-8 窗口纪律。
+- 验收：见 10 号文档；含一次真实 rollback 演练。
+
+### SDD-P1-15 工程化重构路线（Phase 1~4）
+
+#### Phase 1：数据层与同步边界
 
 - 统一 `/api/v1` API client、认证、请求去重、短 TTL 缓存和 mutation 失效。
 - App/页面不直接裸调用 fetch；feature hooks 负责 query/mutation。
 - 会话与消息使用稳定 query key、cursor 和服务端数据真源。
 - 关联计划：`docs/plans/2026-07-14-engineering-phase1-data-layer.md`。
 
-### Phase 2：事件驱动同步
+#### Phase 2：事件驱动同步
 
 - SSE/WebSocket 增量事件、cursor 恢复、前端缓存精确更新。
 - 轮询只作为断线补偿，不作为主要实时同步机制。
 
-### Phase 3：翻译与 AI Job
+#### Phase 3：翻译与 AI Job
 
 - 数据库译文表、最近 10 条上下文批处理、结构化 AI 输出、管理员策略和普通用户只读策略。
 - AI 生成与 Outbox 投递拆成可追踪任务，支持 retry/dead/cancel。
 
-### Phase 4：媒体与可观测性
+#### Phase 4：媒体与可观测性
 
 - 媒体下载、权限代理、Range、对象存储；统一 request/job/event 指标与告警。
 
 
+
+## 4. P2：UX、视觉和工程质量
 
 ### SDD-P2-01 CSS 治理
 

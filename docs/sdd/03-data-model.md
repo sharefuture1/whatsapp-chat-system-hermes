@@ -136,6 +136,24 @@ UNIQUE(account_id, wa_message_id) WHERE wa_message_id IS NOT NULL
 (account_id, status, created_at)
 ```
 
+### 2.4.1 `message_translations`（PERF-004，规格见 `09-performance-and-realtime.md`）
+
+```text
+id              UUID PK
+message_id      FK -> messages.id (ON DELETE CASCADE) not null
+account_id      FK not null
+source_lang     varchar not null
+target_lang     varchar not null default 'Chinese'
+content         text not null
+provider_model  varchar null
+created_at      timestamptz not null
+UNIQUE (message_id, target_lang)
+INDEX (account_id, created_at)
+```
+
+- 译文随消息查询内联返回；重复翻译请求幂等命中已有行。
+- 旁路 JSON `translations__{user}.json` 冻结为只读迁移源，新链路禁止写入。
+
 ### 2.5 `whatsapp_events`
 
 ```text

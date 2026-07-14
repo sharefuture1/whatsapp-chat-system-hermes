@@ -41,6 +41,14 @@
 - worker 现每 30 秒自动执行 `recover_expired_leases(...)`，health 增加 `recovered_leases`；失败重试从固定 30 秒升级为指数退避 + jitter（上限 300 秒）。
 - 质量门禁：focused pytest 45 passed；全量 Python 243 passed；automation health / api health 200。
 
+## 2026-07-14：SDD 扩充——性能/实时规格与 Vercel 前端部署规格
+
+- 新增 `docs/sdd/09-performance-and-realtime.md`：把 2026-07-14 性能审计固化为强制需求 PERF-001~008（刷新调度、轮询负载、AI Provider 单例、翻译数据库化、SQLite WAL/busy_timeout、Worker 事务隔离、消息索引对齐、渲染稳定）与 RT-001~003（`GET /api/v1/events/stream` SSE 契约、前端 EventSource 集成与轮询降级）。
+- 新增 `docs/sdd/10-frontend-vercel-deployment.md`：Vercel 托管静态 SPA 拓扑与 VCL-001~006（构建产物合同、`VITE_API_BASE_URL` 直连、CORS/鉴权、SSE 直连不经 Vercel 代理、Preview 环境隔离、缓存版本验证与双回滚路径）；上线步骤衔接 MIG-7/8。
+- backlog 新增 `SDD-P0-10 性能快赢包`、`SDD-P1-12 SSE 实时事件通道`、`SDD-P1-13 前端 Vercel 部署`（均 `Approved`）。
+- backlog 结构修复：恢复合并中丢失的 `SDD-P0-08 受控内置 AI 人设` 标题；"联系人自动回复控制面"与"认证升级"的 `SDD-P1-07` 编号冲突改为 `SDD-P1-14`；工程化重构 Phase 1~4 归入 `SDD-P1-15` 父条目。
+- `03-data-model.md` 新增 `message_translations` 表（PERF-004）；`04-api-and-events.md` 登记 SSE 端点契约；`02-system-architecture.md` §6.2 登记 Vercel 可选拓扑；`docs/sdd/README.md` 索引更新至 10 篇；`TODO_AGENT.md` 加入对应执行视图。
+
 ## 2026-07-14：微信式设置全屏二级页（SDD-P1-11，完成真实接线）
 
 - 新增 `web/src/components/SettingsPage.jsx`：全屏微信式设置主页，5 个 cell 入口路由到子页（账号与安全/AI 助手/聊天与翻译/通用/关于），取代原 5-tab `SettingsPanel` 模态。

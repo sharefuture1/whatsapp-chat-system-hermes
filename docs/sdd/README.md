@@ -50,6 +50,10 @@
    从 Hermes 运行时迁移到独立系统的阶段、回滚与上线策略。
 8. [`08-ai-relationship-and-multichannel.md`](./08-ai-relationship-and-multichannel.md)
    会话总结、长期记忆、人物画像、拟人回复、插件批处理及 Telegram/Meta 多平台账号目标架构。
+9. [`09-performance-and-realtime.md`](./09-performance-and-realtime.md)
+   性能审计结论、PERF 系列强制需求（刷新调度、轮询负载、连接复用、翻译数据库化、DB 健康、Worker 事务隔离、索引对齐、渲染稳定）与 RT 系列 SSE 实时同步契约。
+10. [`10-frontend-vercel-deployment.md`](./10-frontend-vercel-deployment.md)
+    前端 Vercel 托管拓扑与 VCL 系列需求：构建产物合同、`VITE_API_BASE_URL` 直连模式、CORS/鉴权、SSE 兼容、Preview 环境隔离、缓存版本验证与回滚。
 
 补充实施计划：
 
