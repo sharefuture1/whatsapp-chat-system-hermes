@@ -28,6 +28,7 @@ PLATFORM = "whatsapp"
 class ConversationReplyRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
     idempotency_key: str | None = Field(default=None, max_length=255)
+    preview_only: bool = False
 
 
 class ConversationStateUpdate(BaseModel):
@@ -478,6 +479,15 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        if payload.preview_only:
+            return {
+                "success": True,
+                "preview_only": True,
+                "conversation_id": conversation.id,
+                "message": payload.message,
+                "mode": "direct",
+                "rewrite": {"language": "direct"},
+            }
         idempotency_key = payload.idempotency_key or f"reply:{uuid4()}"
         if not idempotency_key.startswith("reply:"):
             idempotency_key = f"reply:{idempotency_key}"

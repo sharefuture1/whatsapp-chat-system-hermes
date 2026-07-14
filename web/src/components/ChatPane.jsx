@@ -186,9 +186,10 @@ export default function ChatPane({
     const cursorQuery = cursor
       ? `&before_occurred_at=${encodeURIComponent(cursor.before_occurred_at)}&before_id=${encodeURIComponent(cursor.before_id)}`
       : ''
-    const endpoint = standalone && conversationId
+    const endpoint = conversationId
       ? `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=${pageSize}${cursorQuery}`
-      : `/conversations/${encodeURIComponent(targetUserId)}?page=${p}&page_size=${pageSize}`
+      : null
+    if (!endpoint) throw new Error('Conversation is not available in Standalone mode')
     const res = await api.get(endpoint)
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
     const items = standalone ? (res.messages || []).slice() : (res.messages || []).slice().reverse()
@@ -197,7 +198,7 @@ export default function ChatPane({
     } else {
       setMessages(prev => mergeFreshMessages(items, prev))
     }
-    if (standalone) standaloneCursorRef.current = res.next_cursor || null
+    standaloneCursorRef.current = res.next_cursor || null
     setHasMore(Boolean(res.has_more))
     setTotal(res.total_messages || 0)
     setHiddenCount(res.hidden_message_count || 0)
@@ -259,40 +260,16 @@ export default function ChatPane({
   useEffect(() => {
     if (!userId || !refreshTick || fetchedFor.current !== userId) return
     const targetUserId = userId
-    if (standalone) {
+    if (conversationId) {
       const wasAtBottom = lastBottomRef.current
       fetchPage(targetUserId, 1, false).then(res => {
         if (res && wasAtBottom) lastBottomRef.current = true
       }).catch(() => {})
       return
     }
-    const wasAtBottom = lastBottomRef.current
-    const drain = async context => {
-      let cursor = deltaCursorRef.current || maxMessageId(messagesRef.current)
-      let added = 0
-      for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
-        const res = await api.get(`/conversations/${encodeURIComponent(targetUserId)}/messages?after_id=${cursor}&limit=100`)
-        if (!context.isCurrent()) return
-        const items = res.messages || []
-        if (items.length) {
-          const stats = mergeNewMessagesWithStats(messagesRef.current, items)
-          added += stats.newCount
-          messagesRef.current = stats.items
-          setMessages(stats.items)
-          cursor = Number(res.next_after_id || res.max_message_id || maxMessageId(items) || cursor)
-          deltaCursorRef.current = Math.max(deltaCursorRef.current, cursor)
-        }
-        if (!res.has_more || !items.length) break
-      }
-      if (added) {
-        if (wasAtBottom) lastBottomRef.current = true
-        else setNewMessageCount(prev => prev + added)
-        setTotal(prev => prev + added)
-      }
-    }
-    deltaScheduler.current.trigger(targetUserId, drain).catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTick, userId, standalone])
+    // Standalone mode is the only supported runtime. No legacy delta endpoint.
+    // A conversation without a V1 conversation_id cannot be synchronized.
+  }, [refreshTick, userId, conversationId])
 
   const loadMore = async () => {
     if (loadingMore || !hasMore || !userId) return
@@ -335,7 +312,7 @@ export default function ChatPane({
     if (!translationId || translationId.startsWith('tmp-') || msg.pending || msg.failed || msg.translated || msg.lang === 'Chinese' || !isTranslationRetryEligible(msg) || translatingIdsRef.current.has(translationId)) return false
     translatingIdsRef.current.add(translationId)
     try {
-      const res = await api.post(`/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content }, { signal })
+      const res = await api.post(`/v1/messages/${msg.message_id}/translate`, { user_id: userId, content: msg.content }, { signal })
       if (generation !== translationGenerationRef.current || signal.aborted) return false
       if (res?.success === false || !res?.translated) {
         const code = res?.error?.code || 'translation_failed'

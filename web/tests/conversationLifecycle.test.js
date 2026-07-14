@@ -35,7 +35,7 @@ test('delete plans use source-specific endpoint and conversation key identity', 
 
 test('App loads V1 as primary while keeping legacy contacts as migration fallback', () => {
   assert.match(appSource, /api\.get\(`\/v1\/conversations\?platform=all/)
-  assert.match(appSource, /api\.get\('\/contacts\?page=/)
-  assert.match(appSource, /legacy:\s*legacyContactsRes\.items/)
+  assert.doesNotMatch(appSource, /api\.get\('\/contacts\?page=/)
+  assert.match(appSource, /legacy:\s*\[\]/)
   assert.doesNotMatch(contactsSource, /disabled=\{!item\.conversation_key\}/)
 })

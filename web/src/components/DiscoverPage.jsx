@@ -15,7 +15,7 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
     setError(null)
     try {
       const [summary, personaCatalog] = await Promise.all([
-        api.get('/dashboard').catch(() => null),
+        api.get('/v1/dashboard'),
         fetchPersonaCatalog(),
       ])
       if (summary?.stats) {

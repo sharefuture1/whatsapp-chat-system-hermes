@@ -167,31 +167,21 @@ function AppInner() {
   const fetchConversationsPage = useCallback(async (page) => {
     const standaloneRes = await api.get(`/v1/conversations?platform=all&account_id=all&limit=200`)
     const contactsRes = await api.get('/v1/contacts?platform=all&account_id=all&limit=500')
-    const legacyResults = await Promise.allSettled([
-      api.get(`/conversations?page=${page}&page_size=${PAGE_SIZE}`),
-      api.get('/contacts?page=1&page_size=500'),
-    ])
-    const legacyRes = legacyResults[0].status === 'fulfilled'
-      ? legacyResults[0].value
-      : { items: [], total: 0, has_more: false }
-    const legacyContactsRes = legacyResults[1].status === 'fulfilled'
-      ? legacyResults[1].value
-      : { items: [] }
     const inbox = buildInbox({
-      legacy: legacyRes.items || [],
+      legacy: [],
       standalone: standaloneRes.items || [],
       standaloneAccounts: standaloneRes.available_accounts || accountsRef.current || [],
     })
     return {
       items: inbox.conversations,
       contacts: buildContacts({
-        legacy: legacyContactsRes.items || [],
+        legacy: [],
         standalone: contactsRes.items || [],
         accounts: inbox.accounts,
       }),
       accounts: inbox.accounts,
-      legacyTotal: Number(legacyRes.total) || 0,
-      has_more: Boolean(legacyRes.has_more),
+      legacyTotal: Number(standaloneRes.total) || 0,
+      has_more: Boolean(standaloneRes.has_more),
       page,
     }
   }, [])
@@ -213,7 +203,7 @@ function AppInner() {
       try {
         const [convRes, dashboardRes] = await Promise.all([
           fetchConversationsPage(1),
-          api.get('/v1/dashboard').catch(() => api.get('/dashboard').catch(() => null)),
+          api.get('/v1/dashboard'),
         ])
         return { convRes, dashboardRes }
       } catch (e) {
@@ -265,7 +255,7 @@ function AppInner() {
 
   const refreshSettings = useCallback(async () => {
     const [settingsData, aiData] = await Promise.all([
-      api.get('/v1/settings').catch(() => api.get('/settings')),
+      api.get('/v1/settings'),
       api.get('/v1/ai/settings').catch(() => ({})),
     ])
     setSettings(settingsData)
@@ -327,7 +317,7 @@ function AppInner() {
       await api.put('/v1/settings', {
         channels: payload.channels || settings.channels || [],
         web_settings: payload.web_settings || payload,
-      }).catch(() => api.put('/settings', payload))
+      })
       await refreshSettings()
       done?.()
     } catch (e) {
@@ -351,8 +341,8 @@ function AppInner() {
         throw new Error(t('previewFailed') || 'Preview is not available for this conversation yet')
       }
       const data = conversation?.source === 'standalone' && conversation?.conversation_id
-        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey })
-        : await api.post('/reply', { target: conversation?.user_id, message, mode, preview_only: previewOnly })
+        ? await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey, preview_only: previewOnly })
+        : await Promise.reject(new Error(t('conversationUnavailable') || 'Conversation is not available in Standalone mode'))
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
         error.code = data?.code || 'delivery_failed'
@@ -374,7 +364,7 @@ function AppInner() {
 
   const hideMessage = async (messageId) => {
     try {
-      await api.post('/messages/hide', { message_ids: [messageId] })
+      throw new Error(t('messageHideUnavailable') || 'Message hiding is not available in Standalone mode')
     } catch (e) {
       showError(e)
     }
@@ -392,8 +382,6 @@ function AppInner() {
     try {
       if (conversation.source === 'standalone' && conversation.conversation_id) {
         await api.patch(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}`, { pinned: !isPinned })
-      } else {
-        await api.post('/chat/pin', { user_id: conversation.user_id, pinned: !isPinned })
       }
       refreshWorkspace({ silent: true, fresh: true })
     } catch (error) {
@@ -563,7 +551,7 @@ function AppInner() {
         remark: String(patchFields.remark ?? existingProfile.remark ?? '').trim(),
         notes: String(patchFields.notes ?? existingProfile.notes ?? '').trim(),
       }
-      await api.put('/settings', {
+      await api.put('/v1/settings', {
         channels: settings.channels || [],
         web_settings: {
           ...settings.web_settings,
