@@ -2,6 +2,10 @@
 
 ## 当前优先级排序
 
+### P0 — 运维安全（需人工在生产执行）
+
+- [ ] **轮换生产登录密码**：2026-07-14 hotfix 曾把明文密码写入 `docs/CHANGELOG_AGENT.md` 并推送 GitHub，该密码视为已泄露；需在生产更新 `web-settings.json` auth 记录（文档中的明文已于同日移除）
+
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
 ### P0 — 消息与翻译同步可靠性

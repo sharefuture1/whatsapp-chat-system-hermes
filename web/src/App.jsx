@@ -496,6 +496,34 @@ function AppInner() {
     })
   }, [conversations, query, platformFilter, accountFilter, settings.web_settings?.contact_profiles])
 
+  const contactProfileMap = useMemo(
+    () => settings.web_settings?.contact_profiles || {},
+    [settings.web_settings?.contact_profiles],
+  )
+  const chatListAccounts = useMemo(
+    () => inboxAccounts.filter(account => platformFilter === 'all' || account.platform === platformFilter),
+    [inboxAccounts, platformFilter],
+  )
+  const handlePlatformFilterChange = useCallback(platform => {
+    setPlatformFilter(platform)
+    setAccountFilter('all')
+    setSelectedId('')
+    setSelectedName('')
+  }, [])
+  const handleAccountFilterChange = useCallback(accountId => {
+    setAccountFilter(accountId)
+    setSelectedId('')
+    setSelectedName('')
+  }, [])
+  const openReplySettings = useCallback(() => {
+    setSettingsInitialTab('reply')
+    setSettingsOpen(true)
+  }, [])
+  const handleTabChange = useCallback(tab => {
+    setActiveTab(tab)
+    if (tab !== 'me') setAccountCenterOpen(false)
+  }, [])
+
   const autoTranslateState = deriveAutoTranslateState(settings, apiSettings)
   const autoTranslate = autoTranslateState.ready
   const selectedConversation = useMemo(() => conversations.find(c => c.conversation_key === selectedId) || null, [conversations, selectedId])
@@ -595,7 +623,7 @@ function AppInner() {
             <ChatList
               conversations={filteredConversations}
               selectedId={selectedId}
-              selectedProfileMap={settings.web_settings?.contact_profiles || {}}
+              selectedProfileMap={contactProfileMap}
               onSelect={selectConversation}
               query={query}
               onQueryChange={setQuery}
@@ -610,21 +638,12 @@ function AppInner() {
               autoTranslate={autoTranslate}
               platformFilter={platformFilter}
               platformOptions={platformOptions}
-              onPlatformFilterChange={platform => {
-                setPlatformFilter(platform)
-                setAccountFilter('all')
-                setSelectedId('')
-                setSelectedName('')
-              }}
-              accounts={inboxAccounts.filter(account => platformFilter === 'all' || account.platform === platformFilter)}
+              onPlatformFilterChange={handlePlatformFilterChange}
+              accounts={chatListAccounts}
               selectedAccountId={accountFilter}
               selectedAccountName={selectedAccount?.name || ''}
-              onAccountChange={accountId => {
-                setAccountFilter(accountId)
-                setSelectedId('')
-                setSelectedName('')
-              }}
-              onOpenSettings={() => { setSettingsInitialTab('reply'); setSettingsOpen(true) }}
+              onAccountChange={handleAccountFilterChange}
+              onOpenSettings={openReplySettings}
             />
             <ChatPane
               userId={selectedConversation?.user_id || ''}
@@ -729,7 +748,7 @@ function AppInner() {
         )}
       </div>
 
-      <TabBar activeTab={activeTab} onChange={tab => { setActiveTab(tab); if (tab !== 'me') setAccountCenterOpen(false) }} unreadChats={unreadChats} hidden={(activeTab === 'chats' && Boolean(selectedId)) || accountCenterOpen} />
+      <TabBar activeTab={activeTab} onChange={handleTabChange} unreadChats={unreadChats} hidden={(activeTab === 'chats' && Boolean(selectedId)) || accountCenterOpen} />
 
       <SettingsPanel
         open={settingsOpen}

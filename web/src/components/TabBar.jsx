@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useSettings } from '../settings'
 
 const ChatIcon = () => (
@@ -20,7 +21,7 @@ const TABS = [
   { id: 'me', key: 'tabMe', Icon: MeIcon },
 ]
 
-export default function TabBar({ activeTab, onChange, unreadChats, hidden = false }) {
+function TabBar({ activeTab, onChange, unreadChats, hidden = false }) {
   const { t } = useSettings()
   return (
     <nav className={`wx-tab-bar${hidden ? ' is-chat-hidden' : ''}`} role="tablist">
@@ -41,3 +42,5 @@ export default function TabBar({ activeTab, onChange, unreadChats, hidden = fals
     </nav>
   )
 }
+
+export default memo(TabBar)

@@ -85,9 +85,23 @@ class WendingAIProvider:
     ) -> None:
         self.settings = settings
         self._injected_session = session
+        self._owned_session: Any | None = None
         self.sleep = sleep
         # 运行时设置管理器（由 setup_ai_runtime_settings 注入）
         self._runtime_manager: RuntimeAISettings | None = None
+
+    def _session(self) -> Any:
+        if self._injected_session is not None:
+            return self._injected_session
+        if self._owned_session is None:
+            self._owned_session = requests.Session()
+        return self._owned_session
+
+    def close(self) -> None:
+        """关闭自有持久 Session；注入 Session 的生命周期归调用方。"""
+        if self._owned_session is not None:
+            self._owned_session.close()
+            self._owned_session = None
 
     def set_runtime_manager(self, mgr: RuntimeAISettings | None) -> None:
         """由 web_api.py 在启动时注入运行时设置管理器，实现保存后热生效。"""
@@ -141,18 +155,12 @@ class WendingAIProvider:
             payload["temperature"] = temperature
 
         started = monotonic()
-        session = self._injected_session or requests.Session()
-        owns_session = self._injected_session is None
-        try:
-            return self._chat_with_session(
-                session,
-                payload=payload,
-                model=model,
-                started=started,
-            )
-        finally:
-            if owns_session:
-                session.close()
+        return self._chat_with_session(
+            self._session(),
+            payload=payload,
+            model=model,
+            started=started,
+        )
 
     def _chat_with_session(
         self,

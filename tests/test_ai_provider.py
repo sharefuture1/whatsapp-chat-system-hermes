@@ -188,7 +188,7 @@ def test_settings_normalize_and_bound_environment_values():
     assert invalid_port.base_url == "https://wendingai.future1.us/v1"
 
 
-def test_provider_default_session_is_per_call_and_closed(monkeypatch):
+def test_provider_default_session_is_persistent_and_reused(monkeypatch):
     sessions = []
 
     class ClosingSession(_FakeSession):
@@ -202,6 +202,7 @@ def test_provider_default_session_is_per_call_and_closed(monkeypatch):
                             "choices": [{"message": {"content": "ok"}}],
                         },
                     )
+                    for _ in range(2)
                 ]
             )
             self.closed = False
@@ -220,8 +221,25 @@ def test_provider_default_session_is_per_call_and_closed(monkeypatch):
     provider.chat(model="m", messages=[])
     provider.chat(model="m", messages=[])
 
-    assert len(sessions) == 2
-    assert all(session.closed for session in sessions)
+    # 持久 Session：两次调用复用同一连接池，调用之间不关闭
+    assert len(sessions) == 1
+    assert sessions[0].calls == 2
+    assert sessions[0].closed is False
+
+    provider.close()
+    assert sessions[0].closed is True
+
+
+def test_provider_close_does_not_touch_injected_session():
+    session = _FakeSession(
+        [_FakeResponse(200, {"id": "r", "choices": [{"message": {"content": "ok"}}]})]
+    )
+    provider = WendingAIProvider(
+        AISettings(api_key="unit-test-secret", max_retries=0), session=session
+    )
+    provider.chat(model="m", messages=[])
+    provider.close()  # 注入 Session 生命周期归调用方，close 不得抛错也不得关闭它
+    assert not getattr(session, "closed", False)
 
 
 def test_provider_maps_invalid_timeout_to_configuration_error():
