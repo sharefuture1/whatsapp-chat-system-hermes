@@ -16,6 +16,8 @@
   - [x] AI Worker：claim、lease、retry、dead、heartbeat
   - [x] Job 完成后幂等写入 Outbox，Bridge 真实回执对账
   - [ ] 管理员策略、暂停、限速、预算和熔断
+  - [x] 执行前二次校验：system message 过滤、联系人 override 再检查、人工回复竞态取消
+  - [x] lease recovery 已接入 worker loop；retry 改为指数退避+jitter
   - [x] `/api/v1/automation/health` 已接线
   - [ ] 24 小时真实账号验收
 

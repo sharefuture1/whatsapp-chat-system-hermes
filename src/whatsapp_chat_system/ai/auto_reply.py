@@ -35,6 +35,8 @@ def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conv
     """Create one durable auto-reply analysis job; never call the provider here."""
     if message.direction != 'inbound' or not message.wa_message_id:
         return None
+    if message.message_type == 'system':
+        return None
     override = session.scalar(select(ContactAIOverride).where(
         ContactAIOverride.account_id == account.id,
         ContactAIOverride.contact_id == conversation.contact_id,
@@ -42,9 +44,9 @@ def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conv
     decision = decide_auto_reply(account, conversation, contact_enabled=override.auto_reply_enabled if override else None)
     if not decision.enabled:
         return None
-    source = json.dumps({'message_id': message.id, 'content': message.content or '', 'policy': account.auto_reply_mode}, sort_keys=True)
+    source = json.dumps({'message_id': message.id, 'account_id': account.id, 'content': message.content or '', 'policy': account.auto_reply_mode}, sort_keys=True)
     input_hash = hashlib.sha256(source.encode()).hexdigest()
-    key = f'auto-reply:{message.wa_message_id}:{account.auto_reply_mode}'
+    key = f'auto-reply:{account.id}:{message.wa_message_id}:{account.auto_reply_mode}'
     job = AnalysisJobRepository(session).enqueue(
         account_id=account.id,
         job_type='auto_reply',

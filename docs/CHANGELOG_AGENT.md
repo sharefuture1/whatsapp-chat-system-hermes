@@ -1,3 +1,10 @@
+## 2026-07-14：P0-09 自动回复可靠性补全（执行前竞态取消 + lease recovery + backoff）
+
+- `auto_reply.py`：入站自动回复 enqueue 现在显式过滤 `message_type=system`，并将 `account_id` 纳入 idempotency key / input hash 语义，降低跨账号与策略混淆风险。
+- `auto_reply_worker.py`：执行前二次校验已补齐：再次检查联系人 `auto_reply_enabled`、过滤 system message、若该入站消息之后已存在人工 outbound 回复则直接取消 job，避免客服与 AI 抢答。
+- worker 现每 30 秒自动执行 `recover_expired_leases(...)`，health 增加 `recovered_leases`；失败重试从固定 30 秒升级为指数退避 + jitter（上限 300 秒）。
+- 质量门禁：focused pytest 45 passed；全量 Python 243 passed；automation health / api health 200。
+
 ## 2026-07-14：微信式设置全屏二级页（SDD-P1-11，完成真实接线）
 
 - 新增 `web/src/components/SettingsPage.jsx`：全屏微信式设置主页，5 个 cell 入口路由到子页（账号与安全/AI 助手/聊天与翻译/通用/关于），取代原 5-tab `SettingsPanel` 模态。

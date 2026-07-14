@@ -143,5 +143,5 @@ V2 create/status/stop             200
 
 - **2026-07-14 SDD-P1-11 我页 → 设置二级页**：`SettingsPage` 替代 5-tab `SettingsPanel` 模态，全屏 5 个 cell 入口（账号与安全/AI 助手/聊天与翻译/通用/关于），角色权限边界已实装；MePage 顶部 hero 显示真实登录名 + 角色 + 状态 pills + QR 入口。`/api/v1/me` 提供 `{username, role}` 数据源。
 - **2026-07-14 SDD-P1-07 联系人自动回复控制面**：聊天页 `auto_reply_enabled` 开关 + `PATCH /api/v1/conversations/{id}/auto-reply` 端点已闭环。
-- **2026-07-14 SDD-P0-09 AI 自动回复 24x7**：`AutoReplyWorker` lease/heartbeat/dead；`/api/v1/automation/health` 已接线。
+- **2026-07-14 SDD-P0-09 自动回复可靠性补全**：enqueue 显式过滤 system message；idempotency key 纳入 `account_id`；worker 执行前再次检查联系人 override 与人工 outbound 竞态，若人工已回复则取消 job；lease recovery 每 30 秒接入主循环；retry 退避升级为指数 backoff + jitter；`/api/v1/automation/health` 新增 `recovered_leases`。
 

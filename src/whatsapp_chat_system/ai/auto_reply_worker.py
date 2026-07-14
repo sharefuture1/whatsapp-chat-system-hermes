@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -11,7 +12,7 @@ from sqlalchemy import select
 from .job_repository import AnalysisJobRepository, JobLease, claim_next_committed
 from .provider import AIProvider, AIProviderError
 from .service import AIService
-from ..db.models import Conversation, Message, WhatsAppAccount
+from ..db.models import ContactAIOverride, Conversation, Message, WhatsAppAccount
 from ..outbox import enqueue_outbox_message
 from ..settings import AISettings
 
@@ -39,6 +40,8 @@ class AutoReplyWorker:
         self.last_error: str | None = None
         self.processed = 0
         self.failed = 0
+        self.recovered_leases = 0
+        self._last_recovery_second: int | None = None
 
     def _settings(self) -> AISettings:
         return AISettings(
@@ -57,6 +60,7 @@ class AutoReplyWorker:
 
     def run_once(self) -> bool:
         self.last_heartbeat = datetime.now(timezone.utc)
+        self._recover_if_due()
         lease = claim_next_committed(
             self.session_factory,
             worker_id=self.worker_id,
@@ -80,19 +84,53 @@ class AutoReplyWorker:
             self._fail(lease, "auto_reply_worker_error", retryable=True)
         return True
 
+    def _recover_if_due(self) -> None:
+        now = datetime.now(timezone.utc)
+        bucket = int(now.timestamp()) // 30
+        if self._last_recovery_second == bucket:
+            return
+        self._last_recovery_second = bucket
+        with self.session_factory() as session:
+            recovered = AnalysisJobRepository(session).recover_expired_leases(now=now, limit=100)
+            session.commit()
+            self.recovered_leases += recovered
+
     def _process(self, lease: JobLease) -> None:
         with self.session_factory() as session:
             repo = AnalysisJobRepository(session)
             job = repo.start(lease.account_id, lease.id, self.worker_id, lease.version)
             session.commit()
-            source_id = lease.idempotency_key.removeprefix("auto-reply:").rsplit(":", 1)[0]
+            source_id = lease.idempotency_key.split(':')[2]
             message = session.scalar(select(Message).where(
                 Message.account_id == lease.account_id,
                 Message.wa_message_id == source_id,
             ))
             account = session.get(WhatsAppAccount, lease.account_id)
             conversation = session.get(Conversation, lease.conversation_id) if lease.conversation_id else None
-            if not message or not account or not conversation or not account.enabled or account.status != "online" or account.auto_reply_mode != "auto" or conversation.ai_mode != "auto":
+            override = session.scalar(select(ContactAIOverride).where(
+                ContactAIOverride.account_id == lease.account_id,
+                ContactAIOverride.contact_id == conversation.contact_id,
+            )) if conversation and conversation.contact_id else None
+            if (
+                not message or
+                not account or
+                not conversation or
+                message.message_type == 'system' or
+                not account.enabled or
+                account.status != "online" or
+                account.auto_reply_mode != "auto" or
+                conversation.ai_mode != "auto" or
+                (override and override.auto_reply_enabled is False)
+            ):
+                repo.cancel(lease.account_id, lease.id, job.version)
+                session.commit()
+                return
+            newer_human_reply = session.scalar(select(Message.id).where(
+                Message.conversation_id == conversation.id,
+                Message.direction == 'outbound',
+                Message.occurred_at > message.occurred_at,
+            ).limit(1))
+            if newer_human_reply:
                 repo.cancel(lease.account_id, lease.id, job.version)
                 session.commit()
                 return
@@ -100,8 +138,8 @@ class AutoReplyWorker:
                 Message.conversation_id == conversation.id,
             ).order_by(Message.occurred_at.desc(), Message.id.desc()).limit(self.config.context_messages)).all())
             recent.reverse()
-            messages = [{"role": "user" if item.direction == "inbound" else "assistant", "content": item.content or ""} for item in recent if item.content]
-            messages.append({"role": "system", "content": "Reply concisely in the user's language. Return only the reply text. Do not claim actions you did not take."})
+            messages = [{"role": "system", "content": "Reply concisely in the user's language. Return only the reply text. Do not claim actions you did not take."}]
+            messages.extend({"role": "user" if item.direction == "inbound" else "assistant", "content": item.content or ""} for item in recent if item.content)
             service = AIService(self._provider(self._settings()), self._settings())
             result = service.chat(messages=messages).result.content.strip()
             if not result:
@@ -115,7 +153,11 @@ class AutoReplyWorker:
         with self.session_factory() as session:
             repo = AnalysisJobRepository(session)
             try:
-                repo.fail(lease.account_id, lease.id, self.worker_id, lease.version, code, 30 if retryable else 0)
+                delay = 0
+                if retryable:
+                    base = min(300, 30 * (2 ** max(0, lease.attempts - 1)))
+                    delay = int(base + random.randint(0, 15))
+                repo.fail(lease.account_id, lease.id, self.worker_id, lease.version, code, delay)
                 session.commit()
             except Exception:
                 session.rollback()
@@ -128,4 +170,5 @@ class AutoReplyWorker:
             "last_error": self.last_error,
             "processed": self.processed,
             "failed": self.failed,
+            "recovered_leases": self.recovered_leases,
         }
