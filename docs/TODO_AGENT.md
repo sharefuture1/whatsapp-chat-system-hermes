@@ -27,7 +27,7 @@
   - [x] 统一 client 已支持认证、GET 短 TTL、single-flight 和 mutation 失效
   - [ ] App 页面 API 调用迁移到 feature hooks
   - [ ] cursor/SSE 增量同步
-  - [>] 翻译数据库批处理与管理员策略（已落地 DB 真源 Phase 1：`message_translations` / `translation_batches` + batch enqueue API）
+  - [>] 翻译数据库批处理与管理员策略（已落地 DB 真源 Phase 1：`message_translations` / `translation_batches` + batch enqueue API + 进程内 TranslationDispatcher）
   - [ ] 媒体代理、AI Job、可观测性
 
 

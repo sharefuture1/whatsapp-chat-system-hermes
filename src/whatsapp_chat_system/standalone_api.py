@@ -40,6 +40,7 @@ from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
 from .outbox import OutboxDispatcher
 from .ai.auto_reply_worker import AutoReplyWorker
+from .translations_dispatcher import TranslationDispatcher
 from .runtime import (
     StandaloneRuntime,
     StandaloneAISettingsManager,
@@ -213,6 +214,7 @@ def build_standalone_app(
     reconciler = AccountReconciler(factory, bridge)
     outbox_dispatcher = OutboxDispatcher(factory, bridge)
     auto_reply_worker = AutoReplyWorker(factory, runtime_ai_settings)
+    translation_dispatcher = TranslationDispatcher(factory, runtime, runtime_manager=runtime_ai_settings)
     login_lock = RLock()
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -257,12 +259,25 @@ def build_standalone_app(
                     processed = False
                 await asyncio.sleep(0 if processed else 2.0)
 
+        async def translation_loop() -> None:
+            while True:
+                try:
+                    processed = await asyncio.to_thread(translation_dispatcher.run_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Translation dispatcher round failed")
+                    processed = False
+                await asyncio.sleep(0 if processed else 2.0)
+
         reconcile_task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
         outbox_task = asyncio.create_task(outbox_loop(), name="whatsapp-outbox-worker")
         auto_reply_task = asyncio.create_task(auto_reply_loop(), name="whatsapp-ai-auto-reply-worker")
+        translation_task = asyncio.create_task(translation_loop(), name="whatsapp-translation-dispatcher")
         app.state.account_reconciler_task = reconcile_task
         app.state.outbox_worker_task = outbox_task
         app.state.auto_reply_worker_task = auto_reply_task
+        app.state.translation_dispatcher_task = translation_task
         try:
             yield
         finally:
@@ -270,7 +285,8 @@ def build_standalone_app(
             reconcile_task.cancel()
             outbox_task.cancel()
             auto_reply_task.cancel()
-            await asyncio.gather(reconcile_task, outbox_task, auto_reply_task, return_exceptions=True)
+            translation_task.cancel()
+            await asyncio.gather(reconcile_task, outbox_task, auto_reply_task, translation_task, return_exceptions=True)
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
@@ -379,12 +395,18 @@ def build_standalone_app(
                 "login_enabled": True,
                 "outbox_worker": "running",
                 "auto_reply_worker": auto_reply_worker.health(),
+                "translation_dispatcher": translation_dispatcher.health(),
             }
         )
 
     @app.get("/api/v1/automation/health")
     def automation_health() -> dict[str, Any]:
-        return {"ok": True, "worker": auto_reply_worker.health(), "service": "standalone"}
+        return {
+            "ok": True,
+            "worker": auto_reply_worker.health(),
+            "translation_dispatcher": translation_dispatcher.health(),
+            "service": "standalone",
+        }
 
     @app.get("/api/v1/me")
     def get_me(request: Request) -> dict[str, Any]:

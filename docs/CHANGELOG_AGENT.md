@@ -5,7 +5,8 @@
 - 消息翻译成功/失败均回写数据库：`translated_text / status / error_code / error_message / source_lang / completed_at`。
 - `/api/v1/conversations/{conversation_id}/messages` 已开始返回 `translated / translation_status / translation_updated_at`，前端可逐步切换到数据库真源展示。
 - 新增 `POST /api/v1/conversations/{conversation_id}/translations`：返回 `202 queued`、`batch_id`、`queued_message_ids`、`cached_message_ids`，为后续真正异步 Worker/SSE 铺路。
-- 本轮仍未完成：真正的 TranslationDispatcher/批任务执行、管理员窗口策略、SSE/WebSocket；因此 SDD-P1-05 继续保持 `In Progress`。
+- `TranslationDispatcher` 已接入 Standalone lifespan：轮询 `translation_batches.pending`，按锚点消息窗口执行翻译，并回填 `message_translations`。
+- `/api/health` 与 `/api/v1/automation/health` 已暴露 `translation_dispatcher` 心跳与 processed/failed 计数。
 
 ## 2026-07-14：P0-09 自动回复可靠性补全（执行前竞态取消 + lease recovery + backoff）
 
