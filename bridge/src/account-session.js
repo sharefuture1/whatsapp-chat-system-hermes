@@ -250,6 +250,7 @@ export class AccountSession {
               await this.#emitEvent(
                 receipt.eventType,
                 receipt.payload,
+                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}`,
               );
             }
           })
