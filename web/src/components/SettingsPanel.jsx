@@ -4,7 +4,7 @@ import { useSettings } from '../settings'
 import { SUPPORTED_LANGUAGES } from '../i18n'
 
 function makeUserOverrideEntry() {
-  return { user_id: '', ai_model: '', custom_system_prompt: '', reply_style: '' }
+  return { user_id: '', ai_model: '', custom_system_prompt: '', reply_style: '', auto_reply_enabled: null }
 }
 
 export default function SettingsPanel({
@@ -81,7 +81,7 @@ export default function SettingsPanel({
     if (!open || !selectedConversation?.user_id || (initialTab || 'reply') !== 'reply') return
     setUserOverrides(prev => {
       if (prev.some(item => String(item.user_id || '').trim() === String(selectedConversation.user_id).trim())) return prev
-      return [{ user_id: String(selectedConversation.user_id), ai_model: '', custom_system_prompt: '', reply_style: '' }, ...prev]
+      return [{ user_id: String(selectedConversation.user_id), ai_model: '', custom_system_prompt: '', reply_style: '', auto_reply_enabled: selectedConversation.user_override?.auto_reply_enabled ?? null }, ...prev]
     })
   }, [open, selectedConversation, initialTab])
 
@@ -154,6 +154,7 @@ export default function SettingsPanel({
                     ai_model: String(item.ai_model || '').trim(),
                     custom_system_prompt: String(item.custom_system_prompt || '').trim(),
                     reply_style: String(item.reply_style || '').trim(),
+                    auto_reply_enabled: item.auto_reply_enabled,
                   },
                 ]),
             ),
@@ -329,6 +330,14 @@ export default function SettingsPanel({
                             onChange={e => updateUserOverride(idx, 'reply_style', e.target.value)}
                             placeholder={t('contactStyleHelp')}
                           />
+                        </label>
+                        <label className="checkbox">
+                          <input
+                            type="checkbox"
+                            checked={item.auto_reply_enabled === true}
+                            onChange={e => updateUserOverride(idx, 'auto_reply_enabled', e.target.checked ? true : null)}
+                          />
+                          {t('autoReply') || '自动回复'}
                         </label>
                       </div>
                       <div className="platform-actions">

@@ -36,12 +36,40 @@ function mediaUrl(metadata = {}) {
   return metadata.url || metadata.media_url || metadata.thumbnail_url || null
 }
 
-function MessageMedia({ message }) {
+function MessageMedia({ message, onOpenMedia }) {
   const type = String(message.message_type || '').toLowerCase()
   const url = mediaUrl(message.media_metadata)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
   if (!url || !['image', 'video'].includes(type)) return null
-  if (type === 'image') return <img className="wx-message-media" src={url} alt="" loading="lazy" />
-  return <video className="wx-message-media" src={url} controls preload="metadata" />
+  const handleClick = () => { if (onOpenMedia) onOpenMedia({ url, type, message }) }
+  if (type === 'image') {
+    return (
+      <div className="wx-media-wrapper">
+        {!loaded && !error && <div className="wx-media-placeholder" aria-label="Loading image" />}
+        {error ? (
+          <div className="wx-media-error" aria-label="Image load failed">
+            <svg viewBox="0 0 24 24" aria-hidden="true" width="32" height="32"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z" fill="currentColor"/></svg>
+            <span>加载失败</span>
+          </div>
+        ) : (
+          <img className={`wx-message-media ${loaded ? 'visible' : 'hidden'}`} src={url} alt="" loading="lazy" onLoad={() => setLoaded(true)} onError={() => setError(true)} onClick={handleClick} style={{ cursor: onOpenMedia ? 'zoom-in' : 'default' }} />
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="wx-media-wrapper">
+      {error ? (
+        <div className="wx-media-error" aria-label="Video load failed">
+          <svg viewBox="0 0 24 24" aria-hidden="true" width="32" height="32"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z" fill="currentColor"/></svg>
+          <span>加载失败</span>
+        </div>
+      ) : (
+        <video className="wx-message-media" src={url} controls preload="metadata" onError={() => setError(true)} onClick={handleClick} style={{ cursor: onOpenMedia ? 'pointer' : 'default' }} />
+      )}
+    </div>
+  )
 }
 
 function avatarColor(name) {
@@ -134,6 +162,7 @@ export default function ChatPane({
   const [contactSaved, setContactSaved] = useState(false)
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(userOverride?.auto_reply_enabled === true)
   const [autoReplySaving, setAutoReplySaving] = useState(false)
+  const [lightbox, setLightbox] = useState(null) // { url, type }
   const [activeMessageId, setActiveMessageId] = useState(null)
   const [hiddenTranslations, setHiddenTranslations] = useState({})
   const [translationError, setTranslationError] = useState('')
@@ -651,6 +680,7 @@ export default function ChatPane({
 
   const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
   const headerTitle = contactProfile?.remark || userName
+  const accountStatus = activeAccount?.status || 'offline'
 
   return (
     <section className={`wx-chat is-active${active ? '' : ''}`}>
@@ -661,7 +691,11 @@ export default function ChatPane({
         <div className="wx-avatar" style={{ background: avatarColor(headerTitle) }}>{initials(headerTitle)}</div>
         <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
           <div className="wx-chat-title">{headerTitle}</div>
-          <div className="wx-chat-sub"><span className="wx-online-dot"/><span>{accountLabel || String(platform || 'WA').toUpperCase()} · {accountName}</span></div>
+          <div className="wx-chat-sub">
+            <span className={`wx-online-dot ${accountStatus === 'online' ? 'live' : accountStatus === 'connecting' ? 'busy' : 'off'}`}/>
+            <span>{accountLabel || String(platform || 'WA').toUpperCase()} · {accountName}</span>
+            {autoReplyEnabled ? <span className="wx-ar-badge">{t('autoReply') || '自动回复'}</span> : null}
+          </div>
           {currentPersona ? <span className="wx-current-persona">{t('personaCurrent')}: {currentPersona.name}</span> : null}
           </div>
         <div className="wx-chat-header-actions">
@@ -746,7 +780,7 @@ export default function ChatPane({
                 <div>
                   <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
                     <div className="wx-bubble-content">
-                      {effectiveHidden ? t('hiddenPlaceholder') : <><MessageMedia message={item} />{item.content}</>}
+                      {effectiveHidden ? t('hiddenPlaceholder') : <><MessageMedia message={item} onOpenMedia={setLightbox} />{item.content}</>}
                     </div>
                     {showTranslation ? (
                       <div className="wx-bubble-translation">
@@ -888,6 +922,16 @@ export default function ChatPane({
           </div>
         ) : null}
       </div>
+      {lightbox ? (
+        <div className="wx-media-lightbox" role="dialog" aria-label="Media preview" onClick={() => setLightbox(null)}>
+          <button className="wx-media-lightbox-close" aria-label="Close" onClick={() => setLightbox(null)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          </button>
+          {lightbox.type === 'image'
+            ? <img src={lightbox.url} alt="" onClick={e => e.stopPropagation()} />
+            : <video src={lightbox.url} controls autoPlay onClick={e => e.stopPropagation()} />}
+        </div>
+      ) : null}
     </section>
   )
 }
