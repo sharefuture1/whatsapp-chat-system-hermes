@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from whatsapp_chat_system.authz import restrict_account_id, visible_account_ids_for
 from whatsapp_chat_system.db.models import (
     Conversation,
     Contact,
@@ -48,6 +49,7 @@ def _fallback_contact_name(remote_jid: str) -> str:
 
 class ConversationReplyRequest(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
+    mode: str = Field(default="direct", max_length=32)
     idempotency_key: str | None = Field(default=None, max_length=255)
     preview_only: bool = False
 
@@ -65,6 +67,12 @@ class AutoReplyUpdate(BaseModel):
 class TranslateRequest(BaseModel):
     user_id: str = Field(default="", max_length=255)
     content: str = Field(default="", max_length=10000)
+
+
+class TranslationBatchRequest(BaseModel):
+    anchor_message_id: str = Field(..., max_length=36)
+    target_lang: str = Field(default='zh-CN', max_length=32)
+    window_size: int = Field(default=10, ge=1, le=20)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -115,6 +123,7 @@ def create_conversations_router(
 
     @router.get("/conversations")
     def list_conversations(
+        request: Request,
         platform: str = Query(default="all"),
         account_id: str = Query(default="all"),
         limit: int = Query(default=50, ge=1, le=200),
@@ -131,6 +140,8 @@ def create_conversations_router(
                 "available_platforms": [PLATFORM],
                 "available_accounts": [],
             }
+        visible_ids = visible_account_ids_for(request.app.state.runtime, request)
+        account_id = restrict_account_id(account_id, visible_ids)
         statement = (
             select(Conversation, Contact, WhatsAppAccount, ContactAIOverride)
             .join(WhatsAppAccount, WhatsAppAccount.id == Conversation.account_id)
@@ -147,6 +158,9 @@ def create_conversations_router(
         count_statement = select(func.count(Conversation.id)).where(
             Conversation.deleted_at.is_(None), Conversation.archived.is_(False)
         )
+        if visible_ids is not None:
+            statement = statement.where(Conversation.account_id.in_(visible_ids))
+            count_statement = count_statement.where(Conversation.account_id.in_(visible_ids))
         if account_id != "all":
             statement = statement.where(Conversation.account_id == account_id)
             count_statement = count_statement.where(
@@ -218,6 +232,7 @@ def create_conversations_router(
 
     @router.get("/contacts")
     def list_contacts(
+        request: Request,
         platform: str = Query(default="all"),
         account_id: str = Query(default="all"),
         limit: int = Query(default=200, ge=1, le=500),
@@ -233,6 +248,8 @@ def create_conversations_router(
                 "available_platforms": [PLATFORM],
                 "available_accounts": [],
             }
+        visible_ids = visible_account_ids_for(request.app.state.runtime, request)
+        account_id = restrict_account_id(account_id, visible_ids)
         statement = (
             select(Contact, WhatsAppAccount, Conversation, ContactAIOverride)
             .join(WhatsAppAccount, WhatsAppAccount.id == Contact.account_id)
@@ -250,6 +267,8 @@ def create_conversations_router(
                 ),
             )
         )
+        if visible_ids is not None:
+            statement = statement.where(Contact.account_id.in_(visible_ids))
         if account_id != "all":
             statement = statement.where(Contact.account_id == account_id)
         cleaned_query = query.strip()
@@ -543,13 +562,96 @@ def create_conversations_router(
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         if payload.preview_only:
+            try:
+                from whatsapp_chat_system.rewriter import Rewriter
+
+                class _DummyAppPaths:
+                    memory_dir: Any
+                    def __init__(self, memory_dir: Any) -> None:
+                        self.memory_dir = memory_dir
+
+                class _DummyConfig:
+                    paths: _DummyAppPaths
+                    ai_settings: Any
+                    web_settings: dict[str, Any]
+                    def __init__(self, memory_dir: Any, ai_settings: Any, web_settings: dict[str, Any]) -> None:
+                        self.paths = _DummyAppPaths(memory_dir)
+                        self.ai_settings = ai_settings
+                        self.web_settings = web_settings
+
+                runtime = getattr(session.bind, '_standalone_runtime', None)
+                if runtime is None:
+                    from whatsapp_chat_system.runtime import StandaloneRuntime
+                    runtime = StandaloneRuntime.from_env()
+                runtime_manager = None
+                try:
+                    from whatsapp_chat_system.runtime import RuntimeAISettings
+                    runtime_manager = RuntimeAISettings(runtime.ai_settings, lambda: session)
+                except Exception:
+                    runtime_manager = None
+
+                contact = session.scalar(select(Contact).where(
+                    Contact.account_id == conversation.account_id,
+                    Contact.remote_jid == conversation.remote_jid,
+                ))
+                override = session.get(ContactAIOverride, (contact.account_id, contact.id)) if contact is not None else None
+                reply_overrides = {}
+                if override is not None:
+                    reply_overrides = {
+                        'ai_model': override.model,
+                        'custom_system_prompt': override.system_prompt,
+                        'reply_style': override.reply_style,
+                    }
+                web_settings = {
+                    'reply': {
+                        'smart_max_length': 40,
+                        'translate_max_length': 60,
+                        'default_reply_style': '',
+                        'user_overrides': {conversation.remote_jid: reply_overrides} if reply_overrides else {},
+                    },
+                    'plugins': runtime.web_settings.get('plugins', {}),
+                    'contact_profiles': {
+                        conversation.remote_jid: {
+                            'remark': contact.remark if contact is not None else None,
+                            'notes': contact.notes if contact is not None else None,
+                        }
+                    } if contact is not None else {},
+                }
+                config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings, web_settings)
+                rewriter = Rewriter(config, lambda *args, **kwargs: None, runtime_manager=runtime_manager)
+                target = {'id': conversation.remote_jid, 'name': conversation.title or conversation.remote_jid}
+                memory_md = ''
+                mode = (payload.mode or 'smart').strip() or 'smart'
+                if mode == 'translate':
+                    rewrite = rewriter.translate_only(target, payload.message, memory_md)
+                elif mode == 'direct':
+                    rewrite = None
+                else:
+                    rewrite = rewriter.rewrite(target, payload.message, memory_md, reply_overrides=reply_overrides)
+                if rewrite is not None:
+                    return {
+                        'success': True,
+                        'preview_only': True,
+                        'conversation_id': conversation.id,
+                        'message': payload.message,
+                        'mode': mode,
+                        'rewrite': {
+                            'language': rewrite.language,
+                            'message': rewrite.message,
+                            'used_fallback': rewrite.used_fallback,
+                            'error': rewrite.error,
+                            'persona': rewrite.persona,
+                        },
+                    }
+            except Exception:
+                pass
             return {
-                "success": True,
-                "preview_only": True,
-                "conversation_id": conversation.id,
-                "message": payload.message,
-                "mode": "direct",
-                "rewrite": {"language": "direct"},
+                'success': True,
+                'preview_only': True,
+                'conversation_id': conversation.id,
+                'message': payload.message,
+                'mode': 'direct',
+                'rewrite': {'language': 'direct', 'message': payload.message, 'used_fallback': True},
             }
         idempotency_key = payload.idempotency_key or f"reply:{uuid4()}"
         if not idempotency_key.startswith("reply:"):
@@ -595,11 +697,6 @@ def create_conversations_router(
         user_id: str = Field(default="", max_length=255)
         content: str = Field(default="", max_length=10000)
 
-    class TranslationBatchRequest(BaseModel):
-        anchor_message_id: str = Field(..., max_length=36)
-        target_lang: str = Field(default='zh-CN', max_length=32)
-        window_size: int = Field(default=10, ge=1, le=20)
-
     @router.post(
         "/conversations/{conversation_id}/translations",
         tags=["conversations"],
@@ -608,7 +705,7 @@ def create_conversations_router(
     )
     def queue_translation_batch(
         conversation_id: str,
-        payload: TranslationBatchRequest,
+        payload: TranslationBatchRequest = Body(...),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
@@ -709,12 +806,14 @@ def create_conversations_router(
             class _DummyConfig:
                 paths: _DummyAppPaths
                 ai_settings: Any
+                web_settings: dict[str, Any]
 
-                def __init__(self, memory_dir: Any, ai_settings: Any) -> None:
+                def __init__(self, memory_dir: Any, ai_settings: Any, web_settings: dict[str, Any]) -> None:
                     self.paths = _DummyAppPaths(memory_dir)
                     self.ai_settings = ai_settings
+                    self.web_settings = web_settings
 
-            config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings)
+            config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings, runtime.web_settings)
             worker = Rewriter(config, lambda *args, **kwargs: None)
             result = worker.translate_to_zh_result(text, lang)
 

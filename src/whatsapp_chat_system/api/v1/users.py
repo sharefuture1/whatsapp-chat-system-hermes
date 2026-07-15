@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ...authz import require_admin
 from ...standalone_api import (
     _is_authenticated,
     _session_info,
@@ -23,6 +24,8 @@ from ...runtime import StandaloneRuntime
 
 class UserSummary(BaseModel):
     username: str
+    role: str = 'operator'
+    allowed_account_ids: list[str] = Field(default_factory=list)
     created_at: float | None = None
 
 
@@ -34,6 +37,8 @@ class ChangePasswordRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default='operator', pattern='^(admin|operator|viewer)$')
+    allowed_account_ids: list[str] = Field(default_factory=list)
 
 
 class DeleteUserRequest(BaseModel):
@@ -52,7 +57,12 @@ _INVALID_USERNAME = (
 def _list_users(runtime: StandaloneRuntime) -> list[UserSummary]:
     users = runtime.web_settings.get("users") or {}
     return [
-        UserSummary(username=name, created_at=record.get("created_at"))
+        UserSummary(
+            username=name,
+            role=str(record.get('role') or ('admin' if name == 'admin' else 'operator')),
+            allowed_account_ids=[str(x).strip() for x in (record.get('allowed_account_ids') or []) if str(x).strip()],
+            created_at=record.get("created_at"),
+        )
         for name, record in users.items()
     ]
 
@@ -65,6 +75,7 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
         """List all registered users (username + created_at only)."""
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
             raise HTTPException(status_code=401, detail="Unauthorized")
+        require_admin(runtime, request)
         return _list_users(runtime)
 
     @router.post("/register", status_code=201)
@@ -72,6 +83,7 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
         """Register a new operator account (admin only)."""
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
             raise HTTPException(status_code=401, detail="Unauthorized")
+        require_admin(runtime, request)
         username = body.username.strip()
         if not _USERNAME_RE.match(username):
             raise HTTPException(status_code=422, detail=_INVALID_USERNAME)
@@ -94,6 +106,8 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
             "iterations": 600_000,
             "hash": derived.hex(),
             "created_at": now,
+            "role": body.role,
+            "allowed_account_ids": [str(x).strip() for x in body.allowed_account_ids if str(x).strip()],
         }
         runtime.web_settings["users"] = users
         save_runtime_settings(runtime)
@@ -104,6 +118,7 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
         """Delete a user account (admin only)."""
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
             raise HTTPException(status_code=401, detail="Unauthorized")
+        require_admin(runtime, request)
         username = body.username.strip()
 
         sess = _session_info(runtime, request.headers.get("x-session-token", ""))

@@ -118,11 +118,13 @@ def create_messages_router() -> APIRouter:
             class _DummyConfig:
                 paths: _DummyAppPaths
                 ai_settings: Any
-                def __init__(self, memory_dir: Any, ai_settings: Any) -> None:
+                web_settings: dict[str, Any]
+                def __init__(self, memory_dir: Any, ai_settings: Any, web_settings: dict[str, Any]) -> None:
                     self.paths = _DummyAppPaths(memory_dir)
                     self.ai_settings = ai_settings
+                    self.web_settings = web_settings
 
-            config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings)
+            config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings, runtime.web_settings)
             worker = Rewriter(
                 config,
                 lambda *args, **kwargs: None,

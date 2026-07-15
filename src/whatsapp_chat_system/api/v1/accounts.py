@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from whatsapp_chat_system.authz import require_admin, visible_account_ids_for
+
 from whatsapp_chat_system.accounts.service import (
     AccountConfirmationError,
     AccountError,
@@ -112,9 +114,12 @@ def create_accounts_router(
         )
 
     @router.get("")
-    def list_accounts(session: Session = Depends(get_session)) -> dict[str, Any]:
+    def list_accounts(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
         service = AccountService(session)
         items = [service.serialize(item) for item in service.list()]
+        visible_ids = visible_account_ids_for(request.app.state.runtime, request)
+        if visible_ids is not None:
+            items = [item for item in items if item.get('id') in visible_ids]
         return {"items": items, "total": len(items)}
 
     @router.post("", status_code=201)
@@ -124,6 +129,7 @@ def create_accounts_router(
         session: Session = Depends(get_session),
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         account = None
         try:
             account = service.create(**payload.model_dump())
@@ -148,6 +154,7 @@ def create_accounts_router(
         session: Session = Depends(get_session),
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         changes = payload.model_dump(exclude_unset=True)
         if "name" in changes and changes["name"] is None:
             return error_response(
@@ -169,6 +176,7 @@ def create_accounts_router(
         account_id: str, request: Request, session: Session = Depends(get_session)
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         try:
             account = service.get(account_id)
             bridge.connect(account_id)
@@ -183,6 +191,7 @@ def create_accounts_router(
         account_id: str, request: Request, session: Session = Depends(get_session)
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         try:
             account = service.get(account_id)
             if account.status != "qr_pending":
@@ -203,6 +212,7 @@ def create_accounts_router(
         account_id: str, request: Request, session: Session = Depends(get_session)
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         try:
             service.get(account_id)
             bridge.logout(account_id)
@@ -222,6 +232,7 @@ def create_accounts_router(
         session: Session = Depends(get_session),
     ) -> Any:
         service = AccountService(session)
+        require_admin(request.app.state.runtime, request)
         try:
             account = service.get(account_id)
             if payload.confirm_name != account.name:

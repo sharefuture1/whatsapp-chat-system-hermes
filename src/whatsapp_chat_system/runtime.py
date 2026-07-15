@@ -187,7 +187,11 @@ def _existing_web_settings_defaults() -> dict[str, Any]:
     return {
         "auth_required": True,
         "auth_ttl_seconds": 86400,
-        "message_ops": {"auto_translate": True},
+        "message_ops": {
+            "auto_translate": True,
+            "translation_provider": "wendingai",
+            "translation_fallback_provider": "laotalk",
+        },
         "plugins": {},
         "sessions": {},
     }

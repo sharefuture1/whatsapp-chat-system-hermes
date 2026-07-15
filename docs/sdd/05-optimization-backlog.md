@@ -121,33 +121,36 @@
 
 ### SDD-P0-09 24x7 AI 自动回复可靠性
 
-- 状态：`Approved`
+**状态：`Code Implemented`**（生产切流验收前不得标记 `Verified`）
+
 - 目标：AI 自动回复必须由独立的持久化 Job + Outbox 链路驱动，不能在 webhook 请求线程同步调用模型，也不能依赖浏览器页面打开。
 - 触发：仅处理入站、非系统、非自己发送的消息；账号 `enabled=true`、`auto_reply_mode=auto`、会话 `ai_mode=auto` 且联系人未显式关闭时才创建任务。
 - 幂等：以 `account_id + wa_message_id + policy_revision` 为唯一幂等键；同一入站消息最多产生一个自动回复 Job 和一个 Outbox。
 - 可靠性：AI Job 状态为 `pending/claimed/running/retry/completed/failed/dead/cancelled`；Provider 超时、429、5xx 使用指数退避；不可重试错误进入 dead；Outbox 使用 lease、真实 WhatsApp message ID 和回执对账。
 - 安全：管理员配置全局策略、模型、限速、工作时间和暂停开关；普通用户只能看到状态，不能修改 Provider、Prompt、模型、限速或全局开关；联系人可以由管理员单独暂停自动回复。
 - 防骚扰：每账号/联系人限速、冷却窗口、每日预算、连续失败熔断；AI 回复前再次检查账号在线、策略和消息是否已被人工回复。
-- 运维：`/api/v1/automation/health` 返回 worker heartbeat、pending/running/retry/dead、最近错误和熔断状态；systemd 必须自动重启，服务启动后不依赖 Web 页面。
+- 运维：`/api/v1/automation/health` 返回 worker heartbeat、pending/running/retry/dead/recovered_leases、最近错误和熔断状态；systemd 必须自动重启，服务启动后不依赖 Web 页面。
+- **已实现（代码层）**：入站 Job enqueue + 幂等、Worker claim/lease/retry/dead + 指数退避 + jitter、`recover_expired_leases` 每 30s 执行、Outbox 链路、`/api/v1/automation/health`、执行前二次校验（system message 过滤 + 人工回复竞态取消）。
+- **待完成**：管理员策略/暂停/限速/预算/熔断配置面、真实 WhatsApp 收发、连续 24 小时生产验收。
 - 验收：服务停止/重启后 Job 可恢复；重复 webhook 不重复回复；AI 超时可重试；Bridge 离线进入 retry；管理员暂停立即阻止新任务；真实账号 24 小时运行观测无永久 pending/dead 增长。
 
-- 状态：`In Progress`（代码与 API 已落地，但未做真实部署切流；待生产验收后再标记 `Verified`）。
-- 需求：`FR-PLG-007`、`FR-PLG-008`、`FR-AI-012`。
-- 当前进度：
-  - 受控人设库 `src/whatsapp_chat_system/personas.py` 内置 `default / tong-jincheng / professional-service / mature-uncle`，每条人设仅含审计过的 prompt 与展示元数据。
-  - Rewriter 已接收 `reply_overrides.persona_id`，`rewrite.persona` 字段返回当前人设元数据。
-  - V1 API：`GET /api/v1/personas`、`PUT /api/v1/personas/{id}/enable`、`PUT /api/v1/contacts/{contact_id}/persona`。
-  - 前端聊天页 `…` 菜单 → 人设 picker；头部 `personaCurrent` 实时反映；预览条同步显示当前人设。
-  - 前端发现页"AI 人设"分类展示内置人设卡片，禁显任何外部源/仓库信息。
-  - 四语 i18n key 同步、`t()` 使用 `??`，未知 key 不被吞掉。
-- 验收：
-  - 真实调用 V1 列表/启停/分配人设接口，回归 200/401/404/422。
-  - 重写器在选中/卸载/未知/插件关闭任一情况下都不注入未授权 prompt。
-  - 真实老挝语→中文 AI 探针：选择 `tong-jincheng` 后回复风格被该 prompt 影响。
-  - 默认策略（不选人设）走 `default` 且不引入额外延迟。
-- 未完成：未在生产启用；未与真实 WhatsApp 账号联动验收。
-
 ## 3. P1：产品可用性
+
+### SDD-P0-08 受控 AI 人设（Code Implemented，待生产切流验收）
+
+- 需求：`FR-PLG-007`、`FR-PLG-008`、`FR-AI-012`
+- 当前进度：
+  - 受控人设库 `src/whatsapp_chat_system/personas.py` 内置 `default / tong-jincheng / professional-service / mature-uncle`，每条人设仅含审计过的 prompt 与展示元数据
+  - Rewriter 已接收 `reply_overrides.persona_id`，`rewrite.persona` 字段返回当前人设元数据
+  - V1 API：`GET /api/v1/personas`、`PUT /api/v1/personas/{id}/enable`、`PUT /api/v1/contacts/{contact_id}/persona`
+  - 前端聊天页 `…` 菜单 → 人设 picker；头部 `personaCurrent` 实时反映；预览条同步显示当前人设
+  - 前端发现页"AI 人设"分类展示内置人设卡片，禁显任何外部源/仓库信息
+  - 四语 i18n key 同步、`t()` 使用 `??`，未知 key 不被吞掉
+- 验收：
+  - 真实调用 V1 列表/启停/分配人设接口，回归 200/401/404/422
+  - 重写器在选中/卸载/未知/插件关闭任一情况下都不注入未授权 prompt
+  - 默认策略（不选人设）走 `default` 且不引入额外延迟
+- 未完成：未在生产启用；未与真实 WhatsApp 账号联动验收
 
 ### SDD-P1-01 前端 WhatsApp 账号中心
 
@@ -201,8 +204,20 @@
 
 ### SDD-P1-05 翻译异步化
 
-- 状态：`In Progress`
+**状态：`Phase 1 Implemented`**（Phase 2 SSE/WebSocket 待完成）
+
 - 实施计划：`docs/plans/2026-07-14-translation-db-source-phase1.md`
+- Phase 1 已落地：
+  - 新增数据模型：`message_translations`、`translation_batches`，Alembic `0005_message_translations.py`
+  - `/api/v1/messages/{message_id}/translate` 优先读数据库真源，命中 `source_text_hash + target_lang` completed 记录直接返回
+  - 消息翻译成功/失败均回写数据库（`translated_text / status / error_code / source_lang / completed_at`）
+  - `/api/v1/conversations/{id}/messages` 返回 `translated / translation_status / translation_updated_at`
+  - 新增 `POST /api/v1/conversations/{id}/translations`：返回 `202 queued + batch_id + queued_message_ids + cached_message_ids`
+  - `TranslationDispatcher` 已接入 Standalone lifespan，优先窗口批量翻译，失败回退逐条
+  - 前端 `ChatPane.jsx` 自动翻译主路径已切换 batch API；Legacy 路径保留单条回退
+  - 新增 `scripts/deploy-frontend-prod.sh`：前端 build + rsync + 生产资源校验
+- Phase 1 验收通过：pytest 245 passed、npm run build PASS、/api/health 200
+- Phase 2 阻塞项：SSE/WebSocket 跨客户端实时推送、数据库 revision/event cursor
 - 新增要求：翻译结果必须持久化到 Standalone 业务数据库，不以浏览器 localStorage 作为真源。
 - 翻译采用会话上下文批处理：默认以当前待翻译消息及其之前最多 10 条消息组成上下文窗口，单次模型调用统一翻译并校正窗口内译文；已完成且未发生内容变化的消息不得重复调用 Provider。
 - 页面优先读取数据库已有译文；缺失译文才创建一次批处理任务/请求，完成后批量回填并展示。

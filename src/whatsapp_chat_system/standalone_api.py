@@ -40,6 +40,7 @@ from .db import Base, create_engine, create_session_factory
 from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
 from .outbox import OutboxDispatcher
 from .ai.auto_reply_worker import AutoReplyWorker
+from .ai.auto_reply_reconciler import AutoReplyReconciler
 from .translations_dispatcher import TranslationDispatcher
 from .runtime import (
     StandaloneRuntime,
@@ -214,8 +215,12 @@ def build_standalone_app(
     reconciler = AccountReconciler(factory, bridge)
     outbox_dispatcher = OutboxDispatcher(factory, bridge)
     auto_reply_worker = AutoReplyWorker(factory, runtime_ai_settings)
-    translation_dispatcher = TranslationDispatcher(factory, runtime, runtime_manager=runtime_ai_settings)
+    auto_reply_reconciler = AutoReplyReconciler(factory)
+    translation_dispatcher = TranslationDispatcher(
+        factory, runtime, runtime_manager=runtime_ai_settings
+    )
     login_lock = RLock()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if not _schema_ready(factory):
@@ -259,6 +264,17 @@ def build_standalone_app(
                     processed = False
                 await asyncio.sleep(0 if processed else 2.0)
 
+        async def auto_reply_reconcile_loop() -> None:
+            while True:
+                try:
+                    processed = await asyncio.to_thread(auto_reply_reconciler.run_once)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("AI auto reply reconcile round failed")
+                    processed = False
+                await asyncio.sleep(0 if processed else 30.0)
+
         async def translation_loop() -> None:
             while True:
                 try:
@@ -270,13 +286,23 @@ def build_standalone_app(
                     processed = False
                 await asyncio.sleep(0 if processed else 2.0)
 
-        reconcile_task = asyncio.create_task(reconcile_loop(), name="whatsapp-account-reconciler")
+        reconcile_task = asyncio.create_task(
+            reconcile_loop(), name="whatsapp-account-reconciler"
+        )
         outbox_task = asyncio.create_task(outbox_loop(), name="whatsapp-outbox-worker")
-        auto_reply_task = asyncio.create_task(auto_reply_loop(), name="whatsapp-ai-auto-reply-worker")
-        translation_task = asyncio.create_task(translation_loop(), name="whatsapp-translation-dispatcher")
+        auto_reply_task = asyncio.create_task(
+            auto_reply_loop(), name="whatsapp-ai-auto-reply-worker"
+        )
+        auto_reply_reconcile_task = asyncio.create_task(
+            auto_reply_reconcile_loop(), name="whatsapp-ai-auto-reply-reconciler"
+        )
+        translation_task = asyncio.create_task(
+            translation_loop(), name="whatsapp-translation-dispatcher"
+        )
         app.state.account_reconciler_task = reconcile_task
         app.state.outbox_worker_task = outbox_task
         app.state.auto_reply_worker_task = auto_reply_task
+        app.state.auto_reply_reconciler_task = auto_reply_reconcile_task
         app.state.translation_dispatcher_task = translation_task
         try:
             yield
@@ -285,8 +311,16 @@ def build_standalone_app(
             reconcile_task.cancel()
             outbox_task.cancel()
             auto_reply_task.cancel()
+            auto_reply_reconcile_task.cancel()
             translation_task.cancel()
-            await asyncio.gather(reconcile_task, outbox_task, auto_reply_task, translation_task, return_exceptions=True)
+            await asyncio.gather(
+                reconcile_task,
+                outbox_task,
+                auto_reply_task,
+                auto_reply_reconcile_task,
+                translation_task,
+                return_exceptions=True,
+            )
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.6.0", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
@@ -356,7 +390,14 @@ def build_standalone_app(
         if (
             request.method == "OPTIONS"
             or not path.startswith("/api")
-            or path in {"/api/health", "/api/login", "/api/logout", "/api/v1/automation/health", "/api/v1/me"}
+            or path
+            in {
+                "/api/health",
+                "/api/login",
+                "/api/logout",
+                "/api/v1/automation/health",
+                "/api/v1/me",
+            }
         ):
             return await call_next(request)
         if not _is_authenticated(runtime, request.headers.get("x-session-token", "")):
@@ -395,6 +436,7 @@ def build_standalone_app(
                 "login_enabled": True,
                 "outbox_worker": "running",
                 "auto_reply_worker": auto_reply_worker.health(),
+                "auto_reply_reconciler": auto_reply_reconciler.health(),
                 "translation_dispatcher": translation_dispatcher.health(),
             }
         )
@@ -404,6 +446,7 @@ def build_standalone_app(
         return {
             "ok": True,
             "worker": auto_reply_worker.health(),
+            "reconciler": auto_reply_reconciler.health(),
             "translation_dispatcher": translation_dispatcher.health(),
             "service": "standalone",
         }
@@ -424,6 +467,7 @@ def build_standalone_app(
         return {
             "username": username,
             "role": user.get("role", "admin"),  # admin | operator | viewer
+            "allowed_account_ids": [str(x).strip() for x in (user.get('allowed_account_ids') or []) if str(x).strip()],
             "session_expires_at": session.get("expires_at"),
         }
 
@@ -465,7 +509,9 @@ def build_standalone_app(
             # Preserve the existing password; never replace it with a guessed default.
             if not users and runtime.web_settings.get("auth"):
                 legacy_auth = runtime.web_settings["auth"]
-                if username == "admin" and _verify_password(legacy_auth, payload.password):
+                if username == "admin" and _verify_password(
+                    legacy_auth, payload.password
+                ):
                     users["admin"] = dict(legacy_auth)
                     users["admin"].setdefault("created_at", time.time())
                     runtime.web_settings["users"] = users

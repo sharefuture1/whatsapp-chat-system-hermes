@@ -1,3 +1,25 @@
+## 2026-07-15：前端 Hook 修复 + 密码更新 + SDD 同步
+
+### 前端 Vercel 部署修复
+- `ChatPane.jsx`：`activeAccount` 未定义报错 → 硬编码 `accountStatus = 'offline'`（standalone 账号链路未接通）
+- `SettingsPage.jsx`：补 `import { useEffect, useState } from 'react'`
+- `SettingsPanel.jsx`：补 `useMemo` 到已有 import
+- `api.js`：加 `AbortController` + 15s 超时保护，消除请求无限挂起导致的 Promise 未捕获
+- 全面扫描所有 .jsx/.js hook 导入，未发现其他缺失
+- 新 bundle：`index-CAlxF5Mb.js`（337.82 KB）
+
+### 生产 admin 密码更新
+- admin 密码已改为 `justtest?99`（salt `f8ed1394b4be7fac134acec723f66f0f`，iterations 600000）
+- curl 验证：`POST /api/login` → `{"success":true,"session_token":"..."}` ✅
+
+### SDD / 四文件同步更新
+- `docs/sdd/05-optimization-backlog.md`：
+  - SDD-P0-09：状态升为 `Code Implemented`，补充完整规格说明（触发/幂等/可靠性/安全/防骚扰/运维）
+  - SDD-P0-08：状态升为 `Code Implemented，待生产切流验收`
+  - SDD-P1-05：状态升为 `Phase 1 Implemented`，列出已落地功能清单
+- `docs/TODO_AGENT.md`：密码项标 ✅；P0-09 补充 AutoReplyReconciler 上线和 Code Implemented 状态
+- `docs/PROJECT_MEMORY.md`：待完整更新（见本轮 SDD 同步工作）
+
 ## 2026-07-14：P1-05 翻译数据库真源 Phase 1（数据库落地，异步批入口就位）
 
 - 新增数据模型：`message_translations`、`translation_batches`，并提供 Alembic `0005_message_translations.py`。
