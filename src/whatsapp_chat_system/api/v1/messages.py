@@ -131,8 +131,10 @@ def create_messages_router() -> APIRouter:
                 runtime_manager=getattr(request.app.state, "ai_settings_manager", None),
             )
             result = worker.translate_to_zh_result(text, lang)
-            if result.error:
-                _upsert_db_translation(session, message, source_lang=lang, target_lang='zh-CN', translated_text=None, status='failed', error_code='translate_failed', error_message=result.error)
+            fallback_translation = (result.message or '').strip()
+            has_usable_translation = bool(fallback_translation and fallback_translation != text.strip())
+            if result.error and not has_usable_translation:
+                _upsert_db_translation(session, message, source_lang=lang, target_lang='zh-CN', translated_text=None, status='failed', error_code='translate_failed', error_message=str(result.error))
                 session.commit()
                 return {
                     "success": False,
@@ -144,14 +146,16 @@ def create_messages_router() -> APIRouter:
                     "used_fallback": result.used_fallback,
                     "error": result.error,
                 }
-            _upsert_db_translation(session, message, source_lang=lang, target_lang='zh-CN', translated_text=result.message or None, status='completed')
+            _upsert_db_translation(session, message, source_lang=lang, target_lang='zh-CN', translated_text=fallback_translation or None, status='completed')
             session.commit()
             return {
                 "message_id": message_id,
                 "lang": lang,
-                "translated": result.message or None,
+                "translated": fallback_translation or None,
                 "translation_status": 'completed',
                 "cached": False,
+                "used_fallback": result.used_fallback,
+                "provider_warning": result.error if result.used_fallback else None,
             }
 
 

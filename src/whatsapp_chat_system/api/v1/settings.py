@@ -8,11 +8,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from whatsapp_chat_system.authz import require_admin, visible_account_ids_for
 from whatsapp_chat_system.ai.crypto import (
     decrypt_api_key,
     encrypt_api_key,
@@ -182,7 +183,8 @@ def create_settings_router(
         }
 
     @router.put("/settings")
-    def update_settings(payload: StandaloneSettingsUpdate) -> dict[str, Any]:
+    def update_settings(request: Request, payload: StandaloneSettingsUpdate) -> dict[str, Any]:
+        require_admin(runtime, request)
         disallowed = set(payload.web_settings) - _SAFE_SETTING_SECTIONS
         if disallowed:
             raise HTTPException(
@@ -226,9 +228,11 @@ def create_settings_router(
 
     @router.put("/ai/settings")
     def update_ai_settings(
+        request: Request,
         payload: AISettingsUpdate,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
+        require_admin(runtime, request)
         row = session.get(AIRuntimeSetting, "global")
         if row is None:
             row = AIRuntimeSetting(id="global", provider="wendingai")
@@ -311,26 +315,33 @@ def create_settings_router(
             return {"ok": False, "message": str(exc)}
 
     @router.get("/dashboard")
-    def dashboard(session: Session = Depends(get_session)) -> dict[str, Any]:
+    def dashboard(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
+        visible_ids = visible_account_ids_for(runtime, request)
+        account_filter = WhatsAppAccount.id.in_(visible_ids) if visible_ids is not None else None
+        contact_filter = Contact.account_id.in_(visible_ids) if visible_ids is not None else None
+        conversation_filter = Conversation.account_id.in_(visible_ids) if visible_ids is not None else None
+        message_filter = Message.account_id.in_(visible_ids) if visible_ids is not None else None
         return {
             "runtime_mode": "standalone",
             "stats": {
-                "accounts": session.scalar(select(func.count(WhatsAppAccount.id))) or 0,
+                "accounts": session.scalar(select(func.count(WhatsAppAccount.id)).where(account_filter) if account_filter is not None else select(func.count(WhatsAppAccount.id))) or 0,
                 "online_accounts": session.scalar(
                     select(func.count(WhatsAppAccount.id)).where(
-                        WhatsAppAccount.status == "online"
+                        WhatsAppAccount.status == "online",
+                        account_filter if account_filter is not None else True,
                     )
                 )
                 or 0,
-                "contacts": session.scalar(select(func.count(Contact.id))) or 0,
+                "contacts": session.scalar(select(func.count(Contact.id)).where(contact_filter) if contact_filter is not None else select(func.count(Contact.id))) or 0,
                 "conversations": session.scalar(
                     select(func.count(Conversation.id)).where(
-                        Conversation.deleted_at.is_(None)
+                        Conversation.deleted_at.is_(None),
+                        conversation_filter if conversation_filter is not None else True,
                     )
                 )
                 or 0,
-                "messages": session.scalar(select(func.count(Message.id))) or 0,
-                "unread": session.scalar(select(func.sum(Conversation.unread_count)))
+                "messages": session.scalar(select(func.count(Message.id)).where(message_filter) if message_filter is not None else select(func.count(Message.id))) or 0,
+                "unread": session.scalar(select(func.sum(Conversation.unread_count)).where(conversation_filter) if conversation_filter is not None else select(func.sum(Conversation.unread_count)))
                 or 0,
             },
             "recent_conversations": [],

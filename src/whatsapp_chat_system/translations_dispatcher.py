@@ -103,10 +103,12 @@ class TranslationDispatcher:
                 result = batch_result.get(message.id)
                 if result is None:
                     fallback = worker.translate_to_zh_result(item['text'], item['source_lang'])
-                    if fallback.error:
+                    fallback_text = (fallback.message or '').strip()
+                    has_usable_translation = bool(fallback_text and fallback_text != item['text'].strip())
+                    if fallback.error and not has_usable_translation:
                         self._upsert_translation(session, message, batch, source_lang=item['source_lang'], translated_text=None, status='failed', error_code='translate_failed', error_message=str(fallback.error))
                     else:
-                        self._upsert_translation(session, message, batch, source_lang=item['source_lang'], translated_text=fallback.message or None, status='completed')
+                        self._upsert_translation(session, message, batch, source_lang=item['source_lang'], translated_text=fallback_text or None, status='completed')
                     continue
                 if result.get('error'):
                     self._upsert_translation(session, message, batch, source_lang=str(result.get('source_lang') or item['source_lang']), translated_text=None, status='failed', error_code='translate_failed', error_message=str(result['error']))
