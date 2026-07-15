@@ -51,11 +51,20 @@
 - 状态：`In Progress`
 - 实施计划：`docs/plans/2026-07-10-p0-02-account-scoped-database.md`
 - 需求：DATA-001~007、FR-ACC-003、FR-CON-003
+- 当前进度补充（2026-07-15）：
+  - Standalone 用户记录已支持 `role`（admin/operator/viewer）与 `allowed_account_ids`
+  - `authz.py` 已提供统一 `require_admin / visible_account_ids_for / restrict_account_id`
+  - `/api/v1/me` 已返回账号范围
+  - `/api/v1/users` 列表/注册/删除改为 admin-only
+  - `/api/v1/accounts` 已按登录用户 `allowed_account_ids` 过滤，生产实测 operator 只能看到授权账号
 - 验收：
   - 两账号相同 JID 可并存；
   - 查询无跨账号泄漏；
   - 重复 WhatsApp message ID 幂等；
   - Alembic upgrade/downgrade 测试通过。
+- 剩余阻塞：
+  - `/api/v1/conversations`、`/api/v1/contacts`、`/api/v1/dashboard` 仍需完成并验证用户范围隔离
+  - 前端用户管理页尚未提供 role / allowed accounts 配置 UI
 
 ### SDD-P0-03 独立 Bridge V2 单账号
 

@@ -1,6 +1,10 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-14 UTC
+> 最后更新：2026-07-15 UTC
+
+- LaoTalk 翻译保底已接入：`message_ops.translation_provider` / `translation_fallback_provider` 生效，默认主翻译 `wendingai`，失败自动回退 `laotalk`；`/api/v1/messages/{id}/translate` 生产实测可直接走 LaoTalk 返回中文译文。
+- 多用户第一批 RBAC 已进入生产：用户记录支持 `role` 与 `allowed_account_ids`；`/api/v1/me` 返回账号范围；`/api/v1/users` 为 admin-only；`/api/v1/accounts` 已按账号范围过滤，operator 不能再看到所有账号。
+- 服务器 Caddy 前端与 Vercel 前端已重新对齐：`/opt/whatsapp-chat-system/web/dist` 已用最新前端构建同步，`https://whats.future1.us` 与 `https://wt.v.future1.us` 现同时引用 `index-ugN3RvFm.js`，静态 JS 均返回 200 且 content-length=344362。
 
 - 当前已接入 `AutoReplyWorker`：Standalone lifespan 独立运行 claim/AI/Outbox loop，入站 `message.upsert` 按策略创建幂等 `analysis_jobs`，AI 成功后使用 job idempotency key 写入 Outbox；`/api/v1/automation/health` 暴露 heartbeat/processed/failed。仍未标记 Verified：需要真实账号在线、管理员策略接线、限速/熔断和连续 24 小时真实消息验收。
 - 联系人自动回复控制面按 `SDD-P1-07` 接入：会话列表返回 `user_override.auto_reply_enabled`，新增 `PATCH /api/v1/conversations/{id}/auto-reply` 持久化联系人开关，ChatPane 聊天详情抽屉新增真实 toggle；Worker 继续要求账号/会话/联系人策略同时满足。

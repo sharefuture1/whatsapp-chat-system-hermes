@@ -1,3 +1,17 @@
+## 2026-07-15: 多用户第一批先按账号范围做 RBAC 与数据隔离
+
+**决策**：在 Standalone 多用户落地第一阶段，先把用户模型收敛为 `role + allowed_account_ids`，所有非 admin 用户只按账号范围隔离；不先引入更复杂的 row-level policy 或会话级 ACL。
+
+- `admin` 拥有全量账号与全局设置/用户管理权限；
+- `operator/viewer` 只能看到 `allowed_account_ids` 范围内的账号、会话、联系人和汇总；
+- 用户管理接口（列表/注册/删除）一律 admin-only；
+- 后续如需更细粒度（联系人级 / 会话级）权限，再在账号范围隔离稳定后追加。
+
+**原因**：当前系统所有核心业务实体天然带 `account_id`，先以账号作为最小可验证隔离边界，能最快把“其他用户与 admin 区分开、数据不串”这件事真正落地，而不会在尚未稳定的前端/后端同步链路中引入更高复杂度。
+
+**关联规格**：`FR-ACC-003/004/007`、`FR-CON-003`、`SEC-005`、`SDD-P0-02`。
+
+
 ## 2026-07-14：24x7 AI 自动回复必须走持久化 Job + Outbox
 
 **决策**：自动回复不依赖浏览器，不在 webhook 请求线程同步调用 AI。入站消息只在事务中创建 account-scoped、幂等的 AnalysisJob；Worker 负责 AI 生成，成功后以唯一 idempotency key 创建 Outbox，最后由 Bridge 发送并等待真实回执。

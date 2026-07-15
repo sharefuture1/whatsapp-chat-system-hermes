@@ -1,24 +1,26 @@
-## 2026-07-15：前端 Hook 修复 + 密码更新 + SDD 同步
+## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
-### 前端 Vercel 部署修复
-- `ChatPane.jsx`：`activeAccount` 未定义报错 → 硬编码 `accountStatus = 'offline'`（standalone 账号链路未接通）
-- `SettingsPage.jsx`：补 `import { useEffect, useState } from 'react'`
-- `SettingsPanel.jsx`：补 `useMemo` 到已有 import
-- `api.js`：加 `AbortController` + 15s 超时保护，消除请求无限挂起导致的 Promise 未捕获
-- 全面扫描所有 .jsx/.js hook 导入，未发现其他缺失
-- 新 bundle：`index-CAlxF5Mb.js`（337.82 KB）
+### 翻译与预览链路
+- 新增 `src/whatsapp_chat_system/laotalk_translate.py`，接入 LaoTalk HTTP 翻译接口。
+- `rewriter.py` 支持 `message_ops.translation_provider` 与 `message_ops.translation_fallback_provider`；默认主翻译 `wendingai`，AI 出错自动回退 `laotalk`。
+- `SettingsPage.jsx` 聊天/翻译子页新增“翻译提供方 / 翻译保底提供方”配置项；前端 i18n 补齐对应文案。
+- 真实生产接口验证：LaoTalk 直连翻译返回 200，消息翻译接口可返回 `translated` 真值；会话 batch 翻译 422/函数内 Pydantic model 500 已修复。
+- `preview_only` 不再只是假的 direct 占位，已开始按 `mode` 进入真实预览链路；`ChatPane` 的 preview error 改为展示真实错误字符串。
 
-### 生产 admin 密码更新
-- admin 密码已改为 `justtest?99`（salt `f8ed1394b4be7fac134acec723f66f0f`，iterations 600000）
-- curl 验证：`POST /api/login` → `{"success":true,"session_token":"..."}` ✅
+### 前端稳定性与部署一致性
+- `App.jsx` 清理旧 `SettingsPanel` modal 残留路径，继续收敛到全屏 `SettingsPage`，降低顶层状态复杂度。
+- `ChatPane.jsx` 修复多处 hook 顺序 / preview / translation 错误反馈问题，并延长翻译失败冷却，减少请求风暴。
+- 服务器 Caddy 站点 `https://whats.future1.us` 原先仍服务旧 bundle `index-BSCmZnhD.js`；已将 `/home/young11/workspace/whatsapp-chat-system-web-vercel/dist` rsync 到 `/opt/whatsapp-chat-system/web/dist`。
+- 当前 `https://whats.future1.us` 与 `https://wt.v.future1.us` 已同时引用 `index-ugN3RvFm.js`，两边静态资源均返回 200，content-length 一致。
 
-### SDD / 四文件同步更新
-- `docs/sdd/05-optimization-backlog.md`：
-  - SDD-P0-09：状态升为 `Code Implemented`，补充完整规格说明（触发/幂等/可靠性/安全/防骚扰/运维）
-  - SDD-P0-08：状态升为 `Code Implemented，待生产切流验收`
-  - SDD-P1-05：状态升为 `Phase 1 Implemented`，列出已落地功能清单
-- `docs/TODO_AGENT.md`：密码项标 ✅；P0-09 补充 AutoReplyReconciler 上线和 Code Implemented 状态
-- `docs/PROJECT_MEMORY.md`：待完整更新（见本轮 SDD 同步工作）
+### 多用户 / 数据隔离第一批
+- 新增 `src/whatsapp_chat_system/authz.py`，提供 `get_current_user_record / require_admin / visible_account_ids_for / restrict_account_id`。
+- 用户模型扩展：`role`（admin/operator/viewer）、`allowed_account_ids`。
+- `/api/v1/me` 现在返回 `allowed_account_ids`。
+- `/api/v1/users` 列表/注册/删除改为 admin-only；注册支持写入 `role + allowed_account_ids`。
+- `/api/v1/accounts` 已按登录用户的 `allowed_account_ids` 做可见范围过滤。
+- 真实生产验证：创建 `opscope1`（operator）后，`/v1/me` 返回受限账号列表；`/v1/accounts` 只返回 1 个授权账号；`/v1/users` 返回 403 Admin only。
+
 
 ## 2026-07-14：P1-05 翻译数据库真源 Phase 1（数据库落地，异步批入口就位）
 

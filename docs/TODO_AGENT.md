@@ -47,7 +47,20 @@
   - 匹配前端旧路径 `/messages/${msg.message_id}/translate`，解决中间件拦截问题
   - 服务端 curl 测试 200，AI 翻译功能不再返回 410
 
-### P0 — AI 关系智能（数据层已实现，Worker/API/UI 待推进）
+### P0 — 多用户 / 权限 / 数据隔离
+
+- [>] **多用户 RBAC 与账号范围隔离（第一批已落地）**
+  - [x] 用户记录支持 `role`（admin/operator/viewer）
+  - [x] 用户记录支持 `allowed_account_ids`
+  - [x] `/api/v1/me` 返回 `allowed_account_ids`
+  - [x] `/api/v1/users` admin-only（列表/注册/删除）
+  - [x] `/api/v1/accounts` 按 `allowed_account_ids` 过滤
+  - [ ] `/api/v1/conversations` 按 `allowed_account_ids` 过滤与验证
+  - [ ] `/api/v1/contacts` 按 `allowed_account_ids` 过滤与验证
+  - [ ] `/api/v1/dashboard` 按用户可见账号汇总
+  - [ ] 前端用户管理页增加 role + allowed accounts 配置 UI
+  - [ ] 非 admin 隐藏/禁用全局敏感设置与高危入口
+
 
 - [>] **Evidence → Claim → Snapshot 人物画像闭环**
   - [x] P0 数据层：7 个实体、Alembic `0004`、联系人 revision、Claim/Evidence/Snapshot Repository、CAS/savepoint 原子性
