@@ -1,6 +1,6 @@
 # Tauri 2 桌面安装包自动构建
 
-> 状态：In Progress  
+> 状态：In Progress
 > 关联需求：FR-DESKTOP-001、SEC-DESKTOP-001、QA-DESKTOP-001、NFR-REL-003
 
 ## 1. 目标
