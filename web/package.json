@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:tauri": "vite build --mode tauri",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-http": "2.5.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

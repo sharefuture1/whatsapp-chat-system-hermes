@@ -105,6 +105,16 @@ test('API-EVENT: HTTP 422 moves event to dead-letter', async () => {
   assert.equal(await count(root, 'dead'), 1);
 });
 
+test('API-EVENT: an explicitly non-retryable HTTP 409 moves event to dead-letter', async () => {
+  const { root, sink } = await setup(async () => response(409, {
+    error: { code: 'event_conflict', retryable: false },
+  }));
+  await sink.enqueue(event('conflict'));
+  assert.equal(await count(root, 'pending'), 0);
+  assert.equal(await count(root, 'inflight'), 0);
+  assert.equal(await count(root, 'dead'), 1);
+});
+
 test('API-EVENT: restart replays an event retained after failure', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'event-replay-'));
   const firstSpool = new FileSpool({ root, accountId: 'A' });

@@ -76,6 +76,13 @@ export function isConversationCacheFresh(item, now = Date.now()) {
   return Boolean(item?.savedAt && now - Number(item.savedAt) < MESSAGE_TTL_MS)
 }
 
+export function canShortCircuitConversationFetch(
+  item,
+  { appendOlder = false, cachePolicy = 'cache-first', now = Date.now() } = {},
+) {
+  return !appendOlder && cachePolicy === 'cache-first' && isConversationCacheFresh(item, now)
+}
+
 export function loadTranslationCache(messageId, content) {
   if (!messageId || !content) return null
   const key = `translation:${safeId(messageId)}:${safeId(content).slice(0, 80)}`

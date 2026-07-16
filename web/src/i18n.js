@@ -612,8 +612,6 @@ const STRINGS = {
     default: '默认',
     chat: '聊天',
     changePassword: '修改密码',
-    addRuleForContact: '当前对话',
-    addRule: '使用此联系人',
     personaLibrary: 'AI 人设',
     personaAvailable: '可用于当前联系人',
     personaUnavailable: 'AI 人设暂不可用',

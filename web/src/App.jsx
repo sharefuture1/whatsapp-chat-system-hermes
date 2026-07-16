@@ -545,6 +545,10 @@ function AppInner() {
   const autoTranslateState = deriveAutoTranslateState(settings, apiSettings)
   const autoTranslate = autoTranslateState.ready
   const selectedConversation = useMemo(() => conversations.find(c => c.conversation_key === selectedId) || null, [conversations, selectedId])
+  const selectedConversationAccount = useMemo(
+    () => inboxAccounts.find(item => String(item.id) === String(selectedConversation?.account_id)) || null,
+    [inboxAccounts, selectedConversation?.account_id],
+  )
   const selectedAccount = useMemo(
     () => inboxAccounts.find(item => item.id === accountFilter) || null,
     [inboxAccounts, accountFilter],
@@ -670,6 +674,7 @@ function AppInner() {
               standalone={selectedConversation?.source === 'standalone'}
               accountLabel={selectedConversation?.account_label || ''}
               accountName={selectedConversation?.account_name || ''}
+              accountStatus={selectedConversationAccount?.status || 'offline'}
               platform={selectedConversation?.platform || ''}
               userName={selectedName}
               contactProfile={selectedContactProfile}

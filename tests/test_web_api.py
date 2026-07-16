@@ -122,6 +122,37 @@ def test_settings_exposes_model_default_and_plugins(tmp_path):
     assert "auto_translate" in body["plugins"]
 
 
+def test_legacy_settings_never_exposes_auth_or_user_records(tmp_path):
+    profile = create_profile(tmp_path / "p-settings-credentials")
+    settings_path = profile / "web-settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings.update(
+        {
+            "auth_policy": {"max_attempts": 5},
+            "login_attempts": {"127.0.0.1": [1]},
+            "sessions": {"session-token": {"expires_at": 9999999999}},
+            "users": {
+                "admin": {
+                    "salt": "test-salt",
+                    "hash": "test-hash",
+                    "iterations": 600000,
+                }
+            },
+        }
+    )
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+    client = authed_client(profile)
+
+    response = client.get("/api/settings")
+
+    assert response.status_code == 200
+    returned = response.json()["web_settings"]
+    for key in ("auth", "auth_policy", "login_attempts", "sessions", "users"):
+        assert key not in returned
+    assert "test-salt" not in response.text
+    assert "test-hash" not in response.text
+
+
 def test_ai_settings_v1_is_safe_and_reports_effective_account_model(
     monkeypatch, tmp_path
 ):

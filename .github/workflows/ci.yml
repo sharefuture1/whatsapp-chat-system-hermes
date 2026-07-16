@@ -16,34 +16,41 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
       - name: Install
-        run: python -m pip install --upgrade pip && python -m pip install -e . pytest httpx ruff
+        run: python -m pip install uv==0.9.25 && uv sync --locked --group dev
       - name: Ruff changed Python files
         shell: bash
         run: |
-          base="origin/${GITHUB_BASE_REF:-main}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="origin/${GITHUB_BASE_REF}"
+          else
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="HEAD^"
+            fi
+          fi
           mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base...HEAD" -- '*.py')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No changed Python files"
             exit 0
           fi
-          ruff check "${files[@]}"
-          ruff format --check "${files[@]}"
+          uv run ruff check "${files[@]}"
+          uv run ruff format --check "${files[@]}"
       - name: Pytest
-        run: pytest -q
+        run: uv run pytest -q
 
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm
@@ -58,8 +65,8 @@ jobs:
   bridge:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm
@@ -74,8 +81,38 @@ jobs:
   diff-quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Whitespace and conflict markers
-        run: git diff --check origin/${{ github.base_ref || 'main' }}...HEAD
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="origin/${GITHUB_BASE_REF}"
+          else
+            base="${{ github.event.before }}"
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              base="HEAD^"
+            fi
+          fi
+          git diff --check "$base...HEAD"
+
+  tauri-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+      - name: Install JavaScript dependencies
+        run: npm ci && npm ci --prefix web
+      - name: Validate Tauri shell configuration
+        run: npm run tauri:validate
+      - name: Build packaged frontend
+        run: npm run web:build:tauri
+      - name: Validate Tauri CLI
+        run: npm run tauri -- --version

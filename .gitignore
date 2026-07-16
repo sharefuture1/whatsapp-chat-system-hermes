@@ -17,11 +17,16 @@ dist/
 *.egg-info/
 
 # Node
+node_modules/
 web/node_modules/
 web/dist/
 web/.vite/
 bridge/node_modules/
 bridge/runtime/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Local env / runtime
 .env

@@ -1,3 +1,6 @@
+import { isTauri } from '@tauri-apps/api/core'
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
+
 const DEFAULT_API_BASE = import.meta.env?.VITE_API_BASE?.replace(/\/$/, '') || '/api'
 
 let sessionToken = ''
@@ -68,6 +71,14 @@ const inflightRequests = new Map()
 
 function cacheKey(path, method) { return `${sessionToken}:${method}:${path}` }
 
+function transportFetch(input, init) {
+  // Relative URLs keep the browser/Vite same-origin path. Packaged Tauri apps
+  // use the scoped HTTP plugin for an absolute remote API, avoiding WebView
+  // CORS differences without widening the server's browser origin allowlist.
+  if (isTauri() && /^https?:\/\//i.test(input)) return tauriFetch(input, init)
+  return globalThis.fetch(input, init)
+}
+
 async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = {}) {
   const key = cacheKey(path, method)
   if (method === 'GET' && cacheTtlMs > 0) {
@@ -80,7 +91,7 @@ async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = 
     const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (sessionToken) headers['x-session-token'] = sessionToken
-  const res = await fetch(`${DEFAULT_API_BASE}${path}`, {
+  const res = await transportFetch(`${DEFAULT_API_BASE}${path}`, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

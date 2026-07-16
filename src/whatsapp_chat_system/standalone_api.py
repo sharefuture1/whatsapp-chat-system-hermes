@@ -354,7 +354,7 @@ def build_standalone_app(
     from .api.v1.messages import create_messages_router as _create_messages_router
 
     app.include_router(create_settings_router(runtime, factory))
-    app.include_router(create_operations_router(factory))
+    app.include_router(create_operations_router(runtime, factory))
     app.include_router(_create_users_router(runtime))
     app.include_router(_create_messages_router())
 
@@ -467,7 +467,11 @@ def build_standalone_app(
         return {
             "username": username,
             "role": user.get("role", "admin"),  # admin | operator | viewer
-            "allowed_account_ids": [str(x).strip() for x in (user.get('allowed_account_ids') or []) if str(x).strip()],
+            "allowed_account_ids": [
+                str(x).strip()
+                for x in (user.get("allowed_account_ids") or [])
+                if str(x).strip()
+            ],
             "session_expires_at": session.get("expires_at"),
         }
 

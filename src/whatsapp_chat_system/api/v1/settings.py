@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import socket
 from collections.abc import Callable, Generator
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from whatsapp_chat_system.authz import require_admin, visible_account_ids_for
+from whatsapp_chat_system.authz import (
+    require_admin,
+    require_object_account_access,
+    visible_account_ids_for,
+)
 from whatsapp_chat_system.ai.crypto import (
     decrypt_api_key,
     encrypt_api_key,
@@ -32,6 +39,22 @@ from whatsapp_chat_system.settings import _normalize_base_url
 
 
 _SAFE_SETTING_SECTIONS = frozenset({"ui", "message_ops", "reply", "plugins"})
+_SENSITIVE_SETTING_KEYS = frozenset(
+    {
+        "api_key",
+        "api_key_ciphertext",
+        "auth",
+        "auth_policy",
+        "hash",
+        "login_attempts",
+        "password",
+        "salt",
+        "secret",
+        "sessions",
+        "token",
+        "users",
+    }
+)
 
 
 class StandaloneSettingsUpdate(BaseModel):
@@ -48,9 +71,9 @@ class AISettingsUpdate(BaseModel):
 
 
 class AITestRequest(BaseModel):
-    base_url: str | None = None
-    default_model: str | None = None
-    api_key: str | None = None
+    base_url: str | None = Field(default=None, max_length=2048)
+    default_model: str | None = Field(default=None, max_length=255)
+    api_key: str | None = Field(default=None, max_length=512)
 
 
 class ContactSettingsUpdate(BaseModel):
@@ -75,11 +98,89 @@ def _deep_merge(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any
 
 
 def _safe_web_settings(runtime: StandaloneRuntime) -> dict[str, Any]:
-    return {
-        key: deepcopy(value)
-        for key, value in runtime.web_settings.items()
-        if key not in {"auth", "sessions", "login_attempts", "auth_policy"}
-    }
+    return _redact_sensitive_settings(
+        {
+            key: deepcopy(value)
+            for key, value in runtime.web_settings.items()
+            if key in _SAFE_SETTING_SECTIONS
+        }
+    )
+
+
+def _redact_sensitive_settings(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _redact_sensitive_settings(item)
+            for key, item in value.items()
+            if str(key).lower() not in _SENSITIVE_SETTING_KEYS
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_settings(item) for item in value]
+    return value
+
+
+def _unsafe_ai_base_url(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"code": "unsafe_ai_base_url", "message": message},
+    )
+
+
+def _validate_public_https_url(raw: str) -> str:
+    """Fail closed for AI endpoints that send credentials to a remote host."""
+    value = raw.strip().rstrip("/")
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError as exc:
+        raise _unsafe_ai_base_url("AI base URL is invalid") from exc
+    if (
+        parts.scheme.lower() != "https"
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+    ):
+        raise _unsafe_ai_base_url(
+            "AI base URL must be an HTTPS URL without credentials, query, or fragment"
+        )
+
+    hostname = parts.hostname.rstrip(".").lower()
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise _unsafe_ai_base_url("AI base URL must resolve to a public address")
+
+    try:
+        addresses = {ipaddress.ip_address(hostname)}
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(
+                hostname,
+                port or 443,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+            )
+        except OSError as exc:
+            raise _unsafe_ai_base_url(
+                "AI base URL hostname could not be resolved"
+            ) from exc
+        addresses = set()
+        for item in resolved:
+            address = str(item[4][0]).split("%", 1)[0]
+            try:
+                addresses.add(ipaddress.ip_address(address))
+            except ValueError as exc:
+                raise _unsafe_ai_base_url(
+                    "AI base URL hostname resolved to an invalid address"
+                ) from exc
+
+    if not addresses or any(not address.is_global for address in addresses):
+        raise _unsafe_ai_base_url("AI base URL must resolve only to public addresses")
+
+    normalized = _normalize_base_url(value)
+    if normalized != value:
+        raise _unsafe_ai_base_url("AI base URL is invalid")
+    return normalized
 
 
 def _load_aliases(path: Path) -> dict[str, Any]:
@@ -164,10 +265,11 @@ def create_settings_router(
     @router.get("/settings")
     def get_settings(session: Session = Depends(get_session)) -> dict[str, Any]:
         ai_row = session.get(AIRuntimeSetting, "global")
+        safe_web_settings = _safe_web_settings(runtime)
         return {
             "channels": deepcopy(runtime.forwarding_channels),
             "aliases": _load_aliases(runtime.paths.alias_file),
-            "web_settings": _safe_web_settings(runtime),
+            "web_settings": safe_web_settings,
             "model": {
                 "provider": "wendingai",
                 "default": ai_row.default_model
@@ -178,12 +280,14 @@ def create_settings_router(
                     "api_key_configured"
                 ],
             },
-            "plugins": deepcopy(runtime.web_settings.get("plugins") or {}),
+            "plugins": deepcopy(safe_web_settings.get("plugins") or {}),
             "runtime_mode": "standalone",
         }
 
     @router.put("/settings")
-    def update_settings(request: Request, payload: StandaloneSettingsUpdate) -> dict[str, Any]:
+    def update_settings(
+        request: Request, payload: StandaloneSettingsUpdate
+    ) -> dict[str, Any]:
         require_admin(runtime, request)
         disallowed = set(payload.web_settings) - _SAFE_SETTING_SECTIONS
         if disallowed:
@@ -238,10 +342,7 @@ def create_settings_router(
             row = AIRuntimeSetting(id="global", provider="wendingai")
             session.add(row)
         if payload.base_url is not None:
-            normalized = _normalize_base_url(payload.base_url)
-            if normalized != payload.base_url.strip().rstrip("/"):
-                raise HTTPException(status_code=422, detail="Invalid AI base URL")
-            row.base_url = normalized
+            row.base_url = _validate_public_https_url(payload.base_url)
         if payload.default_model is not None:
             model = payload.default_model.strip()
             if not model:
@@ -262,34 +363,51 @@ def create_settings_router(
 
     @router.post("/ai/test")
     def test_ai_connection(
+        request: Request,
         payload: AITestRequest = Body(...),
+        session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         """
         Test AI connection with the given or currently configured credentials.
         Used by the Global AI settings page to verify connectivity before saving.
         """
-        from whatsapp_chat_system.ai.provider import AIProviderError
-        from whatsapp_chat_system.ai.provider import WendingAIProvider
+        from whatsapp_chat_system.ai.provider import AIProviderError, WendingAIProvider
 
-        # Resolve effective credentials
-        effective_key = payload.api_key.strip() if payload.api_key else None
-        effective_base_url = (
-            payload.base_url or ""
-        ).strip() or runtime.ai_settings.base_url
-        effective_model = (
-            payload.default_model or ""
-        ).strip() or runtime.ai_settings.default_model
+        require_admin(runtime, request)
+
+        supplied_key = (payload.api_key or "").strip()
+        supplied_base_url = (payload.base_url or "").strip()
+        if supplied_base_url and not supplied_key:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "api_key_required_for_custom_base_url",
+                    "message": "A custom AI base URL requires an API key in the same request",
+                },
+            )
+
+        effective_key = supplied_key or None
+        row = session.get(AIRuntimeSetting, "global")
+        configured_base_url = (
+            row.base_url if row and row.base_url else runtime.ai_settings.base_url
+        )
+        effective_base_url = supplied_base_url or configured_base_url
+        effective_model = (payload.default_model or "").strip() or (
+            row.default_model
+            if row and row.default_model
+            else runtime.ai_settings.default_model
+        )
 
         if effective_key is None:
-            # Try to read from DB
-            row = next(get_session()).get(AIRuntimeSetting, "global")
             if row and row.api_key_ciphertext:
-                from whatsapp_chat_system.ai.crypto import decrypt_api_key
-
                 effective_key = decrypt_api_key(row.api_key_ciphertext)
+            else:
+                effective_key = runtime.ai_settings.api_key.strip() or None
 
         if not effective_key:
             return {"ok": False, "message": "No API key configured"}
+
+        effective_base_url = _validate_public_https_url(effective_base_url)
 
         # Build a temporary provider to test
         from whatsapp_chat_system.settings import AISettings
@@ -310,21 +428,38 @@ def create_settings_router(
             )
             return {"ok": True, "message": f"Connected — model: {result.model}"}
         except AIProviderError as exc:
-            return {"ok": False, "message": exc.message or exc.code}
-        except Exception as exc:
-            return {"ok": False, "message": str(exc)}
+            return {"ok": False, "message": str(exc) or exc.code}
+        except Exception:
+            return {"ok": False, "message": "AI connection test failed"}
 
     @router.get("/dashboard")
-    def dashboard(request: Request, session: Session = Depends(get_session)) -> dict[str, Any]:
+    def dashboard(
+        request: Request, session: Session = Depends(get_session)
+    ) -> dict[str, Any]:
         visible_ids = visible_account_ids_for(runtime, request)
-        account_filter = WhatsAppAccount.id.in_(visible_ids) if visible_ids is not None else None
-        contact_filter = Contact.account_id.in_(visible_ids) if visible_ids is not None else None
-        conversation_filter = Conversation.account_id.in_(visible_ids) if visible_ids is not None else None
-        message_filter = Message.account_id.in_(visible_ids) if visible_ids is not None else None
+        account_filter = (
+            WhatsAppAccount.id.in_(visible_ids) if visible_ids is not None else None
+        )
+        contact_filter = (
+            Contact.account_id.in_(visible_ids) if visible_ids is not None else None
+        )
+        conversation_filter = (
+            Conversation.account_id.in_(visible_ids)
+            if visible_ids is not None
+            else None
+        )
+        message_filter = (
+            Message.account_id.in_(visible_ids) if visible_ids is not None else None
+        )
         return {
             "runtime_mode": "standalone",
             "stats": {
-                "accounts": session.scalar(select(func.count(WhatsAppAccount.id)).where(account_filter) if account_filter is not None else select(func.count(WhatsAppAccount.id))) or 0,
+                "accounts": session.scalar(
+                    select(func.count(WhatsAppAccount.id)).where(account_filter)
+                    if account_filter is not None
+                    else select(func.count(WhatsAppAccount.id))
+                )
+                or 0,
                 "online_accounts": session.scalar(
                     select(func.count(WhatsAppAccount.id)).where(
                         WhatsAppAccount.status == "online",
@@ -332,16 +467,34 @@ def create_settings_router(
                     )
                 )
                 or 0,
-                "contacts": session.scalar(select(func.count(Contact.id)).where(contact_filter) if contact_filter is not None else select(func.count(Contact.id))) or 0,
+                "contacts": session.scalar(
+                    select(func.count(Contact.id)).where(contact_filter)
+                    if contact_filter is not None
+                    else select(func.count(Contact.id))
+                )
+                or 0,
                 "conversations": session.scalar(
                     select(func.count(Conversation.id)).where(
                         Conversation.deleted_at.is_(None),
-                        conversation_filter if conversation_filter is not None else True,
+                        conversation_filter
+                        if conversation_filter is not None
+                        else True,
                     )
                 )
                 or 0,
-                "messages": session.scalar(select(func.count(Message.id)).where(message_filter) if message_filter is not None else select(func.count(Message.id))) or 0,
-                "unread": session.scalar(select(func.sum(Conversation.unread_count)).where(conversation_filter) if conversation_filter is not None else select(func.sum(Conversation.unread_count)))
+                "messages": session.scalar(
+                    select(func.count(Message.id)).where(message_filter)
+                    if message_filter is not None
+                    else select(func.count(Message.id))
+                )
+                or 0,
+                "unread": session.scalar(
+                    select(func.sum(Conversation.unread_count)).where(
+                        conversation_filter
+                    )
+                    if conversation_filter is not None
+                    else select(func.sum(Conversation.unread_count))
+                )
                 or 0,
             },
             "recent_conversations": [],
@@ -354,17 +507,25 @@ def create_settings_router(
 
     @router.get("/contacts/{contact_id}/settings")
     def get_contact_settings(
+        request: Request,
         contact_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         contact = session.get(Contact, contact_id)
         if contact is None:
             raise HTTPException(status_code=404, detail="Contact not found")
+        require_object_account_access(
+            runtime,
+            request,
+            contact.account_id,
+            not_found_detail="Contact not found",
+        )
         override = session.get(ContactAIOverride, (contact.account_id, contact.id))
         return _contact_payload(contact, override)
 
     @router.put("/contacts/{contact_id}/settings")
     def update_contact_settings(
+        request: Request,
         contact_id: str,
         payload: ContactSettingsUpdate,
         session: Session = Depends(get_session),
@@ -372,6 +533,13 @@ def create_settings_router(
         contact = session.get(Contact, contact_id)
         if contact is None:
             raise HTTPException(status_code=404, detail="Contact not found")
+        require_object_account_access(
+            runtime,
+            request,
+            contact.account_id,
+            write=True,
+            not_found_detail="Contact not found",
+        )
         values = payload.model_dump(exclude_unset=True)
         if "remark" in values:
             contact.remark = (values["remark"] or "").strip() or None

@@ -18,6 +18,13 @@ dependencies = [
   "cryptography>=42.0.0",
 ]
 
+[dependency-groups]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.3.0",
+  "ruff>=0.12.0",
+]
+
 [project.scripts]
 whatsapp-chat-system = "whatsapp_chat_system.cli:main"
 
