@@ -1,3 +1,17 @@
+## 2026-07-16：Tauri 2 测试安装包必须由锁定依赖的多平台 CI 构建
+
+**决策**：Tauri 2 桌面端保持薄客户端；GitHub Actions 使用 `Cargo.lock + npm lockfile` 自动构建 Linux `.deb/.AppImage`、Windows NSIS `.exe` 和 macOS `.dmg`，并上传短期 artifact。未配置平台签名和 notarization 前，这些产物只定义为内部测试安装包。
+
+- Tauri HTTP capability 仅允许 `https://whats.future1.us/api/**`；
+- Tauri 模式 session token 不写入 localStorage，关闭应用后重新登录；
+- Tauri 模式消息和翻译缓存仅存内存，浏览器缓存按用户隔离且 logout 清除；
+- Android/iOS 需要原生工程、签名和专用 runner，不纳入本阶段“安装包自动构建完成”范围。
+
+**原因**：仅验证 Vite bundle 和 Tauri CLI 不能证明原生程序可编译；可重复 lockfile、真实 `cargo check --locked`、平台安装包构建和 artifact 上传必须成为合并门禁。同时不能把未签名、未真机验证的产物描述为正式发布版。
+
+**关联规格**：`docs/sdd/11-tauri-desktop-distribution.md`、`docs/plans/2026-07-16-tauri-desktop-installers.md`。
+
+
 ## 2026-07-15: 多用户第一批先按账号范围做 RBAC 与数据隔离
 
 **决策**：在 Standalone 多用户落地第一阶段，先把用户模型收敛为 `role + allowed_account_ids`，所有非 admin 用户只按账号范围隔离；不先引入更复杂的 row-level policy 或会话级 ACL。

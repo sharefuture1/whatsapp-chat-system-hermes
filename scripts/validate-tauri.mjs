@@ -64,13 +64,13 @@ assert(JSON.stringify(capability.windows) === JSON.stringify(['main']), 'capabil
 assert(capability.permissions?.length === 1, 'native permissions must remain minimal')
 const httpPermission = capability.permissions[0]
 assert(httpPermission.identifier === 'http:default', 'only the scoped HTTP permission is expected')
-assert(JSON.stringify(httpPermission.allow) === JSON.stringify([{ url: 'https://whats.future1.us/**' }]), 'HTTP permission must allow only the exact production origin')
+assert(JSON.stringify(httpPermission.allow) === JSON.stringify([{ url: 'https://whats.future1.us/api/**' }]), 'HTTP permission must allow only the exact production API path')
 
 const webProductionEnv = publicEnv('web/.env.production')
 const tauriEnv = publicEnv('web/.env.tauri')
 assert(JSON.stringify(Object.keys(webProductionEnv)) === JSON.stringify(['VITE_API_BASE']), 'browser production may expose only VITE_API_BASE')
 assert(JSON.stringify(Object.keys(tauriEnv)) === JSON.stringify(['VITE_API_BASE']), 'Tauri mode may expose only VITE_API_BASE')
-assert(webProductionEnv.VITE_API_BASE === '/api', 'browser production must keep a same-origin API base')
+assert(webProductionEnv.VITE_API_BASE === 'https://whats.future1.us/api', 'browser production must use the verified public API base')
 assert(tauriEnv.VITE_API_BASE === 'https://whats.future1.us/api', 'Tauri mode must use the approved remote API base')
 for (const [path, values] of Object.entries({ 'web/.env.production': webProductionEnv, 'web/.env.tauri': tauriEnv })) {
   for (const key of Object.keys(values)) {

@@ -7,7 +7,7 @@
       "identifier": "http:default",
       "allow": [
         {
-          "url": "https://whats.future1.us/**"
+          "url": "https://whats.future1.us/api/**"
         }
       ]
     }

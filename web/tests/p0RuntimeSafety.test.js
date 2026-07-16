@@ -31,6 +31,16 @@ test('manual, polling, and translation refreshes bypass fresh local conversation
   assert.match(chatPane, /canShortCircuitConversationFetch\(cached, \{ appendOlder, cachePolicy \}\)/)
 })
 
+test('Tauri mode keeps the session token out of localStorage and logout clears chat caches', () => {
+  const app = read('App.jsx')
+  const cache = read('chatCache.js')
+
+  assert.match(app, /isTauri\(\) \? '' : localStorage\.getItem\(TOKEN_KEY\)/)
+  assert.match(app, /if \(!isTauri\(\)\) localStorage\.setItem\(TOKEN_KEY, data\.session_token\)/)
+  assert.match(app, /clearAllChatCaches\(\)/)
+  assert.match(cache, /export function clearAllChatCaches\(\)/)
+})
+
 test('missing Standalone refresh setting gets a reliable default while explicit zero remains supported', () => {
   const app = read('App.jsx')
 

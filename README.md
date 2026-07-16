@@ -250,27 +250,32 @@ That means the deployed frontend should still reach the backend API as long as:
 - `https://whats.future1.us/api/...` is reachable from the public internet
 - the backend is running on the host and proxied correctly
 
-## Tauri 2 desktop and mobile shell
+## Tauri 2 desktop test installers
 
-The packaged application is intentionally a thin client: React/Vite runs in
-Tauri while the FastAPI service, PostgreSQL database, and WhatsApp Bridge remain
-on the server. This keeps Windows, macOS, Linux, Android, iOS, and the browser on
-one API contract without placing database or Bridge credentials on end-user
-devices.
+The packaged desktop application is a Tauri 2 thin client: React/Vite runs in
+Tauri while FastAPI, PostgreSQL, and the WhatsApp Bridge remain on the server.
+The current verified scope targets Linux, Windows, and macOS test installers.
+Android and iOS remain future targets and are not release-verified.
 
 ```bash
 npm ci
 npm ci --prefix web
 npm run tauri:dev
 npm run tauri:build
-
-# Native projects require the Android/iOS prerequisites first.
-npm run tauri:android:init
-npm run tauri:ios:init       # macOS only
 ```
 
-See `docs/TAURI2.md` for platform prerequisites, scoped HTTP permissions,
-signing/update policy, mobile UX requirements, and store-readiness gates.
+GitHub Actions automatically builds and uploads unsigned internal-test artifacts:
+
+- Linux x64: `.deb` and `.AppImage`
+- Windows x64: NSIS `.exe`
+- macOS: `.dmg`
+
+Use the **Tauri installers** workflow or push relevant changes to `main` or the
+Tauri development branch. Platform signing, Apple notarization, and store
+release approval are separate mandatory gates.
+
+See `docs/TAURI2.md` and `docs/sdd/11-tauri-desktop-distribution.md` for the
+security model, build prerequisites, and release-readiness gates.
 
 ## Testing
 

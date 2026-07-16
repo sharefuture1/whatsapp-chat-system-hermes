@@ -18,12 +18,15 @@ def get_current_user_record(runtime: Any, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Unauthorized") from exc
     if expires_at <= time.time():
         raise HTTPException(status_code=401, detail="Unauthorized")
-    username = session.get("username", "admin")
+    username = str(session.get("username") or "").strip()
+    if not username:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     users: dict[str, Any] = runtime.web_settings.get("users") or {}
-    user = dict(users.get(username) or {})
-    user.setdefault("username", username)
-    user.setdefault("role", "admin" if username == "admin" else "operator")
-    user.setdefault("allowed_account_ids", [])
+    raw_user = users.get(username)
+    if not isinstance(raw_user, dict) or not raw_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    user = dict(raw_user)
+    user["username"] = username
     return user
 
 

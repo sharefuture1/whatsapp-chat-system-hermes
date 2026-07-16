@@ -821,3 +821,81 @@ def test_compat_standalone_builder_exposes_runtime_to_v1_routers(
 
     assert app.state.runtime_mode == "standalone"
     assert app.state.runtime.internal_event_token == "security-test-token"
+
+
+def test_legacy_session_without_username_is_not_promoted_to_admin(security_api):
+    client, app, _ = security_api
+    app.state.runtime.web_settings.setdefault("sessions", {})["legacy-token"] = {
+        "issued_at": time.time(),
+        "expires_at": time.time() + 3600,
+    }
+
+    response = client.get(
+        "/api/v1/users",
+        headers={"x-session-token": "legacy-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_changing_ai_base_url_requires_a_new_key_in_the_same_request(security_api):
+    client, _, _ = security_api
+    admin_token = _login(client)
+
+    rejected = client.put(
+        "/api/v1/ai/settings",
+        headers={"x-session-token": admin_token},
+        json={"base_url": "https://8.8.8.8/v1"},
+    )
+    accepted = client.put(
+        "/api/v1/ai/settings",
+        headers={"x-session-token": admin_token},
+        json={"base_url": "https://8.8.8.8/v1", "api_key": "replacement-key"},
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "api_key_required_for_base_url_change"
+    assert accepted.status_code == 200
+
+
+def test_non_admin_users_receive_only_minimal_runtime_capabilities(security_api):
+    client, _, _ = security_api
+    admin_token = _login(client)
+    viewer_token = _register_user(
+        client,
+        admin_token,
+        username="capabilities-viewer",
+        role="viewer",
+    )
+
+    assert (
+        client.get(
+            "/api/v1/settings",
+            headers={"x-session-token": viewer_token},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/api/v1/ai/settings",
+            headers={"x-session-token": viewer_token},
+        ).status_code
+        == 403
+    )
+
+    capabilities = client.get(
+        "/api/v1/capabilities",
+        headers={"x-session-token": viewer_token},
+    )
+    assert capabilities.status_code == 200
+    payload = capabilities.json()
+    assert set(payload) == {
+        "runtime_mode",
+        "message_ops",
+        "reply",
+        "plugins",
+        "auto_translate",
+    }
+    serialized = str(payload).lower()
+    for forbidden in ("base_url", "api_key", "hint", "channels", "aliases"):
+        assert forbidden not in serialized

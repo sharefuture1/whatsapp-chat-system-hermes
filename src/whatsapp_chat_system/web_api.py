@@ -987,7 +987,18 @@ def _build_standalone_app(
         token = secrets.token_urlsafe(24)
         ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(runtime.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(runtime.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        runtime.web_settings["users"] = users
         runtime.web_settings["sessions"] = sessions
         _save_runtime_settings(runtime)
         return {"success": True, "session_token": token, "expires_in": ttl}
@@ -1339,7 +1350,18 @@ def build_app(
         token = secrets.token_urlsafe(24)
         ttl = int(config.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(config.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(config.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        config.web_settings["users"] = users
         config.web_settings["sessions"] = sessions
         save_json(config.paths.web_settings_file, config.web_settings)
         return {"success": True, "session_token": token, "expires_in": ttl}

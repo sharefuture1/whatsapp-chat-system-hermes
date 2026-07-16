@@ -26,6 +26,18 @@
 - `sameMessageList` 改为比较完整 JSON-like 消息结构；语义完全相同时仍保持原数组引用，任意嵌套字段变化时返回新数组。
 - 新增回归测试覆盖平台消息 ID 与媒体元数据同时变化；验证 focused Web 27 passed、Web 全量 96 passed、Vite build 通过。
 
+## 2026-07-16：Tauri 2 安全加固与 GitHub 自动安装包工作流
+
+- 新增 `docs/sdd/11-tauri-desktop-distribution.md` 与实施计划，冻结桌面薄客户端、测试安装包和签名边界。
+- 修复旧格式 Session 缺少 username 时默认 admin 的提权问题；admin 仅在真实登录迁移时写入显式角色。
+- AI Base URL 变化必须同请求提交新 API key，阻止旧密钥被发送到新公网主机。
+- 完整 settings/AI settings 改为 admin-only；operator/viewer 使用不含 URL、key hint、channels/aliases 的最小 capabilities DTO。
+- Tauri 模式 session token 不再写入 localStorage，消息与翻译缓存仅保存在内存；浏览器缓存升级为按用户名隔离，logout 时清理。
+- Tauri HTTP capability 收紧到 `https://whats.future1.us/api/**`，浏览器和 Tauri 均使用已验证绝对 API base。
+- 生成并提交 `src-tauri/Cargo.lock`、桌面/移动图标和 bundle icon 配置；Linux `cargo check --locked` 及 `.deb` 本机构建已真实通过。
+- 新增 `.github/workflows/tauri-build.yml`：Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg` 自动构建并上传 Actions artifacts。
+- 安装包当前未签名，仅供内部测试；Android/iOS 尚不在完成范围。
+
 ## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
 ### 翻译与预览链路

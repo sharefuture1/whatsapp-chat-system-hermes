@@ -262,8 +262,37 @@ def create_settings_router(
         finally:
             session.close()
 
+    @router.get("/capabilities")
+    def get_capabilities(request: Request) -> dict[str, Any]:
+        visible_account_ids_for(runtime, request)
+        message_ops = deepcopy(runtime.web_settings.get("message_ops") or {})
+        reply = deepcopy(runtime.web_settings.get("reply") or {})
+        plugins = deepcopy(runtime.web_settings.get("plugins") or {})
+        auto_translate = {
+            "plugin_enabled": plugins.get("auto_translate", True),
+            "setting_enabled": message_ops.get("auto_translate", True),
+        }
+        return {
+            "runtime_mode": "standalone",
+            "message_ops": message_ops,
+            "reply": {
+                key: reply.get(key)
+                for key in (
+                    "default_reply_style",
+                    "smart_max_length",
+                    "translate_max_length",
+                )
+                if key in reply
+            },
+            "plugins": plugins,
+            "auto_translate": auto_translate,
+        }
+
     @router.get("/settings")
-    def get_settings(session: Session = Depends(get_session)) -> dict[str, Any]:
+    def get_settings(
+        request: Request, session: Session = Depends(get_session)
+    ) -> dict[str, Any]:
+        require_admin(runtime, request)
         ai_row = session.get(AIRuntimeSetting, "global")
         safe_web_settings = _safe_web_settings(runtime)
         return {
@@ -309,7 +338,10 @@ def create_settings_router(
         }
 
     @router.get("/ai/settings")
-    def get_ai_settings(session: Session = Depends(get_session)) -> dict[str, Any]:
+    def get_ai_settings(
+        request: Request, session: Session = Depends(get_session)
+    ) -> dict[str, Any]:
+        require_admin(runtime, request)
         payload = _ai_payload(runtime, session.get(AIRuntimeSetting, "global"))
         auto_translate = payload["auto_translate"]
         configured = bool(payload["api_key_configured"])
@@ -342,7 +374,22 @@ def create_settings_router(
             row = AIRuntimeSetting(id="global", provider="wendingai")
             session.add(row)
         if payload.base_url is not None:
-            row.base_url = _validate_public_https_url(payload.base_url)
+            next_base_url = _validate_public_https_url(payload.base_url)
+            current_base_url = (
+                row.base_url if row.base_url else runtime.ai_settings.base_url
+            )
+            if (
+                next_base_url != current_base_url
+                and not (payload.api_key or "").strip()
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "api_key_required_for_base_url_change",
+                        "message": "Changing the AI base URL requires a new API key in the same request",
+                    },
+                )
+            row.base_url = next_base_url
         if payload.default_model is not None:
             model = payload.default_model.strip()
             if not model:

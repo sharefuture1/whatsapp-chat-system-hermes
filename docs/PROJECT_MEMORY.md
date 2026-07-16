@@ -1,6 +1,10 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-15 UTC
+> 最后更新：2026-07-16 UTC
+
+- Tauri 2 桌面薄客户端已进入安全加固/自动构建阶段：Rust `Cargo.lock`、多平台图标和 GitHub Actions 安装包矩阵已加入；目标 artifacts 为 Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg`。当前产物定义为未签名内部测试包，需等待 GitHub 三平台真实运行并上传 artifact 后才可标 Verified。
+- Tauri 模式不持久化 session token，聊天/翻译缓存只存内存；浏览器缓存按用户隔离并在 logout 清除。HTTP capability 仅允许 `https://whats.future1.us/api/**`。
+- P0 安全补强：旧格式 Session 不再默认 admin；AI Base URL 换域必须同请求提交新 key；完整 settings/AI settings 仅 admin 可读，普通用户使用最小 capabilities DTO。
 
 - LaoTalk 翻译保底已接入：`message_ops.translation_provider` / `translation_fallback_provider` 生效，默认主翻译 `wendingai`，失败自动回退 `laotalk`；`/api/v1/messages/{id}/translate` 生产实测可直接走 LaoTalk 返回中文译文。
 - 多用户第一批 RBAC 已进入生产：用户记录支持 `role` 与 `allowed_account_ids`；`/api/v1/me` 返回账号范围；`/api/v1/users` 为 admin-only；`/api/v1/accounts` 已按账号范围过滤，operator 不能再看到所有账号。

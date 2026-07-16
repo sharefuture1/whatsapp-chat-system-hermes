@@ -54,6 +54,8 @@
    性能审计结论、PERF 系列强制需求（刷新调度、轮询负载、连接复用、翻译数据库化、DB 健康、Worker 事务隔离、索引对齐、渲染稳定）与 RT 系列 SSE 实时同步契约。
 10. [`10-frontend-vercel-deployment.md`](./10-frontend-vercel-deployment.md)
     前端 Vercel 托管拓扑与 VCL 系列需求：构建产物合同、`VITE_API_BASE_URL` 直连模式、CORS/鉴权、SSE 兼容、Preview 环境隔离、缓存版本验证与回滚。
+11. [`11-tauri-desktop-distribution.md`](./11-tauri-desktop-distribution.md)
+   Tauri 2 桌面薄客户端、安全存储边界、GitHub Actions 安装包构建和发布门禁。
 
 补充实施计划：
 

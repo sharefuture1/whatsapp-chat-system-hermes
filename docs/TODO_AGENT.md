@@ -2,6 +2,22 @@
 
 ## 当前优先级排序
 
+### P0 — Tauri 2 桌面安装包自动构建
+
+- [>] **GitHub Actions 自动构建测试安装包（FR-DESKTOP-001）**
+  - [x] Tauri 2 薄壳、最小 HTTP capability 与 Browser/Tauri 双模式构建
+  - [x] 旧 Session、AI URL/key、设置读取权限安全修复
+  - [x] Tauri token 内存化、缓存按用户隔离与 logout 清理
+  - [x] `Cargo.lock` 与多平台图标
+  - [x] Linux `.deb/.AppImage`、Windows NSIS、macOS `.dmg` Actions 矩阵
+  - [x] 本机 Linux `.deb` 构建完成
+  - [ ] GitHub 三平台 workflow 全部绿色并产生 artifacts
+  - [ ] 对应系统安装、启动、登录、翻译和注销冒烟测试
+  - [ ] 正式发布签名/notarization（当前仅未签名内部测试包）
+  - SDD：`docs/sdd/11-tauri-desktop-distribution.md`
+  - 计划：`docs/plans/2026-07-16-tauri-desktop-installers.md`
+
+
 ### P0 — 运维安全（需人工在生产执行）
 
 - [ ] **按凭据泄露流程再次轮换生产登录密码**：历史凭据曾进入版本库，须立即轮换并撤销现有会话；完成后只记录时间与负责人，不记录密码值

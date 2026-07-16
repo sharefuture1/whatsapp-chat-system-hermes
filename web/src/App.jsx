@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { isTauri } from '@tauri-apps/api/core'
 import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from './api'
+import { clearAllChatCaches, setChatCacheScope } from './chatCache'
 import { useAccountsController } from './accounts/useAccountsController'
 import { SettingsProvider, useSettings } from './settings'
 import { buildContacts, buildInbox, filterInbox } from './inboxModel'
@@ -62,7 +64,7 @@ function AppInner() {
   const settingsApi = useSettings()
   const { t } = settingsApi
   const [sessionToken, setToken] = useState(() => {
-    const stored = localStorage.getItem(TOKEN_KEY) || ''
+    const stored = isTauri() ? '' : localStorage.getItem(TOKEN_KEY) || ''
     setSessionToken(stored)
     return stored
   })
@@ -127,6 +129,8 @@ function AppInner() {
     } catch {}
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USERNAME_KEY)
+    clearAllChatCaches()
+    setChatCacheScope('anonymous')
     clearSessionToken()
     setToken('')
     setLoggedInUsername('')
@@ -151,8 +155,10 @@ function AppInner() {
     setLoginError('')
     try {
       const data = await api.post('/login', { username, password })
-      localStorage.setItem(TOKEN_KEY, data.session_token)
+      if (!isTauri()) localStorage.setItem(TOKEN_KEY, data.session_token)
       localStorage.setItem(USERNAME_KEY, data.username || username)
+      clearAllChatCaches()
+      setChatCacheScope(data.username || username)
       setSessionToken(data.session_token)
       setToken(data.session_token)
       setLoggedInUsername(data.username || username)
@@ -274,15 +280,28 @@ function AppInner() {
   }, [commitConversationsPage, conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
 
   const refreshSettings = useCallback(async () => {
-    const [settingsData, aiData, meData] = await Promise.all([
-      api.get('/v1/settings'),
-      api.get('/v1/ai/settings').catch(() => ({})),
-      api.get('/v1/me').catch(() => ({ username: '', role: 'admin' })),
+    const meData = await api.get('/v1/me')
+    const role = meData.role || 'viewer'
+    const isAdmin = role === 'admin'
+    const [settingsData, aiData] = await Promise.all([
+      isAdmin
+        ? api.get('/v1/settings')
+        : api.get('/v1/capabilities').then(data => ({
+            channels: [],
+            aliases: {},
+            web_settings: {
+              message_ops: data.message_ops || {},
+              reply: data.reply || {},
+              plugins: data.plugins || {},
+            },
+          })),
+      isAdmin ? api.get('/v1/ai/settings').catch(() => ({})) : Promise.resolve({}),
     ])
     setSettings(settingsData)
     setApiSettings(aiData)
-    setCurrentUser({ username: meData.username || '', role: meData.role || 'admin' })
-  }, [])
+    setCurrentUser({ username: meData.username || '', role })
+    setChatCacheScope(meData.username || loggedInUsername || 'anonymous')
+  }, [loggedInUsername])
 
   const [apiSettings, setApiSettings] = useState({})
 
