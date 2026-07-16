@@ -623,7 +623,21 @@ def create_conversations_router(
                 memory_md = ''
                 mode = (payload.mode or 'smart').strip() or 'smart'
                 if mode == 'translate':
-                    rewrite = rewriter.translate_only(target, payload.message, memory_md)
+                    preview_translation = rewriter.translate_to_zh_result(payload.message, 'Unknown')
+                    return {
+                        'success': True,
+                        'preview_only': True,
+                        'conversation_id': conversation.id,
+                        'message': payload.message,
+                        'mode': mode,
+                        'rewrite': {
+                            'language': preview_translation.language,
+                            'message': preview_translation.message,
+                            'used_fallback': preview_translation.used_fallback,
+                            'error': preview_translation.error,
+                            'persona': None,
+                        },
+                    }
                 elif mode == 'direct':
                     rewrite = None
                 else:
