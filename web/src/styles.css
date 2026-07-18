@@ -1072,6 +1072,14 @@ a { color: var(--wx-link); text-decoration: none; }
 .wx-skeleton-line { height: 12px; border-radius: 6px; margin: 10px 0; }
 .wx-skeleton-line.short { width: 40%; }
 .wx-skeleton-line.medium { width: 65%; }
+.wx-skeleton-line.thin { height: 10px; opacity: .7; }
+
+/* 会话列表初次加载骨架（ChatList） */
+.wx-list-skeleton { padding: 2px 0; }
+.wx-list-skeleton-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--wx-divider); }
+.wx-list-skeleton-row .wx-skeleton-avatar { border-radius: 8px; width: 40px; height: 40px; }
+.wx-list-skeleton-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.wx-list-skeleton-text .wx-skeleton-line { margin: 3px 0; }
 
 /* ================== Loading spinner ================== */
 @keyframes wx-spin {

@@ -127,7 +127,23 @@ function SwipeRow({ rowId, children, onPin, onDelete, pinned, t, isOpen, onReque
   )
 }
 
-function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, accounts = [], selectedAccountId = 'all', selectedAccountName = '', onAccountChange, onOpenSettings }) {
+function ListSkeleton() {
+  return (
+    <div className="wx-list-skeleton" aria-hidden="true">
+      {[92, 70, 84, 60, 78, 66, 88, 74].map((w, i) => (
+        <div key={i} className="wx-list-skeleton-row">
+          <div className="wx-skeleton wx-skeleton-avatar" />
+          <div className="wx-list-skeleton-text">
+            <div className="wx-skeleton wx-skeleton-line" style={{ width: `${Math.max(34, w - 30)}%` }} />
+            <div className="wx-skeleton wx-skeleton-line thin" style={{ width: `${w}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, query, onQueryChange, hasMore, onLoadMore, loadingMore, loading = false, pinned, pinnedSet, onTogglePin, onDeleteChat, unread, autoTranslate, platformFilter, platformOptions, onPlatformFilterChange, accounts = [], selectedAccountId = 'all', selectedAccountName = '', onAccountChange, onOpenSettings }) {
   const { t } = useSettings()
   const [openSwipeId, setOpenSwipeId] = useState(null)
   const showPlatformFilter = platformOptions && platformOptions.length > 1
@@ -167,8 +183,9 @@ function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, que
     </div>
     <div className="wx-search"><span className="wx-search-icon" aria-hidden="true"><SearchIcon /></span><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder={t('searchPlaceholder')} /></div>
     <div className="wx-list" onScroll={() => setOpenSwipeId(null)}>
+      {loading && conversations.length === 0 ? <ListSkeleton /> : null}
       {pinnedItems.length > 0 ? <div className="wx-pinned-section">{pinnedItems.map(renderRow)}</div> : null}
-      {conversations.length === 0 ? <div className="wx-empty"><EmptyChatIcon /><div className="wx-empty-state-row"><h3>{t('noConversations')}</h3><p>{t('noConversationsHint') || '暂无会话记录'}</p></div></div> : null}
+      {!loading && conversations.length === 0 ? <div className="wx-empty"><EmptyChatIcon /><div className="wx-empty-state-row"><h3>{t('noConversations')}</h3><p>{t('noConversationsHint') || '暂无会话记录'}</p></div></div> : null}
       {normalItems.map(renderRow)}
       {hasMore ? <div className="wx-loadmore"><button type="button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? t('loading') : t('loadMore')}</button></div> : null}
     </div>

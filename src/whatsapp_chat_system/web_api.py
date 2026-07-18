@@ -932,6 +932,8 @@ def _build_standalone_app(
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
+    # authz.py 的 RBAC 依赖 app.state.runtime；standalone_api 与此处必须同步设置
+    app.state.runtime = runtime
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -1260,6 +1262,8 @@ def build_app(
             await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
+    # authz.py 的 RBAC 读 app.state.runtime.web_settings；legacy 模式下由 config 提供同构接口
+    app.state.runtime = config
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

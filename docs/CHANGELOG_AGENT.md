@@ -1,3 +1,25 @@
+## 2026-07-18：SDD-P0-10 性能快赢包落地 + 上游三端测试修复
+
+### 性能（规格：`docs/sdd/09-performance-and-realtime.md`）
+- PERF-001：`App.jsx` 刷新间隔解除 30s 钳制——尊重服务端配置钳 [3,300]，缺省/非法默认 5s，不再解释为关闭轮询。
+- PERF-002：常规轮询只拉会话列表（50 条/页，随 loadMore 扩窗）+ dashboard；contacts 拆出为 `loadContacts`（登录初始化/进通讯录 Tab 时按需拉取）。
+- PERF-003：翻译端点 `Rewriter` 改为 `app.state.translation_rewriter` 单例（`_RuntimeBackedConfig` 保持设置热生效）；`TranslationDispatcher._rewriter` 实例级缓存；每条翻译不再重建 Provider/TLS 连接。
+- PERF-006：翻译端点与 `AutoReplyWorker._process` 均改三段式——短事务读上下文 → 无 session 调 AI → 新短事务写回；worker 写回前重校验人工回复竞态（AI 慢响应期间人工已回复则取消，不入 Outbox）。
+- PERF-008：`mergeFreshMessages` 数据等价时返回原数组引用（新增 `sameMessageList`）；`chatCache` localStorage 写入改 requestIdleCallback 批量落盘；ChatPane 移除"缓存 5 分钟内新鲜跳过网络"短路，缓存仅作首屏骨架。
+- UI：`ChatList` 首次加载骨架屏（复用 `.wx-skeleton` token）。
+
+### 上游 main 测试修复（本轮变基后 main 自带 14 Python + 3 Web + 2 Bridge 失败）
+- Python：RBAC 改造后 legacy `build_app` 两条路径缺 `app.state.runtime`，authz 全线 AttributeError——补齐（legacy 用 `config` 同构、standalone builder 用 `runtime`），14 个失败归零。
+- Web：`i18n.js` en 块两个 key 缩进错误 + 四语 `messageOps` 重复 key + zh `addRule*` 重复对——修复后四语 352 key 全对齐；th/lo `messageOps` 补本地化译文。两条人设旧测试更新到 SDD-P1-11 现约定（人设目录在聊天页 picker，Discover 仅运营概览）。
+- Bridge：`messages.update` 回执事件身份回归——恢复 occurrence 唯一 nonce（SDD 基线"同内容跨回调不复用 event_id"）；event-sink 409 dead-letter 语义为上游有意恢复，测试更新为 409 → dead-letter 单测。
+
+### 安全
+- `TODO_AGENT.md` 再次出现明文生产密码（2026-07-15 轮换后的新密码），已移除；该密码应视为已泄露并再次轮换。
+
+### 门禁
+- Python `248 passed`（新增 test_auto_reply_worker.py、test_translation_singleton.py）；Web `95 passed` + Vite build；Bridge `75 passed` + lint；changed-files ruff check/format、`git diff --check` 全部通过。
+- 计划：`docs/plans/2026-07-18-perf-quick-wins.md`。
+
 ## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
 ### 翻译与预览链路

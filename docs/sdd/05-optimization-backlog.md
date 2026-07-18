@@ -145,10 +145,18 @@
 
 ### SDD-P0-10 性能快赢包（2026-07-14 审计）
 
-- 状态：`Approved`
+- 状态：`Implemented`（2026-07-18；`updated_since` 增量并入 SDD-P1-12，生产切流验收后才可 `Verified`）
 - 权威规格：`docs/sdd/09-performance-and-realtime.md`（PERF-001/002/003/005/006/008）
-- 内容：前端刷新间隔解除 30s 钳制并给出安全默认；工作台轮询拆除 contacts、并行化、`updated_since` 增量；翻译/预览路径复用 app 级 AI Provider 单例；SQLite WAL + busy_timeout；Worker 不得持有 DB 事务调用外部服务；`mergeFreshMessages` 引用稳定与 localStorage idle 写入。
-- 验收：见 09 号文档各需求 ID；全部三端测试与构建门禁通过。
+- 已落地：
+  - PERF-001：前端刷新解除 30s 钳制，间隔钳 [3,300]、缺省 5s，不再解释为关闭；
+  - PERF-002：常规轮询只拉会话（50 条/页）+ dashboard；contacts 拆出按需拉取；
+  - PERF-003：翻译端点 Rewriter 挂 `app.state` 单例；TranslationDispatcher 实例级缓存；翻译端点 AI 调用移出 DB session；
+  - PERF-005：SQLite WAL + busy_timeout + synchronous=NORMAL（上游先行落地）；
+  - PERF-006：AutoReplyWorker 三段式（短事务读 → 无 session 调 AI → 新短事务重校验竞态后写回）；
+  - PERF-008：`mergeFreshMessages` 等价返回原引用；localStorage 缓存 idle 批量写；缓存不再短路网络请求；
+  - UI：会话列表首载骨架屏。
+- 剩余：`updated_since` 增量（SDD-P1-12）；TranslationDispatcher 批处理事务隔离（同 PERF-006 模式）。
+- 验收：Python 248、Web 95、Bridge 75 全部通过 + Vite build。
 
 ### SDD-P0-08 受控 AI 人设（Code Implemented，待生产切流验收）
 

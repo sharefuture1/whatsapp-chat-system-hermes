@@ -23,6 +23,7 @@ import UserManagementPage from './components/UserManagementPage'
 const TOKEN_KEY='***'
 const USERNAME_KEY='chat-system-username'
 const PAGE_SIZE = 30
+const CONVERSATIONS_PAGE_LIMIT = 50
 const PIN_KEY = 'chat-system-pinned'
 const READ_KEY = 'chat-system-read'
 
@@ -80,6 +81,7 @@ function AppInner() {
   const [conversationsHasMore, setConversationsHasMore] = useState(false)
   const [conversationsPage, setConversationsPage] = useState(1)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [workspaceLoading, setWorkspaceLoading] = useState(true)
   const [selectedId, setSelectedId] = useState('')
   const [selectedName, setSelectedName] = useState('')
   const [settings, setSettings] = useState({ channels: [], aliases: {}, web_settings: {} })
@@ -107,6 +109,7 @@ function AppInner() {
   const [userMgmOpen, setUserMgmOpen] = useState(false)
   const accountsController = useAccountsController(Boolean(sessionToken))
   const accountsRef = useRef([])
+  const inboxAccountsSnapshotRef = useRef([])
   const refreshCoordinatorRef = useRef(createRefreshCoordinator())
   accountsRef.current = accountsController.accounts
   const [pinned, setPinned] = useState(() => {
@@ -173,21 +176,18 @@ function AppInner() {
     }
   }
 
+  // PERF-002：常规轮询只拉会话列表（page=1 → 50 条）；contacts 由 loadContacts 按需拉取
   const fetchConversationsPage = useCallback(async (page) => {
-    const standaloneRes = await api.get(`/v1/conversations?platform=all&account_id=all&limit=200`)
-    const contactsRes = await api.get('/v1/contacts?platform=all&account_id=all&limit=500')
+    const limit = Math.min(200, CONVERSATIONS_PAGE_LIMIT * Math.max(1, page))
+    const standaloneRes = await api.get(`/v1/conversations?platform=all&account_id=all&limit=${limit}`)
     const inbox = buildInbox({
       legacy: [],
       standalone: standaloneRes.items || [],
       standaloneAccounts: standaloneRes.available_accounts || accountsRef.current || [],
     })
+    inboxAccountsSnapshotRef.current = inbox.accounts
     return {
       items: inbox.conversations,
-      contacts: buildContacts({
-        legacy: [],
-        standalone: contactsRes.items || [],
-        accounts: inbox.accounts,
-      }),
       accounts: inbox.accounts,
       legacyTotal: Number(standaloneRes.total) || 0,
       has_more: Boolean(standaloneRes.has_more),
@@ -195,9 +195,20 @@ function AppInner() {
     }
   }, [])
 
+  const loadContacts = useCallback(async () => {
+    try {
+      const contactsRes = await api.get('/v1/contacts?platform=all&account_id=all&limit=500')
+      setContacts(buildContacts({
+        legacy: [],
+        standalone: contactsRes.items || [],
+        accounts: inboxAccountsSnapshotRef.current,
+      }))
+    } catch {}
+  }, [])
+
   const commitConversationsPage = useCallback((snapshot, append = false) => {
+    setWorkspaceLoading(false)
     setInboxAccounts(snapshot.accounts)
-    setContacts(snapshot.contacts)
     setConversations(current => {
       const merged = mergeConversationPages(current, snapshot.items, append)
       setConversationsTotal(append ? Math.max(snapshot.legacyTotal, merged.length) : merged.length)
@@ -283,10 +294,19 @@ function AppInner() {
     if (!sessionToken) return
     refreshSettings().catch(showError)
     refreshWorkspace()
-  }, [sessionToken, refreshSettings, refreshWorkspace])
+    loadContacts()
+  }, [sessionToken, refreshSettings, refreshWorkspace, loadContacts])
 
-  const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds) || 0
-  const refreshInterval = autoSeconds > 0 ? Math.max(30, autoSeconds) : 0
+  // 进入通讯录 Tab 时刷新联系人（contacts 不再随常规轮询拉取）
+  useEffect(() => {
+    if (sessionToken && activeTab === 'contacts') loadContacts()
+  }, [sessionToken, activeTab, loadContacts])
+
+  // PERF-001：尊重服务端配置并钳制到 [3,300] 秒；缺失/非法一律默认 5 秒，禁止解释为关闭轮询
+  const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds)
+  const refreshInterval = Number.isFinite(autoSeconds) && autoSeconds > 0
+    ? Math.min(300, Math.max(3, autoSeconds))
+    : 5
   useEffect(() => {
     if (!sessionToken || refreshInterval <= 0) return undefined
     let timer = null
@@ -629,6 +649,7 @@ function AppInner() {
               hasMore={conversationsHasMore}
               onLoadMore={loadMoreConversations}
               loadingMore={loadingMore}
+              loading={workspaceLoading}
               pinned={pinnedSet}
               onTogglePin={togglePin}
               onDeleteChat={deleteChat}

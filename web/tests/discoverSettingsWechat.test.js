@@ -5,10 +5,11 @@ import { readFileSync } from 'node:fs'
 const root = new URL('../src/', import.meta.url)
 const read = path => readFileSync(new URL(path, root), 'utf8')
 
-test('Discover page keeps only overview cards and the controlled persona library [UX-013]', () => {
+test('Discover page keeps only operations overview cards [UX-013 / SDD-P1-11]', () => {
   const source = read('components/DiscoverPage.jsx')
-  assert.match(source, /wx-cell-group-title[^>]*>\s*\{t\('personaLibrary'\)\}/)
   assert.match(source, /t\('overview'\)/)
+  // SDD-P1-11：人设目录不再出现在发现页
+  assert.doesNotMatch(source, /personaLibrary/)
   assert.doesNotMatch(source, /wx-plugin-filters/)
   assert.doesNotMatch(source, /pluginCenter/)
   assert.doesNotMatch(source, /\bToolsPanel\b/)

@@ -61,12 +61,19 @@ test('API-EVENT: enqueue persists before POST and sends required URL/headers', a
 });
 
 test('API-EVENT: webhook 500 and 401 retain the event for retry', async () => {
-  for (const status of [500, 401, 403, 409]) {
+  for (const status of [500, 401, 403]) {
     const { root, sink } = await setup(async () => response(status));
     await sink.enqueue(event(`evt-${status}`));
     assert.equal(await count(root, 'pending'), 1, `status ${status}`);
     assert.equal(await count(root, 'inflight'), 0);
   }
+});
+
+test('API-EVENT: HTTP 409 event conflict moves to dead-letter instead of retrying forever', async () => {
+  const { root, sink } = await setup(async () => response(409));
+  await sink.enqueue(event('evt-409'));
+  assert.equal(await count(root, 'pending'), 0);
+  assert.equal(await count(root, 'dead'), 1);
 });
 
 test('API-EVENT: timeout/network errors retain the event', async () => {
