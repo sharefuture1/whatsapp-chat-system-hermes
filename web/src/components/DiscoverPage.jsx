@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../settings'
 import { api } from '../api'
-import { fetchPersonaCatalog } from '../personas'
 
 export default function DiscoverPage({ dashboard, channels, conversations }) {
   const { t } = useSettings()
@@ -9,31 +8,19 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
   const [pluginsEnabled, setPluginsEnabled] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [personas, setPersonas] = useState({ items: [], available: false })
-  const [personaError, setPersonaError] = useState(null)
 
   const refresh = async () => {
     setError(null)
-    setPersonaError(null)
-    const [dashboardResult, personaResult] = await Promise.allSettled([
-      api.get('/v1/dashboard'),
-      fetchPersonaCatalog(),
-    ])
-    if (dashboardResult.status === 'fulfilled') {
-      const summary = dashboardResult.value
+    try {
+      const summary = await api.get('/v1/dashboard')
       if (summary?.stats) {
         setStats(summary.stats)
         if (typeof summary.plugins_enabled === 'number') {
           setPluginsEnabled(summary.plugins_enabled)
         }
       }
-    } else {
-      setError(dashboardResult.reason?.message || t('error'))
-    }
-    if (personaResult.status === 'fulfilled') {
-      setPersonas(personaResult.value)
-    } else {
-      setPersonaError(personaResult.reason?.message || t('personaLoadFailed'))
+    } catch (e) {
+      setError(e.message || t('error'))
     }
   }
 
@@ -67,27 +54,6 @@ export default function DiscoverPage({ dashboard, channels, conversations }) {
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="wx-cell-group wx-persona-library">
-        <div className="wx-cell-group-title">{t('personaLibrary')}</div>
-        {loading ? <div className="wx-empty-pill">{t('personaLoading')}</div> : null}
-        {!loading && personaError ? <div className="wx-empty-pill wx-discover-error">{t('personaLoadFailed')}</div> : null}
-        {!loading && !personaError ? (
-          <>
-            <div className="wx-persona-library-status">
-              {personas.available ? t('personaAvailable') : t('personaUnavailable')}
-            </div>
-            <div className="wx-persona-grid">
-              {personas.items.map(persona => (
-                <article className="wx-persona-card" key={persona.id}>
-                  <strong>{persona.name}</strong>
-                  <p>{persona.description}</p>
-                </article>
-              ))}
-            </div>
-          </>
-        ) : null}
       </div>
 
       <div className="wx-cell-group">

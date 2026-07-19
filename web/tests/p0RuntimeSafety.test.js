@@ -23,12 +23,11 @@ test('settings pages import every React hook and never call hooks after an early
   assert.ok(settingsPanel.indexOf('const contactsForPicker = useMemo') < settingsPanel.indexOf('if (!open) return null'))
 })
 
-test('manual, polling, and translation refreshes bypass fresh local conversation cache', () => {
+test('all conversation refreshes revalidate fresh local cache against the server [PERF-008]', () => {
   const chatPane = read('components/ChatPane.jsx')
-  const networkFirstCalls = chatPane.match(/cachePolicy: 'network-first'/g) || []
 
-  assert.ok(networkFirstCalls.length >= 3)
-  assert.match(chatPane, /canShortCircuitConversationFetch\(cached, \{ appendOlder, cachePolicy \}\)/)
+  assert.doesNotMatch(chatPane, /canShortCircuitConversationFetch/)
+  assert.match(chatPane, /本地缓存只作首屏骨架/)
 })
 
 test('Tauri mode keeps the session token out of localStorage and logout clears chat caches', () => {
@@ -41,9 +40,10 @@ test('Tauri mode keeps the session token out of localStorage and logout clears c
   assert.match(cache, /export function clearAllChatCaches\(\)/)
 })
 
-test('missing Standalone refresh setting gets a reliable default while explicit zero remains supported', () => {
+test('missing, invalid, and zero refresh settings use the PERF-001 five-second default', () => {
   const app = read('App.jsx')
 
-  assert.match(app, /configuredAutoSeconds == null \? 30/)
-  assert.match(app, /autoSeconds > 0 \? Math\.max\(30, autoSeconds\) : 0/)
+  assert.match(app, /Math\.min\(300, Math\.max\(3, autoSeconds\)\)/)
+  assert.match(app, /: 5\b/)
+  assert.doesNotMatch(app, /Math\.max\(30/)
 })

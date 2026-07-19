@@ -1,3 +1,11 @@
+## 2026-07-19：PR #2 rebase 冲突收敛
+
+- 将 Tauri/RBAC 安全加固分支 rebase 到已合入 SDD-P0-10 性能快赢包的最新 `main`。
+- 冲突解决保留 PERF-001 的 3–300 秒刷新合同、PERF-008 的缓存仅作首屏骨架语义，以及 Tauri 的对象级账号鉴权和消息源内容一致性校验。
+- Tauri SDD 由重复编号 `09` 调整为 `11-tauri-desktop-distribution.md`，并更新 README、决策、计划和 TODO 引用。
+- Discover 继续遵循 SDD-P1-11：只展示运营概览，人设目录保留在聊天 picker；补齐中文 `addRuleForContact/addRule` 文案。
+- Bridge 409 契约收敛为：无明确错误体的 409 保留重试；仅 `retryable=false` 的终态冲突进入 dead-letter。
+
 ## 2026-07-18：SDD-P0-10 性能快赢包落地 + 上游三端测试修复
 
 ### 性能（规格：`docs/sdd/09-performance-and-realtime.md`）

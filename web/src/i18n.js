@@ -585,6 +585,8 @@ const STRINGS = {
     noAliases: '暂无别名',
     hintSearchContacts: '搜索联系人并查看最近动态。',
     addContactRule: '添加联系人规则',
+    addRuleForContact: '当前会话',
+    addRule: '使用此联系人',
     ai: 'AI',
     pluginCenter: '插件中心',
     pluginCenterSub: '查看和管理已启用的能力',

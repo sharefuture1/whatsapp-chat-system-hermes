@@ -69,11 +69,11 @@ test('API-EVENT: webhook 500 and 401 retain the event for retry', async () => {
   }
 });
 
-test('API-EVENT: HTTP 409 event conflict moves to dead-letter instead of retrying forever', async () => {
+test('API-EVENT: ambiguous HTTP 409 is retained until the API marks it terminal', async () => {
   const { root, sink } = await setup(async () => response(409));
   await sink.enqueue(event('evt-409'));
-  assert.equal(await count(root, 'pending'), 0);
-  assert.equal(await count(root, 'dead'), 1);
+  assert.equal(await count(root, 'pending'), 1);
+  assert.equal(await count(root, 'dead'), 0);
 });
 
 test('API-EVENT: timeout/network errors retain the event', async () => {
