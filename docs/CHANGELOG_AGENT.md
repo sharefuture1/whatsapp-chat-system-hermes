@@ -759,3 +759,9 @@ curl / → 200 text/html ✅
 - **当前线上 CSS**：`index-CJfNWq4L.css`（42KB）
 - **后端日志**：`/tmp/whatsapp-live.log`
 - **后端测试**：`43 passed, 1 failed`（早期遗留 i18n key 缺失）
+# 2026-07-19：设置页布局与渲染性能收敛
+
+- 设置主页增加独立滚动容器、分组间距与桌面最大宽度，移动端适配安全区，避免内容拥挤和溢出。
+- 设置壳与分组启用布局/绘制隔离和 `content-visibility`，降低切换设置页时的无关布局开销。
+- 变更文件：`web/src/components/SettingsPage.jsx`、`web/src/styles.css`。
+- 验证：Vite build 通过；设置/性能/无障碍相关 Web 测试 11 项通过。

@@ -86,6 +86,7 @@ export default function SettingsPage({
           <h2>{t('settings')}</h2>
         </header>
 
+        <div className="wx-settings-main-body">
         <div className="wx-cell-group">
           <div className="wx-section-list wx-card-list">
             <button
@@ -195,6 +196,7 @@ export default function SettingsPage({
               </span>
             </div>
           </div>
+        </div>
         </div>
       </section>
     )

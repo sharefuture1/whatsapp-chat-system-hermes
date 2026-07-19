@@ -2,6 +2,8 @@
 
 > 最后更新：2026-07-16 UTC
 
+- 2026-07-19：设置页新增独立滚动与内容渲染隔离，桌面最大宽度 760px，移动端适配安全区；Vite build 与相关 11 项 Web 测试通过。
+
 - Tauri 2 桌面薄客户端已进入安全加固/自动构建阶段：Rust `Cargo.lock`、多平台图标和 GitHub Actions 安装包矩阵已加入；目标 artifacts 为 Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg`。当前产物定义为未签名内部测试包，需等待 GitHub 三平台真实运行并上传 artifact 后才可标 Verified。
 - Tauri 模式不持久化 session token，聊天/翻译缓存只存内存；浏览器缓存按用户隔离并在 logout 清除。HTTP capability 仅允许 `https://whats.future1.us/api/**`。
 - P0 安全补强：旧格式 Session 不再默认 admin；AI Base URL 换域必须同请求提交新 key；完整 settings/AI settings 仅 admin 可读，普通用户使用最小 capabilities DTO。
@@ -152,4 +154,3 @@ V2 create/status/stop             200
 - **2026-07-14 前端部署自动检查**：新增 `scripts/deploy-frontend-prod.sh`，自动 build、提取 `index-*.js/css`、同步到 `/opt/whatsapp-chat-system/web/dist`，并校验生产首页引用和静态资源 200，降低前端发布后 HTML/asset 不一致风险。
 - **2026-07-14 SDD-P1-07 联系人自动回复控制面**：聊天页 `auto_reply_enabled` 开关 + `PATCH /api/v1/conversations/{id}/auto-reply` 端点已闭环。
 - **2026-07-14 SDD-P0-09 自动回复可靠性补全**：enqueue 显式过滤 system message；idempotency key 纳入 `account_id`；worker 执行前再次检查联系人 override 与人工 outbound 竞态，若人工已回复则取消 job；lease recovery 每 30 秒接入主循环；retry 退避升级为指数 backoff + jitter；`/api/v1/automation/health` 新增 `recovered_leases`。
-

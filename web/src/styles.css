@@ -1281,7 +1281,7 @@ select:focus-visible, [tabindex]:focus-visible {
 }
 
 /* ================== WeChat-style Settings Page ================== */
-.wx-settings-page { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--wx-bg); }
+.wx-settings-page { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--wx-bg); contain: layout paint; }
 .wx-settings-page-header { display: flex; align-items: center; gap: 6px; padding: 16px 16px 8px; background: var(--wx-bg); position: relative; }
 .wx-settings-page-header h2 { margin: 0; font-size: 20px; font-weight: 650; flex: 1; }
 .wx-page-header-back { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; }
@@ -1292,6 +1292,9 @@ select:focus-visible, [tabindex]:focus-visible {
 .wx-settings-page .wx-setting-row-icon svg { width: 22px; height: 22px; stroke: var(--wx-brand); fill: none; stroke-width: 1.6; }
 .wx-settings-page .wx-setting-row:active { background: var(--wx-list-hover); }
 .wx-settings-subpage { background: var(--wx-bg); }
+.wx-settings-main-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+.wx-settings-main-body .wx-cell-group { max-width: 760px; margin: 0 auto 16px; content-visibility: auto; contain-intrinsic-size: 140px; }
+.wx-settings-main-body .wx-cell-group:first-child { margin-top: 8px; }
 .wx-settings-subpage-body { padding: 0 0 80px; overflow-y: auto; min-height: 0; flex: 1; overscroll-behavior: contain; }
 .wx-empty-tip { padding: 12px 16px; font-size: 12px; color: var(--wx-text-muted); border-bottom: 1px solid var(--wx-divider); }
 .wx-empty-tip:last-child { border-bottom: 0; }
@@ -1317,6 +1320,8 @@ select:focus-visible, [tabindex]:focus-visible {
 
 /* ================== Tauri mobile viewport / safe areas ================== */
 @media (max-width: 760px) {
+
+  .wx-settings-main-body { padding-right: max(12px, env(safe-area-inset-right, 0px)); padding-left: max(12px, env(safe-area-inset-left, 0px)); }
   .wx-page {
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);

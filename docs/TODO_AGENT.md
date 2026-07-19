@@ -25,6 +25,8 @@
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
 
+- [ ] 设置页继续观察真实设备滚动性能；如仍有卡顿，再针对具体组件做 profiling，避免盲目增加缓存。
+
 ### P0 — 性能快赢包（SDD-P0-10，规格：`docs/sdd/09-performance-and-realtime.md`）— **Implemented 2026-07-18**
 
 - [x] PERF-001 前端刷新间隔解除 30s 钳制，默认 5s，越界钳 [3,300]
