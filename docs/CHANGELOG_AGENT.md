@@ -20,6 +20,12 @@
 - Python `248 passed`（新增 test_auto_reply_worker.py、test_translation_singleton.py）；Web `95 passed` + Vite build；Bridge `75 passed` + lint；changed-files ruff check/format、`git diff --check` 全部通过。
 - 计划：`docs/plans/2026-07-18-perf-quick-wins.md`。
 
+## 2026-07-19：性能分支合并前审查修复消息对账引用稳定性
+
+- 审查 `PERF-008` 时复现：`sameMessageList` 仅比较字段白名单，服务器更新 `platform_message_id`、`media_metadata` 等字段时可能错误复用旧数组，导致真实回执或媒体变化不进入 React 状态。
+- `sameMessageList` 改为比较完整 JSON-like 消息结构；语义完全相同时仍保持原数组引用，任意嵌套字段变化时返回新数组。
+- 新增回归测试覆盖平台消息 ID 与媒体元数据同时变化；验证 focused Web 27 passed、Web 全量 96 passed、Vite build 通过。
+
 ## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
 ### 翻译与预览链路

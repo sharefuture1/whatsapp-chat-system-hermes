@@ -100,19 +100,21 @@ export function mergeFreshMessages(serverItems, currentItems) {
   return sameMessageList(next, currentItems) ? currentItems : next
 }
 
-const MESSAGE_IDENTITY_FIELDS = [
-  'message_id', 'content', 'role', 'timestamp', 'status',
-  'translated', 'lang', 'translation_status',
-  'sent', 'pending', 'failed', 'hidden',
-]
+function sameMessageValue(a, b) {
+  if (Object.is(a, b)) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameMessageValue(a[key], b[key]))
+}
 
 export function sameMessageList(a, b) {
   if (a === b) return true
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
   for (let i = 0; i < a.length; i += 1) {
-    for (const field of MESSAGE_IDENTITY_FIELDS) {
-      if ((a[i]?.[field] ?? null) !== (b[i]?.[field] ?? null)) return false
-    }
+    if (!sameMessageValue(a[i], b[i])) return false
   }
   return true
 }

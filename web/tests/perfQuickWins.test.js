@@ -47,6 +47,26 @@ test('PERF-008: sameMessageList detects field-level changes', () => {
   assert.equal(sameMessageList(a, b), false)
 })
 
+test('PERF-008: mergeFreshMessages preserves server reconciliation and media changes', () => {
+  const current = [{
+    message_id: '1',
+    role: 'assistant',
+    content: 'x',
+    status: 'sent',
+    platform_message_id: null,
+    media_metadata: { url: 'old' },
+  }]
+  const server = [{
+    ...current[0],
+    platform_message_id: 'wa-1',
+    media_metadata: { url: 'new' },
+  }]
+  const merged = mergeFreshMessages(server, current)
+  assert.notEqual(merged, current)
+  assert.equal(merged[0].platform_message_id, 'wa-1')
+  assert.deepEqual(merged[0].media_metadata, { url: 'new' })
+})
+
 test('PERF-008: conversation cache writes are deferred off the critical path', () => {
   const cache = read('chatCache.js')
   assert.match(cache, /requestIdleCallback/)
