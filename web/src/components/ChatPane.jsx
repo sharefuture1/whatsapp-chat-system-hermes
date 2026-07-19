@@ -117,6 +117,7 @@ export default function ChatPane({
   standalone = false,
   accountLabel = '',
   accountName = '',
+  accountStatus = 'offline',
   platform = '',
   userName,
   contactProfile,
@@ -228,7 +229,7 @@ export default function ChatPane({
     setContactSaved(false)
   }, [userId, userOverride, contactProfile])
 
-  const fetchPage = async (targetUserId, p, appendOlder = false) => {
+  const fetchPage = async (targetUserId, p, appendOlder = false, { cachePolicy = 'cache-first' } = {}) => {
     if (!targetUserId) return null
     const request = requestTracker.current.begin(targetUserId)
     const cursor = standalone && appendOlder ? standaloneCursorRef.current : null
@@ -325,7 +326,7 @@ export default function ChatPane({
     const targetUserId = userId
     if (conversationId) {
       const wasAtBottom = lastBottomRef.current
-      fetchPage(targetUserId, 1, false).then(res => {
+      fetchPage(targetUserId, 1, false, { cachePolicy: 'network-first' }).then(res => {
         if (res && wasAtBottom) lastBottomRef.current = true
       }).catch(() => {})
       return
@@ -421,7 +422,7 @@ export default function ChatPane({
       for (let attempt = 0; attempt < 3; attempt += 1) {
         if (signal.aborted || generation !== translationGenerationRef.current) return false
         await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 350 : 700))
-        const refreshed = await fetchPage(userId, page || 1, false)
+        const refreshed = await fetchPage(userId, page || 1, false, { cachePolicy: 'network-first' })
         if (!refreshed?.messages?.length) continue
         const translatedNow = refreshed.messages.some(item => item.message_id === anchorMessage.message_id && item.translated)
         if (translatedNow) {
@@ -724,8 +725,6 @@ export default function ChatPane({
 
   const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
   const headerTitle = contactProfile?.remark || userName
-  const accountStatus = activeAccount?.status || 'offline'
-
   return (
     <section className={`wx-chat is-active${active ? '' : ''}`}>
       <div className="wx-chat-header">
@@ -750,7 +749,7 @@ export default function ChatPane({
             <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
           </button>
           {headerMenuOpen ? <div className="wx-chat-overflow-menu">
-            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh') || '刷新'}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false, { cachePolicy: 'network-first' }).catch(() => {}) }}>{t('refresh') || '刷新'}</button>
             <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails') || '聊天详情'}</button>
             <button type="button" onClick={openPersonaPicker}>{t('personaPicker')}</button>
             <div className="wx-menu-divider"/>

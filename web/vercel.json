@@ -4,6 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/(.*)", "destination": "https://whats.future1.us/api/$1" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

@@ -2,12 +2,30 @@
 
 ## 当前优先级排序
 
+### P0 — Tauri 2 桌面安装包自动构建
+
+- [>] **GitHub Actions 自动构建测试安装包（FR-DESKTOP-001）**
+  - [x] Tauri 2 薄壳、最小 HTTP capability 与 Browser/Tauri 双模式构建
+  - [x] 旧 Session、AI URL/key、设置读取权限安全修复
+  - [x] Tauri token 内存化、缓存按用户隔离与 logout 清理
+  - [x] `Cargo.lock` 与多平台图标
+  - [x] Linux `.deb/.AppImage`、Windows NSIS、macOS `.dmg` Actions 矩阵
+  - [x] 本机 Linux `.deb` 构建完成
+  - [ ] GitHub 三平台 workflow 全部绿色并产生 artifacts
+  - [ ] 对应系统安装、启动、登录、翻译和注销冒烟测试
+  - [ ] 正式发布签名/notarization（当前仅未签名内部测试包）
+  - SDD：`docs/sdd/11-tauri-desktop-distribution.md`
+  - 计划：`docs/plans/2026-07-16-tauri-desktop-installers.md`
+
+
 ### P0 — 运维安全（需人工在生产执行）
 
-- [x] **轮换生产登录密码**：2026-07-15 已完成轮换并 curl 验证 200 ✅（密码值不入 Git——SDD 总纲安全纪律；此前本行曾写入明文，已于 2026-07-18 移除，该密码应再次轮换）
-  - 注意：生产密码变更后，Vercel 前端 `wt.v.future1.us` 登录凭据需同步更新
+- [ ] **按凭据泄露流程再次轮换生产登录密码**：历史凭据曾进入版本库，须立即轮换并撤销现有会话；完成后只记录时间与负责人，不记录密码值
+  - 注意：前后端部署环境应通过密钥管理系统同步凭据；清理 Git 历史及外部副本，并在提交前运行秘密扫描
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
+
+- [ ] 设置页继续观察真实设备滚动性能；如仍有卡顿，再针对具体组件做 profiling，避免盲目增加缓存。
 
 ### P0 — 性能快赢包（SDD-P0-10，规格：`docs/sdd/09-performance-and-realtime.md`）— **Implemented 2026-07-18**
 

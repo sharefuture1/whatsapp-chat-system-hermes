@@ -1,0 +1,23 @@
+{
+  "name": "whatsapp-chat-system-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:build:tauri": "npm --prefix web run build:tauri",
+    "tauri": "tauri",
+    "tauri:validate": "node scripts/validate-tauri.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:android:init": "tauri android init",
+    "tauri:android:dev": "tauri android dev",
+    "tauri:android:build": "tauri android build",
+    "tauri:ios:init": "tauri ios init",
+    "tauri:ios:dev": "tauri ios dev",
+    "tauri:ios:build": "tauri ios build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

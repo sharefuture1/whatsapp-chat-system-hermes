@@ -18,6 +18,7 @@ This project now acts as a conversation-first control surface for Hermes profile
 - conversation memory generation
 - configurable admin delivery channels
 - Vercel-ready frontend that can call a remote backend API
+- Tauri 2 thin-client shell for Windows, macOS, Linux, Android, and iOS
 - self-hosted production mode with built SPA mounted by FastAPI or served by nginx
 
 ## Current UI model
@@ -90,8 +91,13 @@ web/src/
     SettingsPanel.jsx
     TabBar.jsx
 
+src-tauri/
+  tauri.conf.json           desktop/mobile shell and CSP
+  capabilities/main.json   least-privilege remote API access
+  src/                      Rust entrypoints
+
 deploy/
-  apply-production.sh       build + install + restart helper
+  apply-production.sh       blocked legacy helper
   nginx/                    sample reverse-proxy config
   systemd/                  production unit file
 
@@ -111,17 +117,18 @@ tests/
 ### Backend
 
 ```bash
-cd /root/whatsapp-chat-system
-./.venv/bin/python -m whatsapp_chat_system.cli \
-  --profile /root/.hermes/profiles/whatsapp-support \
-  serve --host 127.0.0.1 --port 8792
+export DATABASE_URL='postgresql+psycopg://...'
+export WHATSAPP_BRIDGE_INTERNAL_TOKEN='set-in-your-local-secret-store'
+export CHAT_SYSTEM_BOOTSTRAP_PASSWORD='at-least-12-characters'
+uv sync --locked --group dev
+uv run whatsapp-chat-system serve --host 127.0.0.1 --port 8792
 ```
 
 ### Frontend
 
 ```bash
-cd /root/whatsapp-chat-system/web
-npm run dev -- --host 127.0.0.1 --port 38998
+npm ci --prefix web
+npm run dev --prefix web
 ```
 
 Open:
@@ -129,29 +136,28 @@ Open:
 
 ## Production deployment
 
-Frontend must be built before production startup:
+Frontend must be built before production startup. The supported standalone
+installation path is `/opt/whatsapp-chat-system`:
 
 ```bash
-cd /var/www/whatsapp-chat-system
-npm --prefix web ci
-npm --prefix web run build
+cd /opt/whatsapp-chat-system
+npm ci --prefix web
+npm run build --prefix web
 ```
 
-Then run either:
+Run the API with deployment secrets supplied by
+`/etc/whatsapp-chat-system/api.env` (or an equivalent secret store):
 
-1. FastAPI-mounted SPA mode
 ```bash
-CHAT_SYSTEM_WEB_DIST=/var/www/whatsapp-chat-system/web/dist \
-/var/www/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli \
-  --profile /root/.hermes/profiles/whatsapp-support \
-  serve --host 127.0.0.1 --port 8792 --web-dist /var/www/whatsapp-chat-system/web/dist
+/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli \
+  serve --host 127.0.0.1 --port 8792 \
+  --web-dist /opt/whatsapp-chat-system/web/dist
 ```
 
-2. systemd-managed mode
-```bash
-cd /var/www/whatsapp-chat-system
-bash deploy/apply-production.sh
-```
+The reviewed service definitions are in `deploy/systemd/`; nginx serves the
+same `web/dist` path from `deploy/nginx/whats.future1.us.conf`. The historical
+`deploy/apply-production.sh` is intentionally blocked and must not be used for
+the standalone cutover.
 
 This production path removes dependence on:
 - `npm run dev`
@@ -231,7 +237,8 @@ Production frontend host:
 - `https://whats.future1.us`
 
 Frontend production API base:
-- `VITE_API_BASE=https://whats.future1.us/api`
+- browser build: same-origin `/api`
+- packaged Tauri build: `https://whats.future1.us/api`
 
 Repo root `vercel.json` is configured to:
 - build only `web/`
@@ -243,21 +250,47 @@ That means the deployed frontend should still reach the backend API as long as:
 - `https://whats.future1.us/api/...` is reachable from the public internet
 - the backend is running on the host and proxied correctly
 
+## Tauri 2 desktop test installers
+
+The packaged desktop application is a Tauri 2 thin client: React/Vite runs in
+Tauri while FastAPI, PostgreSQL, and the WhatsApp Bridge remain on the server.
+The current verified scope targets Linux, Windows, and macOS test installers.
+Android and iOS remain future targets and are not release-verified.
+
+```bash
+npm ci
+npm ci --prefix web
+npm run tauri:dev
+npm run tauri:build
+```
+
+GitHub Actions automatically builds and uploads unsigned internal-test artifacts:
+
+- Linux x64: `.deb` and `.AppImage`
+- Windows x64: NSIS `.exe`
+- macOS: `.dmg`
+
+Use the **Tauri installers** workflow or push relevant changes to `main` or the
+Tauri development branch. Platform signing, Apple notarization, and store
+release approval are separate mandatory gates.
+
+See `docs/TAURI2.md` and `docs/sdd/11-tauri-desktop-distribution.md` for the
+security model, build prerequisites, and release-readiness gates.
+
 ## Testing
 
 Backend tests:
 
 ```bash
-cd /root/whatsapp-chat-system
-./.venv/bin/pytest -q
+uv run --group dev pytest -q
 ```
 
 Frontend build verification:
 
 ```bash
-cd /root/whatsapp-chat-system
-npm --prefix web ci
-npm --prefix web run build
+npm ci --prefix web
+npm run build --prefix web
+npm run web:build:tauri
 ```
 
 Runtime verification:

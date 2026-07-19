@@ -1,3 +1,11 @@
+## 2026-07-19：PR #2 rebase 冲突收敛
+
+- 将 Tauri/RBAC 安全加固分支 rebase 到已合入 SDD-P0-10 性能快赢包的最新 `main`。
+- 冲突解决保留 PERF-001 的 3–300 秒刷新合同、PERF-008 的缓存仅作首屏骨架语义，以及 Tauri 的对象级账号鉴权和消息源内容一致性校验。
+- Tauri SDD 由重复编号 `09` 调整为 `11-tauri-desktop-distribution.md`，并更新 README、决策、计划和 TODO 引用。
+- Discover 继续遵循 SDD-P1-11：只展示运营概览，人设目录保留在聊天 picker；补齐中文 `addRuleForContact/addRule` 文案。
+- Bridge 409 契约收敛为：无明确错误体的 409 保留重试；仅 `retryable=false` 的终态冲突进入 dead-letter。
+
 ## 2026-07-18：SDD-P0-10 性能快赢包落地 + 上游三端测试修复
 
 ### 性能（规格：`docs/sdd/09-performance-and-realtime.md`）
@@ -25,6 +33,18 @@
 - 审查 `PERF-008` 时复现：`sameMessageList` 仅比较字段白名单，服务器更新 `platform_message_id`、`media_metadata` 等字段时可能错误复用旧数组，导致真实回执或媒体变化不进入 React 状态。
 - `sameMessageList` 改为比较完整 JSON-like 消息结构；语义完全相同时仍保持原数组引用，任意嵌套字段变化时返回新数组。
 - 新增回归测试覆盖平台消息 ID 与媒体元数据同时变化；验证 focused Web 27 passed、Web 全量 96 passed、Vite build 通过。
+
+## 2026-07-16：Tauri 2 安全加固与 GitHub 自动安装包工作流
+
+- 新增 `docs/sdd/11-tauri-desktop-distribution.md` 与实施计划，冻结桌面薄客户端、测试安装包和签名边界。
+- 修复旧格式 Session 缺少 username 时默认 admin 的提权问题；admin 仅在真实登录迁移时写入显式角色。
+- AI Base URL 变化必须同请求提交新 API key，阻止旧密钥被发送到新公网主机。
+- 完整 settings/AI settings 改为 admin-only；operator/viewer 使用不含 URL、key hint、channels/aliases 的最小 capabilities DTO。
+- Tauri 模式 session token 不再写入 localStorage，消息与翻译缓存仅保存在内存；浏览器缓存升级为按用户名隔离，logout 时清理。
+- Tauri HTTP capability 收紧到 `https://whats.future1.us/api/**`，浏览器和 Tauri 均使用已验证绝对 API base。
+- 生成并提交 `src-tauri/Cargo.lock`、桌面/移动图标和 bundle icon 配置；Linux `cargo check --locked` 及 `.deb` 本机构建已真实通过。
+- 新增 `.github/workflows/tauri-build.yml`：Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg` 自动构建并上传 Actions artifacts。
+- 安装包当前未签名，仅供内部测试；Android/iOS 尚不在完成范围。
 
 ## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
@@ -739,3 +759,9 @@ curl / → 200 text/html ✅
 - **当前线上 CSS**：`index-CJfNWq4L.css`（42KB）
 - **后端日志**：`/tmp/whatsapp-live.log`
 - **后端测试**：`43 passed, 1 failed`（早期遗留 i18n key 缺失）
+# 2026-07-19：设置页布局与渲染性能收敛
+
+- 设置主页增加独立滚动容器、分组间距与桌面最大宽度，移动端适配安全区，避免内容拥挤和溢出。
+- 设置壳与分组启用布局/绘制隔离和 `content-visibility`，降低切换设置页时的无关布局开销。
+- 变更文件：`web/src/components/SettingsPage.jsx`、`web/src/styles.css`。
+- 验证：Vite build 通过；设置/性能/无障碍相关 Web 测试 11 项通过。

@@ -118,7 +118,19 @@ export class EventSink {
     }
 
     if (response.status === 409) {
-      await this.spool.deadLetter(claim, { error: 'HTTP 409 event_conflict' });
+      let body = null;
+      try {
+        body = await response.json();
+      } catch {
+        // A 409 without an explicit terminal contract is safe to retry. This
+        // covers the normal race where a receipt arrives before the API has
+        // persisted the outbound WhatsApp message ID.
+      }
+      if (body?.error?.retryable === false) {
+        await this.spool.deadLetter(claim, { error: 'HTTP 409 non_retryable' });
+        return false;
+      }
+      await this.#retain(claim, 'HTTP 409 retryable');
       return false;
     }
 

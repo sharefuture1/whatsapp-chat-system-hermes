@@ -77,7 +77,7 @@ test('composer measures scrollHeight and exposes three direct mode choices', () 
 test('settings modal becomes a full screen page on mobile with scrollable content and a horizontal tab bar [UX-012]', () => {
   const css = read('styles.css')
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.modal-backdrop \{[^}]*padding: 0/)
-  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.modal \{[^}]*width: 100vw[^}]*height: 100dvh[^}]*border-radius: 0/)
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.modal \{[^}]*width: 100%[^}]*height: var\(--app-viewport-height\)[^}]*border-radius: 0/)
   assert.match(css, /\.wx-settings-layout \{[^}]*overflow: hidden/)
   assert.match(css, /\.modal-body \{[^}]*min-height: 0[^}]*overflow: auto/)
   assert.match(css, /\.wx-settings-nav \{[^}]*overflow-x: auto[^}]*overflow-y: hidden/)

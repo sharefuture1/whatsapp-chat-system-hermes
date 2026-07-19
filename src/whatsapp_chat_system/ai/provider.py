@@ -184,6 +184,7 @@ class WendingAIProvider:
                     },
                     json=payload,
                     timeout=timeout,
+                    allow_redirects=False,
                 )
             except requests.Timeout as exc:
                 error = AIProviderError(

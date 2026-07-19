@@ -241,9 +241,11 @@ export class AccountSession {
           });
       });
       socket.ev.on('messages.update', (updates) => {
+        const occurrenceId = randomUUID();
         this.eventWork = this.eventWork
           .then(async () => {
             if (generation !== this.generation) return;
+            let occurrenceIndex = 0;
             for (const update of updates ?? []) {
               const receipt = normalizeReceipt(update, this.now);
               if (!receipt) continue;
@@ -251,7 +253,7 @@ export class AccountSession {
               await this.#emitEvent(
                 receipt.eventType,
                 receipt.payload,
-                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}:${randomUUID()}`,
+                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}:${occurrenceId}:${occurrenceIndex++}`,
               );
             }
           })

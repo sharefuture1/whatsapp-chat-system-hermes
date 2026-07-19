@@ -932,7 +932,8 @@ def _build_standalone_app(
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
-    # authz.py 的 RBAC 依赖 app.state.runtime；standalone_api 与此处必须同步设置
+    # V1 object routers resolve role and account scope from the app runtime.
+    # Keep this compatibility builder aligned with standalone_api.build_standalone_app.
     app.state.runtime = runtime
     app.add_middleware(
         CORSMiddleware,
@@ -986,7 +987,18 @@ def _build_standalone_app(
         token = secrets.token_urlsafe(24)
         ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(runtime.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(runtime.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        runtime.web_settings["users"] = users
         runtime.web_settings["sessions"] = sessions
         _save_runtime_settings(runtime)
         return {"success": True, "session_token": token, "expires_in": ttl}
@@ -1262,7 +1274,9 @@ def build_app(
             await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
-    # authz.py 的 RBAC 读 app.state.runtime.web_settings；legacy 模式下由 config 提供同构接口
+    # V1 routers resolve the authenticated user's role and account scope from
+    # the app runtime. Keep the legacy factory compatible while callers are
+    # migrated to the standalone production factory.
     app.state.runtime = config
     app.add_middleware(
         CORSMiddleware,
@@ -1336,7 +1350,18 @@ def build_app(
         token = secrets.token_urlsafe(24)
         ttl = int(config.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(config.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(config.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        config.web_settings["users"] = users
         config.web_settings["sessions"] = sessions
         save_json(config.paths.web_settings_file, config.web_settings)
         return {"success": True, "session_token": token, "expires_in": ttl}
@@ -1699,8 +1724,10 @@ def build_app(
     def settings() -> dict[str, Any]:
         safe_web_settings = dict(config.web_settings)
         safe_web_settings.pop("auth", None)
+        safe_web_settings.pop("auth_policy", None)
         safe_web_settings.pop("sessions", None)
         safe_web_settings.pop("login_attempts", None)
+        safe_web_settings.pop("users", None)
         account_model = str(
             (config.web_settings.get("reply") or {}).get("ai_model") or ""
         ).strip()

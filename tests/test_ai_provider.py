@@ -108,9 +108,11 @@ class _FakeSession:
     def __init__(self, outcomes: list[object]) -> None:
         self.outcomes = list(outcomes)
         self.calls = 0
+        self.kwargs: list[dict[str, object]] = []
 
     def post(self, *args, **kwargs):
         self.calls += 1
+        self.kwargs.append(kwargs)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
@@ -136,6 +138,7 @@ def test_provider_maps_http_errors_and_retries_only_retryable(
         provider.chat(model="m", messages=[])
 
     assert session.calls == expected_calls
+    assert all(call["allow_redirects"] is False for call in session.kwargs)
     assert caught.value.code == code
     assert caught.value.retryable is retryable
     assert caught.value.status_code == status

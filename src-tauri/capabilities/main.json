@@ -1,0 +1,15 @@
+{
+  "identifier": "main",
+  "description": "Minimum permissions for the bundled Hermes web console",
+  "windows": ["main"],
+  "permissions": [
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://whats.future1.us/api/**"
+        }
+      ]
+    }
+  ]
+}

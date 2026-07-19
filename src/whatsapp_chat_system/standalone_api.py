@@ -354,7 +354,7 @@ def build_standalone_app(
     from .api.v1.messages import create_messages_router as _create_messages_router
 
     app.include_router(create_settings_router(runtime, factory))
-    app.include_router(create_operations_router(factory))
+    app.include_router(create_operations_router(runtime, factory))
     app.include_router(_create_users_router(runtime))
     app.include_router(_create_messages_router())
 
@@ -453,21 +453,19 @@ def build_standalone_app(
 
     @app.get("/api/v1/me")
     def get_me(request: Request) -> dict[str, Any]:
+        from whatsapp_chat_system.authz import get_current_user_record
+
+        user = get_current_user_record(runtime, request)
         token = request.headers.get("x-session-token", "")
-        sessions = dict(runtime.web_settings.get("sessions") or {})
-        session = sessions.get(token)
-        if not session:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        now = time.time()
-        if float(session.get("expires_at", 0)) < now:
-            raise HTTPException(status_code=401, detail="Session expired")
-        username = session.get("username", "admin")
-        users: dict[str, Any] = runtime.web_settings.get("users") or {}
-        user = users.get(username, {})
+        session = (runtime.web_settings.get("sessions") or {}).get(token) or {}
         return {
-            "username": username,
-            "role": user.get("role", "admin"),  # admin | operator | viewer
-            "allowed_account_ids": [str(x).strip() for x in (user.get('allowed_account_ids') or []) if str(x).strip()],
+            "username": user["username"],
+            "role": user.get("role"),
+            "allowed_account_ids": [
+                str(x).strip()
+                for x in (user.get("allowed_account_ids") or [])
+                if str(x).strip()
+            ],
             "session_expires_at": session.get("expires_at"),
         }
 
@@ -514,13 +512,23 @@ def build_standalone_app(
                 ):
                     users["admin"] = dict(legacy_auth)
                     users["admin"].setdefault("created_at", time.time())
+                    users["admin"]["role"] = "admin"
+                    users["admin"].setdefault("allowed_account_ids", [])
                     runtime.web_settings["users"] = users
                     save_runtime_settings(runtime)
 
             user_record: dict[str, Any] | None = users.get(username)
             # Backward compat: also accept legacy auth (single shared password)
             if not user_record and username == "admin":
-                user_record = runtime.web_settings.get("auth")
+                legacy_record = runtime.web_settings.get("auth")
+                if legacy_record:
+                    user_record = dict(legacy_record)
+                    user_record["role"] = "admin"
+                    user_record.setdefault("allowed_account_ids", [])
+                    user_record.setdefault("created_at", time.time())
+                    users["admin"] = user_record
+                    runtime.web_settings["users"] = users
+                    save_runtime_settings(runtime)
             if not user_record or not _verify_password(user_record, payload.password):
                 recent.append(now)
                 attempt_map[client_ip] = recent
@@ -529,6 +537,13 @@ def build_standalone_app(
                 raise HTTPException(
                     status_code=401, detail="Invalid username or password"
                 )
+
+            if username == "admin" and user_record.get("role") != "admin":
+                user_record["role"] = "admin"
+                user_record.setdefault("allowed_account_ids", [])
+                users[username] = user_record
+                runtime.web_settings["users"] = users
+                save_runtime_settings(runtime)
 
             # If password_change_required, return flag so frontend forces a change
             needs_password_change = False
