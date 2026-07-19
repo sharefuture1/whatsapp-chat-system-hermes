@@ -16,18 +16,15 @@ function readLocaleKeys(source, locale) {
   return [...source.slice(start, end).matchAll(/^    ([A-Za-z][A-Za-z0-9_]*):/gm)].map(match => match[1])
 }
 
-test('Discover exposes the API-backed controlled persona library [FR-PLG-007]', () => {
-  const source = read('components/DiscoverPage.jsx')
+test('Persona catalog stays API-backed via the chat picker; Discover no longer embeds it [FR-PLG-007 / SDD-P1-11]', () => {
   const module = read('personas.js')
   assert.match(module, /fetchPersonaCatalog/)
   assert.match(module, /\/v1\/personas/)
-  assert.match(source, /fetchPersonaCatalog/)
-  assert.match(source, /wx-persona-library/)
-  assert.match(source, /wx-persona-card/)
-  assert.match(source, /persona\.name/)
-  assert.match(source, /persona\.description/)
-  assert.match(source, /personas\.available/)
-  assert.match(source, /personaLibrary/)
+  // SDD-P1-11：Discover 仅保留运营概览，人设目录迁移到聊天页头部 picker
+  const discover = read('components/DiscoverPage.jsx')
+  assert.doesNotMatch(discover, /fetchPersonaCatalog/)
+  const chatPane = read('components/ChatPane.jsx')
+  assert.match(chatPane, /fetchPersonaCatalog/)
 })
 
 test('Chat persona picker assigns only the active contact and shows preview persona [FR-PLG-008]', () => {

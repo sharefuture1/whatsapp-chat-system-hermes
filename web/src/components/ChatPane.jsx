@@ -6,7 +6,6 @@ import {
   saveConversationCache,
   loadTranslationCache,
   saveTranslationCache,
-  isConversationCacheFresh,
 } from '../chatCache'
 import { useSettings } from '../settings'
 import { fmtClock } from '../format'
@@ -248,10 +247,7 @@ export default function ChatPane({
       setTotal(cached.total_messages || cachedMessages.length)
       setInitialLoading(false)
     }
-    if (cachedMessages.length && isConversationCacheFresh(cached) && !appendOlder) {
-      fetchedFor.current = targetUserId
-      return { messages: cachedMessages, total_messages: cached.total_messages || cachedMessages.length, has_more: cached.has_more, next_cursor: cached.next_cursor }
-    }
+    // PERF-008：本地缓存只作首屏骨架，永远并行发起服务端校验请求，不做"新鲜即跳过网络"短路
     const res = await api.get(endpoint)
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
     const items = standalone ? (res.messages || []).slice() : (res.messages || []).slice().reverse()

@@ -95,7 +95,28 @@ export function mergeFreshMessages(serverItems, currentItems) {
     if (platformId && serverPlatformIds.has(platformId)) return false
     return !serverKeys.has(`${item.role}:${item.content}`)
   })
-  return [...mergedServer, ...unresolvedLocal]
+  const next = [...mergedServer, ...unresolvedLocal]
+  // PERF-008：数据等价时返回原数组引用，避免每轮轮询触发整列表重渲染
+  return sameMessageList(next, currentItems) ? currentItems : next
+}
+
+function sameMessageValue(a, b) {
+  if (Object.is(a, b)) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameMessageValue(a[key], b[key]))
+}
+
+export function sameMessageList(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (!sameMessageValue(a[i], b[i])) return false
+  }
+  return true
 }
 
 export function commitMessagesUpdate(messagesRef, setMessages, updater) {

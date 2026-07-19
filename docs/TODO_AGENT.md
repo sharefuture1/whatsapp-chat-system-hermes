@@ -4,10 +4,30 @@
 
 ### P0 — 运维安全（需人工在生产执行）
 
-- [x] **轮换生产登录密码**：2026-07-15 admin 密码已改为 `justtest?99`，通过 curl 验证 200 ✅
-  - 注意：生产密码已变更，Vercel 前端 `wt.v.future1.us` 登录凭据同步更新
+- [x] **轮换生产登录密码**：2026-07-15 已完成轮换并 curl 验证 200 ✅（密码值不入 Git——SDD 总纲安全纪律；此前本行曾写入明文，已于 2026-07-18 移除，该密码应再次轮换）
+  - 注意：生产密码变更后，Vercel 前端 `wt.v.future1.us` 登录凭据需同步更新
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
+
+### P0 — 性能快赢包（SDD-P0-10，规格：`docs/sdd/09-performance-and-realtime.md`）— **Implemented 2026-07-18**
+
+- [x] PERF-001 前端刷新间隔解除 30s 钳制，默认 5s，越界钳 [3,300]
+- [x] PERF-002 轮询拆除 contacts（按需拉取）、会话页 50 条；`updated_since` 增量并入 SDD-P1-12
+- [x] PERF-003 翻译/预览复用 app 级 AI Provider 单例（翻译端点 + TranslationDispatcher）
+- [x] PERF-005 SQLite `journal_mode=WAL` + `busy_timeout=5000`（上游先行落地）
+- [x] PERF-006 AutoReplyWorker 改为"短事务读 → 无 session 调 AI → 短事务重校验后写回"
+- [x] PERF-008 `mergeFreshMessages` 引用稳定；localStorage idle 批量写；缓存不短路网络请求
+- [x] UI：会话列表首载骨架屏
+- [ ] TranslationDispatcher 批处理事务隔离（同 PERF-006 模式，后续）
+
+### P1 — 实时通道与 Vercel 部署（新规格已批准）
+
+- [ ] **SDD-P1-12 SSE 实时事件通道**（RT-001/002/003 + PERF-004 翻译入库 + PERF-007 索引对齐）
+- [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
+  - [ ] `api.js` 接入 `VITE_API_BASE_URL`（自托管行为不变）
+  - [ ] API CORS allowlist 加入 Vercel 生产域；nginx SSE `proxy_buffering off`
+  - [ ] Vercel 环境变量矩阵（Preview 禁止指向生产 API）
+  - [ ] 版本哈希验证 + rollback 演练
 
 ### P0 — 24x7 AI 自动回复
 

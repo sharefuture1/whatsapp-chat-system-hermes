@@ -247,10 +247,11 @@ export class AccountSession {
             for (const update of updates ?? []) {
               const receipt = normalizeReceipt(update, this.now);
               if (!receipt) continue;
+              // 每个 occurrence 生成唯一身份：同内容跨回调不得复用 event_id（SDD 基线）
               await this.#emitEvent(
                 receipt.eventType,
                 receipt.payload,
-                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}`,
+                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}:${randomUUID()}`,
               );
             }
           })

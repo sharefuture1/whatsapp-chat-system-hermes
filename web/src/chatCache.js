@@ -32,8 +32,27 @@ export function loadConversationCache(conversationId) {
   return item
 }
 
-export function saveConversationCache(conversationId, messages, meta = {}) {
-  if (!conversationId || !Array.isArray(messages)) return
+// PERF-008：localStorage 序列化移出关键路径——按会话合并 pending 写入，
+// 在浏览器空闲时批量落盘（requestIdleCallback，降级 setTimeout）。
+const pendingCacheWrites = new Map()
+let cacheFlushScheduled = false
+
+function scheduleCacheFlush() {
+  if (cacheFlushScheduled) return
+  cacheFlushScheduled = true
+  const flush = () => {
+    cacheFlushScheduled = false
+    const entries = Array.from(pendingCacheWrites.entries())
+    pendingCacheWrites.clear()
+    for (const [conversationId, { messages, meta }] of entries) {
+      writeConversationCacheNow(conversationId, messages, meta)
+    }
+  }
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(flush, { timeout: 2000 })
+  else setTimeout(flush, 0)
+}
+
+function writeConversationCacheNow(conversationId, messages, meta = {}) {
   const existing = loadConversationCache(conversationId)
   const merged = new Map((existing?.messages || []).map(item => [String(item.message_id), item]))
   for (const message of messages.slice(-MAX_MESSAGES)) {
@@ -45,6 +64,12 @@ export function saveConversationCache(conversationId, messages, meta = {}) {
     ...meta,
     savedAt: Date.now(),
   })
+}
+
+export function saveConversationCache(conversationId, messages, meta = {}) {
+  if (!conversationId || !Array.isArray(messages)) return
+  pendingCacheWrites.set(String(conversationId), { messages, meta })
+  scheduleCacheFlush()
 }
 
 export function isConversationCacheFresh(item, now = Date.now()) {

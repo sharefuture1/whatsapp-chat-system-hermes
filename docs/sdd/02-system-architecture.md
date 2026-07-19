@@ -258,6 +258,10 @@ whatsapp-chat-worker.service
 
 生产安装、重启、端口探测和 legacy 服务停启不属于本 Task；只能在 MIG-8 的受控切换窗口执行。
 
+### 6.2 前端 Vercel 托管（可选拓扑）
+
+前端 SPA 可迁至 Vercel 托管，后端保持本节 systemd 合同不变；权威规格见 `10-frontend-vercel-deployment.md`（VCL-001~006）。自托管 `CHAT_SYSTEM_WEB_DIST` 模式必须保留为回滚路径。
+
 ## 7. 明确不采用
 
 - 每个 WhatsApp 账号启动一整套 FastAPI；
