@@ -30,11 +30,20 @@ src-tauri/gen/schemas/
 
 # Local env / runtime
 .env
+.env.*
+!.env.example
+!.env.production
+!.env.tauri
+.runtime/
+.backup/
+.tmp/
 *.log
 *.sqlite3
 *.db
 *.db-shm
 *.db-wal
+start-server.sh
+*.local.sh
 
 # Local audit / evidence artifacts
 screenshots/

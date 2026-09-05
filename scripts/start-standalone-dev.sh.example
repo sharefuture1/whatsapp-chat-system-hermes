@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+# Standalone development environment variables
+export CHAT_SYSTEM_RUNTIME_DIR="${CHAT_SYSTEM_RUNTIME_DIR:-$ROOT/.runtime}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:///./data/whatsapp-chat-system.db}"
+export WHATSAPP_BRIDGE_INTERNAL_TOKEN="${WHATSAPP_BRIDGE_INTERNAL_TOKEN:-dev-token-change-me}"
+
+echo "Starting WhatsApp Chat System Standalone API on 127.0.0.1:8792..."
+exec "$ROOT/.venv/bin/python" -m whatsapp_chat_system.cli serve --host 127.0.0.1 --port 8792

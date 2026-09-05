@@ -1,6 +1,8 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-07-16 UTC
+> 最后更新：2026-09-06 UTC
+
+- 2026-09-06：完成项目全景架构深度分析与优化蓝图规划（`docs/ARCHITECTURE_OPTIMIZATION.md`）；安全清理强化 `.gitignore`（隔离 `.runtime/`、`.backup/`、本地运行脚本等敏感资产）；Standalone API 补齐标准 CORS `Authorization` 标头支持；开发启动模板 `scripts/start-standalone-dev.sh.example` 归档。全量自动化测试（Python 263 passed / Web 108 passed / Bridge 76 passed）100% 绿灯。
 
 - 2026-07-19：设置页新增独立滚动与内容渲染隔离，桌面最大宽度 760px，移动端适配安全区；Vite build 与相关 11 项 Web 测试通过。
 

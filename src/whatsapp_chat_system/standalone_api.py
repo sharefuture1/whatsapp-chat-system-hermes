@@ -335,6 +335,7 @@ def build_standalone_app(
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
             "Content-Type",
+            "Authorization",
             "X-Session-Token",
             "X-Request-ID",
             "Idempotency-Key",

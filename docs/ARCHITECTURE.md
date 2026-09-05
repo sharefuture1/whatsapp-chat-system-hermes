@@ -2,6 +2,8 @@
 
 > 权威架构规格：[`docs/sdd/02-system-architecture.md`](./sdd/02-system-architecture.md)
 >
+> 架构深度分析与优化规划：[`docs/ARCHITECTURE_OPTIMIZATION.md`](./ARCHITECTURE_OPTIMIZATION.md)
+>
 > 数据模型：[`docs/sdd/03-data-model.md`](./sdd/03-data-model.md)
 >
 > API/事件：[`docs/sdd/04-api-and-events.md`](./sdd/04-api-and-events.md)
