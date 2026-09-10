@@ -41,13 +41,14 @@ class TranslationMemory:
     def get(self, source: str, source_lang: str) -> str | None:
         """查库，返回翻译或 None（未命中）。"""
         key = self._key(source)
-        entry = self._entries.get(key)
-        if entry is None:
-            return None
-        # 语言也要匹配（老挝语和泰语有些词形相近但意思不同）
-        if entry.source_lang != source_lang:
-            return None
-        return entry.translation
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            # 语言也要匹配（老挝语和泰语有些词形相近但意思不同）
+            if entry.source_lang != source_lang:
+                return None
+            return entry.translation
 
     def put(
         self,
@@ -60,23 +61,26 @@ class TranslationMemory:
     ) -> None:
         """写入/更新一条翻译记录。"""
         key = self._key(source)
-        entry = self._entries.get(key)
         now = now or 0.0
-        if entry is not None:
-            entry.translation = translation
-            entry.source_lang = source_lang
-            entry.corrected = entry.corrected or corrected
-            entry.touch(now)
-        else:
-            self._entries[key] = TranslationEntry(
-                source=source,
-                translation=translation,
-                source_lang=source_lang,
-                count=1,
-                last_seen=now,
-                corrected=corrected,
-            )
-        self._save()
+        # 整个「读-改-写」都在锁内完成：_save_locked 假定调用方已持锁，
+        # 避免并发 put 丢失彼此写入的记录。
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None:
+                entry.translation = translation
+                entry.source_lang = source_lang
+                entry.corrected = entry.corrected or corrected
+                entry.touch(now)
+            else:
+                self._entries[key] = TranslationEntry(
+                    source=source,
+                    translation=translation,
+                    source_lang=source_lang,
+                    count=1,
+                    last_seen=now,
+                    corrected=corrected,
+                )
+            self._save_locked()
 
     def review_update(self, source: str, translation: str, source_lang: str) -> bool:
         """
@@ -84,29 +88,32 @@ class TranslationMemory:
         返回 True 表示更新成功，False 表示找不到对应记录。
         """
         key = self._key(source)
-        entry = self._entries.get(key)
-        if entry is None:
-            return False
-        entry.translation = translation
-        entry.source_lang = source_lang
-        entry.corrected = True
-        self._save()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return False
+            entry.translation = translation
+            entry.source_lang = source_lang
+            entry.corrected = True
+            self._save_locked()
         return True
 
     def unreviewed(self) -> Iterable[TranslationEntry]:
         """返回所有待审核（corrected=False）的记录，按 last_seen 降序。"""
-        return sorted(
-            (e for e in self._entries.values() if not e.corrected),
-            key=lambda e: e.last_seen,
-            reverse=True,
-        )
+        with self._lock:
+            snapshot = [
+                e for e in self._entries.values() if not e.corrected
+            ]
+        return sorted(snapshot, key=lambda e: e.last_seen, reverse=True)
 
     def all(self) -> Iterable[TranslationEntry]:
-        return self._entries.values()
+        with self._lock:
+            return list(self._entries.values())
 
     def stats(self) -> dict:
-        total = len(self._entries)
-        reviewed = sum(1 for e in self._entries.values() if e.corrected)
+        with self._lock:
+            total = len(self._entries)
+            reviewed = sum(1 for e in self._entries.values() if e.corrected)
         return {"total": total, "reviewed": reviewed, "pending": total - reviewed}
 
     # ------------------------------------------------------------------ internals
@@ -122,20 +129,26 @@ class TranslationMemory:
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            for key, val in raw.items():
-                try:
-                    self._entries[key] = TranslationEntry(**val)
-                except Exception:
-                    pass  # 跳过格式损坏的旧记录
+            with self._lock:
+                for key, val in raw.items():
+                    try:
+                        self._entries[key] = TranslationEntry(**val)
+                    except Exception:
+                        pass  # 跳过格式损坏的旧记录
         except Exception:
             pass  # fail-soft：文件损坏则从空库开始
 
     def _save(self) -> None:
         with self._lock:
-            try:
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                data = {k: asdict(v) for k, v in self._entries.items()}
-                with open(self._path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass  # fail-soft：写入失败不影响主流程
+            self._save_locked()
+
+    def _save_locked(self) -> None:
+        """写入磁盘；调用方必须已持有 self._lock（Lock 不可重入）。"""
+
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = {k: asdict(v) for k, v in self._entries.items()}
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass  # fail-soft：写入失败不影响主流程
