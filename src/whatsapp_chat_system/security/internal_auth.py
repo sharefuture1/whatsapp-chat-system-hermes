@@ -92,20 +92,24 @@ class ReplayGuard:
 def verify_internal_token(configured_token: str, presented_token: str | None) -> None:
     if not configured_token:
         raise InternalAuthError(
-            'internal_events_not_configured',
-            'WhatsApp internal event token is not configured',
+            "internal_events_not_configured",
+            "WhatsApp internal event token is not configured",
             status_code=503,
         )
-    if not presented_token or not secrets.compare_digest(configured_token, presented_token):
-        raise InternalAuthError('invalid_internal_token', 'Invalid internal token', status_code=401)
+    if not presented_token or not secrets.compare_digest(
+        configured_token, presented_token
+    ):
+        raise InternalAuthError(
+            "invalid_internal_token", "Invalid internal token", status_code=401
+        )
 
 
 def compute_signature(secret: str, timestamp: str, body: bytes) -> str:
     """计算请求签名，供 API 校验与 Bridge 生成时共用。"""
 
     mac = hmac.new(
-        secret.encode('utf-8'),
-        f'{timestamp}.'.encode('utf-8') + body,
+        secret.encode("utf-8"),
+        f"{timestamp}.".encode("utf-8") + body,
         hashlib.sha256,
     )
     return mac.hexdigest()
@@ -124,14 +128,14 @@ def verify_request_signature(
 
     if not secret:
         raise InternalAuthError(
-            'internal_signature_not_configured',
-            'WhatsApp internal event signature secret is not configured',
+            "internal_signature_not_configured",
+            "WhatsApp internal event signature secret is not configured",
             status_code=503,
         )
     if not headers.timestamp or not headers.signature:
         raise InternalAuthError(
-            'missing_signature',
-            'Missing internal request signature',
+            "missing_signature",
+            "Missing internal request signature",
             status_code=401,
         )
 
@@ -139,7 +143,7 @@ def verify_request_signature(
         presented_at = float(headers.timestamp)
     except (TypeError, ValueError) as exc:
         raise InternalAuthError(
-            'invalid_timestamp', 'Invalid internal request timestamp', status_code=401
+            "invalid_timestamp", "Invalid internal request timestamp", status_code=401
         ) from exc
 
     current = time.time() if now is None else now
@@ -147,21 +151,22 @@ def verify_request_signature(
     # 同时拒绝过于超前与过于滞后的时间戳
     if abs(skew) > max_skew_seconds:
         raise InternalAuthError(
-            'stale_signature',
-            'Internal request timestamp is outside the allowed window',
+            "stale_signature",
+            "Internal request timestamp is outside the allowed window",
             status_code=401,
         )
 
     expected = compute_signature(secret, headers.timestamp, body)
     if not secrets.compare_digest(expected, headers.signature):
         raise InternalAuthError(
-            'invalid_signature', 'Invalid internal request signature', status_code=401
+            "invalid_signature", "Invalid internal request signature", status_code=401
         )
 
     if replay_guard is not None and headers.nonce:
         if not replay_guard.check_and_record(headers.nonce):
             raise InternalAuthError(
-                'replayed_request', 'Internal request nonce was already used',
+                "replayed_request",
+                "Internal request nonce was already used",
                 status_code=401,
             )
 
@@ -170,7 +175,7 @@ def verify_internal_request(
     *,
     configured_token: str,
     headers: InternalAuthHeaders,
-    body: bytes = b'',
+    body: bytes = b"",
     hmac_secret: str | None = None,
     max_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
     replay_guard: ReplayGuard | None = None,
@@ -179,12 +184,12 @@ def verify_internal_request(
     """统一入口：始终校验静态 token；配置了密钥时叠加签名校验。"""
 
     verify_internal_token(configured_token, headers.token)
-    secret = (hmac_secret or '').strip()
+    secret = (hmac_secret or "").strip()
     if not secret:
         # 未配置签名密钥时保持旧行为，但显式告警以便运维启用
         logger.warning(
-            'Internal event endpoint is running without HMAC signature verification; '
-            'set WHATSAPP_BRIDGE_HMAC_SECRET to enable replay-resistant auth'
+            "Internal event endpoint is running without HMAC signature verification; "
+            "set WHATSAPP_BRIDGE_HMAC_SECRET to enable replay-resistant auth"
         )
         return
     verify_request_signature(

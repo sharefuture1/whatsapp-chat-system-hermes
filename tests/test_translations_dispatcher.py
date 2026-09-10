@@ -80,8 +80,13 @@ class _SessionTracker:
 
 
 class _FakeAIService:
-    def __init__(self, tracker: _SessionTracker, *, payload: dict | None = None,
-                 raise_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        tracker: _SessionTracker,
+        *,
+        payload: dict | None = None,
+        raise_error: Exception | None = None,
+    ) -> None:
         self._tracker = tracker
         self._payload = payload
         self._raise = raise_error
@@ -97,9 +102,14 @@ class _FakeAIService:
 
 
 class _FakeWorker:
-    def __init__(self, tracker: _SessionTracker, *, batch_payload: dict | None = None,
-                 batch_error: Exception | None = None,
-                 fallback=None) -> None:
+    def __init__(
+        self,
+        tracker: _SessionTracker,
+        *,
+        batch_payload: dict | None = None,
+        batch_error: Exception | None = None,
+        fallback=None,
+    ) -> None:
         self.phrase_dict: dict[str, str] = {}
         self.ai_service = _FakeAIService(
             tracker, payload=batch_payload, raise_error=batch_error
@@ -176,10 +186,18 @@ def _make_dispatcher(factory, tracker, worker, **config_kwargs):
     return dispatcher
 
 
-def _make_batch(factory, *, anchor_id: str, account_id: str, conversation_id: str,
-                target_lang: str = "zh-CN", window_size: int = 10,
-                status: str = "pending", attempt_count: int = 0,
-                updated_at: datetime | None = None) -> str:
+def _make_batch(
+    factory,
+    *,
+    anchor_id: str,
+    account_id: str,
+    conversation_id: str,
+    target_lang: str = "zh-CN",
+    window_size: int = 10,
+    status: str = "pending",
+    attempt_count: int = 0,
+    updated_at: datetime | None = None,
+) -> str:
     with factory() as session:
         batch = TranslationBatch(
             account_id=account_id,
@@ -200,9 +218,7 @@ def _make_batch(factory, *, anchor_id: str, account_id: str, conversation_id: st
 def test_ai_is_never_called_while_a_db_session_is_open(factory):
     """回归：AI 调用必须发生在事务之外。"""
 
-    anchor, _messages, account_id, conversation_id = _seed(
-        factory, ["hello", "world"]
-    )
+    anchor, _messages, account_id, conversation_id = _seed(factory, ["hello", "world"])
     batch_id = _make_batch(
         factory,
         anchor_id=anchor,
@@ -235,11 +251,11 @@ def test_ai_is_never_called_while_a_db_session_is_open(factory):
 
 
 def test_translations_are_persisted_from_window_result(factory):
-    anchor, messages, account_id, conversation_id = _seed(
-        factory, ["hello", "sawadee"]
-    )
+    anchor, messages, account_id, conversation_id = _seed(factory, ["hello", "sawadee"])
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -273,7 +289,9 @@ def test_chinese_source_skips_ai_entirely(factory):
 
     anchor, messages, account_id, conversation_id = _seed(factory, ["你好世界"])
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -292,7 +310,9 @@ def test_chinese_source_skips_ai_entirely(factory):
 def test_already_completed_translation_is_not_recomputed(factory):
     anchor, messages, account_id, conversation_id = _seed(factory, ["hello"])
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -307,7 +327,9 @@ def test_already_completed_translation_is_not_recomputed(factory):
 
     # 第二个批次针对同一条消息，应识别出已完成而不再调用 AI
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     second_worker = _FakeWorker(tracker, batch_payload={"items": []})
@@ -322,7 +344,9 @@ def test_window_failure_falls_back_per_message(factory):
         factory, ["alpha", "beta", "gamma"]
     )
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -354,7 +378,9 @@ def test_fallback_runs_concurrently(factory):
     texts = [f"msg-{i}" for i in range(8)]
     anchor, _messages, account_id, conversation_id = _seed(factory, texts)
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -368,9 +394,7 @@ def test_fallback_runs_concurrently(factory):
         batch_error=RuntimeError("force fallback"),
         fallback=slow_fallback,
     )
-    dispatcher = _make_dispatcher(
-        factory, tracker, worker, max_fallback_concurrency=8
-    )
+    dispatcher = _make_dispatcher(factory, tracker, worker, max_fallback_concurrency=8)
 
     started = time.monotonic()
     assert dispatcher.run_once() is True
@@ -384,7 +408,9 @@ def test_fallback_runs_concurrently(factory):
 def test_fallback_failure_marks_only_that_message_failed(factory):
     anchor, messages, account_id, conversation_id = _seed(factory, ["ok", "boom"])
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -415,7 +441,9 @@ def test_fallback_exception_does_not_lose_other_messages(factory):
 
     anchor, messages, account_id, conversation_id = _seed(factory, ["keep", "explode"])
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -442,7 +470,9 @@ def test_fallback_exception_does_not_lose_other_messages(factory):
 def test_batch_with_missing_anchor_is_marked_dead(factory):
     anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
     batch_id = _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     # 指向一个不存在的锚点，模拟锚点消息被删除后批次悬空
@@ -471,7 +501,9 @@ def test_translation_failure_marks_batch_failed(factory):
 
     anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
     batch_id = _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -576,11 +608,18 @@ def test_window_is_limited_by_window_size(factory):
         factory, [f"m{i}" for i in range(6)]
     )
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
-        conversation_id=conversation_id, window_size=3,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+        window_size=3,
     )
     tracker = _SessionTracker(factory)
-    worker = _FakeWorker(tracker, batch_payload={"items": []}, fallback=lambda t, _l: _FakeRewrite(message=f"译:{t}"))
+    worker = _FakeWorker(
+        tracker,
+        batch_payload={"items": []},
+        fallback=lambda t, _l: _FakeRewrite(message=f"译:{t}"),
+    )
 
     assert _make_dispatcher(factory, tracker, worker).run_once() is True
 
@@ -595,7 +634,9 @@ def test_peak_open_sessions_stays_at_one(factory):
         factory, [f"m{i}" for i in range(6)]
     )
     _make_batch(
-        factory, anchor_id=anchor, account_id=account_id,
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
         conversation_id=conversation_id,
     )
     tracker = _SessionTracker(factory)
@@ -605,8 +646,11 @@ def test_peak_open_sessions_stays_at_one(factory):
         fallback=lambda t, _l: _FakeRewrite(message=f"译:{t}"),
     )
 
-    assert _make_dispatcher(
-        factory, tracker, worker, max_fallback_concurrency=6
-    ).run_once() is True
+    assert (
+        _make_dispatcher(
+            factory, tracker, worker, max_fallback_concurrency=6
+        ).run_once()
+        is True
+    )
 
     assert tracker.peak_open <= 1, f"会话并发打开数异常：{tracker.peak_open}"

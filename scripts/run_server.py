@@ -79,7 +79,11 @@ def resolve_settings(args: argparse.Namespace) -> dict[str, str]:
 
     runtime_dir = Path(
         os.environ.get("CHAT_SYSTEM_RUNTIME_DIR")
-        or (Path(args.runtime_dir) if args.runtime_dir else ROOT / DEFAULT_RUNTIME_DIRNAME)
+        or (
+            Path(args.runtime_dir)
+            if args.runtime_dir
+            else ROOT / DEFAULT_RUNTIME_DIRNAME
+        )
     ).expanduser()
     ensure_directory(runtime_dir, private=True)
     os.environ["CHAT_SYSTEM_RUNTIME_DIR"] = str(runtime_dir)
@@ -95,9 +99,13 @@ def resolve_settings(args: argparse.Namespace) -> dict[str, str]:
     return {
         "runtime_dir": str(runtime_dir),
         "database_url": database_url,
-        "internal_token": (os.environ.get("WHATSAPP_BRIDGE_INTERNAL_TOKEN") or "").strip(),
+        "internal_token": (
+            os.environ.get("WHATSAPP_BRIDGE_INTERNAL_TOKEN") or ""
+        ).strip(),
         "hmac_secret": (os.environ.get("WHATSAPP_BRIDGE_HMAC_SECRET") or "").strip(),
-        "allowed_origins": (os.environ.get("CHAT_SYSTEM_ALLOWED_ORIGINS") or "").strip(),
+        "allowed_origins": (
+            os.environ.get("CHAT_SYSTEM_ALLOWED_ORIGINS") or ""
+        ).strip(),
         "bridge_url": (os.environ.get("WHATSAPP_BRIDGE_V2_URL") or "").strip(),
         "web_dist": Path(args.web_dist).expanduser() if args.web_dist else None,
     }
@@ -129,7 +137,11 @@ def describe(settings: dict[str, str]) -> list[str]:
     )
     lines.append(
         "事件签名      : "
-        + ("已启用 HMAC" if settings["hmac_secret"] else "未启用（建议设置 WHATSAPP_BRIDGE_HMAC_SECRET）")
+        + (
+            "已启用 HMAC"
+            if settings["hmac_secret"]
+            else "未启用（建议设置 WHATSAPP_BRIDGE_HMAC_SECRET）"
+        )
     )
     lines.append(
         "内部事件 token: " + ("已配置" if settings["internal_token"] else "缺失")
@@ -150,7 +162,10 @@ def validate(settings: dict[str, str]) -> list[str]:
         problems.append(
             "WHATSAPP_BRIDGE_INTERNAL_TOKEN 长度不足 16 位，建议改用更长的随机值。"
         )
-    if settings["hmac_secret"] and settings["hmac_secret"] == settings["internal_token"]:
+    if (
+        settings["hmac_secret"]
+        and settings["hmac_secret"] == settings["internal_token"]
+    ):
         problems.append(
             "WHATSAPP_BRIDGE_HMAC_SECRET 不得与 WHATSAPP_BRIDGE_INTERNAL_TOKEN 相同。"
         )
@@ -222,9 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--migrate", action="store_true", help="启动前执行 alembic upgrade head"
     )
-    parser.add_argument(
-        "--check", action="store_true", help="只打印配置自检结果并退出"
-    )
+    parser.add_argument("--check", action="store_true", help="只打印配置自检结果并退出")
     args = parser.parse_args(argv)
 
     settings = resolve_settings(args)

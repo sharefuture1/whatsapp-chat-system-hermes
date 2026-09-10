@@ -64,7 +64,9 @@ class _MessageOutcome:
     error_message: str | None = None
 
 
-def _chunked(values: Sequence[str], size: int = _DB_QUERY_CHUNK) -> Iterable[Sequence[str]]:
+def _chunked(
+    values: Sequence[str], size: int = _DB_QUERY_CHUNK
+) -> Iterable[Sequence[str]]:
     for start in range(0, len(values), size):
         yield values[start : start + size]
 
@@ -126,7 +128,8 @@ class TranslationDispatcher:
             self.failed_batches += 1
             self.last_error = type(exc).__name__
             logger.exception(
-                "Translation batch persistence failed", extra={"batch_id": plan.batch_id}
+                "Translation batch persistence failed",
+                extra={"batch_id": plan.batch_id},
             )
             self._mark_failed(plan.batch_id, exc)
             return False
@@ -210,9 +213,7 @@ class TranslationDispatcher:
             text = (message.content or "").strip()
             if not text:
                 continue
-            candidates.append(
-                (message, text, self._source_text_hash(text))
-            )
+            candidates.append((message, text, self._source_text_hash(text)))
 
         done = self._completed_pairs(
             session, batch.target_lang, [message.id for message, _, _ in candidates]
@@ -313,9 +314,7 @@ class TranslationDispatcher:
                     _MessageOutcome(
                         message_id=item.message_id,
                         source_lang=source_lang,
-                        translated_text=str(
-                            result.get("translated_text") or ""
-                        )
+                        translated_text=str(result.get("translated_text") or "")
                         or None,
                         status="completed",
                     )

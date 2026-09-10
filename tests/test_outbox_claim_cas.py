@@ -29,6 +29,7 @@ def factory(tmp_path):
         f"sqlite:///{tmp_path / 'outbox.db'}",
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+
     # 与生产一致：启用外键与 WAL
     @event.listens_for(engine, "connect")
     def _pragmas(dbapi_connection, _record):

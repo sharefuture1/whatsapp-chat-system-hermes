@@ -172,7 +172,9 @@ def test_history_batch_selects_do_not_scale_with_item_count(factory):
 
     session_factory, counter = factory
 
-    small_selects, _ = _measure(session_factory, counter, _history_envelope(5, sequence=1))
+    small_selects, _ = _measure(
+        session_factory, counter, _history_envelope(5, sequence=1)
+    )
     large_selects, _ = _measure(
         session_factory, counter, _history_envelope(40, sequence=2)
     )
@@ -214,7 +216,9 @@ def test_contacts_batch_selects_are_constant(factory):
 def test_chats_batch_selects_are_constant(factory):
     session_factory, counter = factory
 
-    small_selects, _ = _measure(session_factory, counter, _chats_envelope(5, sequence=1))
+    small_selects, _ = _measure(
+        session_factory, counter, _chats_envelope(5, sequence=1)
+    )
     large_selects, _ = _measure(
         session_factory, counter, _chats_envelope(40, sequence=2)
     )
@@ -240,7 +244,10 @@ def test_duplicate_remote_jid_within_one_batch_updates_single_row(factory):
                 "schema_version": 1,
                 "items": [
                     {"remote_jid": "dup@s.whatsapp.net", "display_name": "First"},
-                    {"remote_jid": "dup@s.whatsapp.net", "phone_number": "+8613800000000"},
+                    {
+                        "remote_jid": "dup@s.whatsapp.net",
+                        "phone_number": "+8613800000000",
+                    },
                 ],
             },
         }

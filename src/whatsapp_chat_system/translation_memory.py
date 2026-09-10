@@ -101,9 +101,7 @@ class TranslationMemory:
     def unreviewed(self) -> Iterable[TranslationEntry]:
         """返回所有待审核（corrected=False）的记录，按 last_seen 降序。"""
         with self._lock:
-            snapshot = [
-                e for e in self._entries.values() if not e.corrected
-            ]
+            snapshot = [e for e in self._entries.values() if not e.corrected]
         return sorted(snapshot, key=lambda e: e.last_seen, reverse=True)
 
     def all(self) -> Iterable[TranslationEntry]:

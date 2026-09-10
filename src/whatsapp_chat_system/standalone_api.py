@@ -51,7 +51,10 @@ from .runtime import (
     save_runtime_settings,
     session_info as _session_info,  # noqa: F401 -- re-exported for users router
 )
-from .security.internal_auth import InternalAuthError, ReplayGuard as InternalReplayGuard
+from .security.internal_auth import (
+    InternalAuthError,
+    ReplayGuard as InternalReplayGuard,
+)
 
 logger = logging.getLogger(__name__)
 

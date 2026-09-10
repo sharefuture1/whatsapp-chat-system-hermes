@@ -6,13 +6,13 @@ from typing import Mapping
 from urllib.parse import urlsplit, urlunsplit
 
 
-DEFAULT_WENDING_AI_BASE_URL = 'https://wendingai.future1.us/v1'
-DEFAULT_WENDING_AI_MODEL = 'gpt-5.3-codex-spark'
+DEFAULT_WENDING_AI_BASE_URL = "https://wendingai.future1.us/v1"
+DEFAULT_WENDING_AI_MODEL = "gpt-5.3-codex-spark"
 DEFAULT_WENDING_AI_TIMEOUT_SECONDS = 90
 DEFAULT_WENDING_AI_MAX_RETRIES = 2
 MAX_WENDING_AI_TIMEOUT_SECONDS = 300
 MAX_WENDING_AI_RETRIES = 5
-DEFAULT_DATABASE_URL = 'sqlite:///./data/whatsapp-chat-system.db'
+DEFAULT_DATABASE_URL = "sqlite:///./data/whatsapp-chat-system.db"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,9 +22,9 @@ class DatabaseSettings:
     database_url: str = DEFAULT_DATABASE_URL
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> 'DatabaseSettings':
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "DatabaseSettings":
         values = environ if env is None else env
-        raw = (values.get('DATABASE_URL') or '').strip() or DEFAULT_DATABASE_URL
+        raw = (values.get("DATABASE_URL") or "").strip() or DEFAULT_DATABASE_URL
         # 归一化 postgres:// 等写法，避免运行时才因缺驱动报错
         from whatsapp_chat_system.db.url import normalize_database_url
 
@@ -36,27 +36,29 @@ class AISettings:
     """独立于 Hermes profile 的问鼎 AI 运行配置。"""
 
     base_url: str = DEFAULT_WENDING_AI_BASE_URL
-    api_key: str = ''
+    api_key: str = ""
     default_model: str = DEFAULT_WENDING_AI_MODEL
     timeout_seconds: int = DEFAULT_WENDING_AI_TIMEOUT_SECONDS
     max_retries: int = DEFAULT_WENDING_AI_MAX_RETRIES
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> 'AISettings':
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "AISettings":
         values = environ if env is None else env
-        default_model = (values.get('WENDING_AI_DEFAULT_MODEL') or '').strip() or DEFAULT_WENDING_AI_MODEL
+        default_model = (
+            values.get("WENDING_AI_DEFAULT_MODEL") or ""
+        ).strip() or DEFAULT_WENDING_AI_MODEL
         return cls(
-            base_url=_normalize_base_url(values.get('WENDING_AI_BASE_URL')),
-            api_key=(values.get('WENDING_AI_API_KEY') or '').strip(),
+            base_url=_normalize_base_url(values.get("WENDING_AI_BASE_URL")),
+            api_key=(values.get("WENDING_AI_API_KEY") or "").strip(),
             default_model=default_model,
             timeout_seconds=_bounded_int(
-                values.get('WENDING_AI_TIMEOUT_SECONDS'),
+                values.get("WENDING_AI_TIMEOUT_SECONDS"),
                 DEFAULT_WENDING_AI_TIMEOUT_SECONDS,
                 minimum=1,
                 maximum=MAX_WENDING_AI_TIMEOUT_SECONDS,
             ),
             max_retries=_bounded_int(
-                values.get('WENDING_AI_MAX_RETRIES'),
+                values.get("WENDING_AI_MAX_RETRIES"),
                 DEFAULT_WENDING_AI_MAX_RETRIES,
                 minimum=0,
                 maximum=MAX_WENDING_AI_RETRIES,
@@ -65,12 +67,12 @@ class AISettings:
 
     def safe_dict(self) -> dict[str, object]:
         return {
-            'provider': 'wendingai',
-            'base_url': _normalize_base_url(self.base_url),
-            'default_model': self.default_model.strip() or DEFAULT_WENDING_AI_MODEL,
-            'timeout_seconds': self.timeout_seconds,
-            'max_retries': self.max_retries,
-            'api_key_configured': bool(self.api_key.strip()),
+            "provider": "wendingai",
+            "base_url": _normalize_base_url(self.base_url),
+            "default_model": self.default_model.strip() or DEFAULT_WENDING_AI_MODEL,
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+            "api_key_configured": bool(self.api_key.strip()),
         }
 
 
@@ -89,11 +91,11 @@ def _normalize_base_url(raw: str | None) -> str:
         port = parts.port
     except ValueError:
         return DEFAULT_WENDING_AI_BASE_URL
-    if parts.scheme not in {'http', 'https'} or not parts.hostname:
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
         return DEFAULT_WENDING_AI_BASE_URL
     host = parts.hostname
-    if ':' in host and not host.startswith('['):
-        host = f'[{host}]'
-    port_suffix = f':{port}' if port else ''
-    path = '/' + parts.path.strip('/') if parts.path.strip('/') else ''
-    return urlunsplit((parts.scheme, f'{host}{port_suffix}', path, '', '')).rstrip('/')
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port_suffix = f":{port}" if port else ""
+    path = "/" + parts.path.strip("/") if parts.path.strip("/") else ""
+    return urlunsplit((parts.scheme, f"{host}{port_suffix}", path, "", "")).rstrip("/")

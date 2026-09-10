@@ -166,9 +166,7 @@ class OutboxDispatcher:
                         OutboxMessage.status == "claimed",
                         OutboxMessage.lease_owner == self.worker_id,
                     )
-                    .order_by(
-                        OutboxMessage.available_at.asc(), OutboxMessage.id.asc()
-                    )
+                    .order_by(OutboxMessage.available_at.asc(), OutboxMessage.id.asc())
                 )
             )
 

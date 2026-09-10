@@ -91,7 +91,9 @@ def signed_client(tmp_path, monkeypatch):
     client._engine.dispose()  # type: ignore[attr-defined]
 
 
-def _sign(secret: str, body: bytes, *, timestamp: str | None = None, nonce: str | None = None):
+def _sign(
+    secret: str, body: bytes, *, timestamp: str | None = None, nonce: str | None = None
+):
     stamp = timestamp if timestamp is not None else str(int(time.time()))
     headers = {
         "X-Internal-Token": TOKEN,
@@ -184,16 +186,16 @@ def test_far_future_timestamp_is_rejected(signed_client):
 
 def test_replayed_nonce_is_rejected(signed_client):
     first_body = _payload(event_id="evt-a")
-    headers = _sign(
-        SECRET, json.dumps(first_body).encode(), nonce="fixed-nonce"
-    )
+    headers = _sign(SECRET, json.dumps(first_body).encode(), nonce="fixed-nonce")
 
     first = _post(signed_client, first_body, headers)
     # 换一个 event_id 再投一次，但 nonce 相同 → 应判为重放
     second_body = _payload(event_id="evt-b")
-    second = _post(signed_client, second_body, _sign(
-        SECRET, json.dumps(second_body).encode(), nonce="fixed-nonce"
-    ))
+    second = _post(
+        signed_client,
+        second_body,
+        _sign(SECRET, json.dumps(second_body).encode(), nonce="fixed-nonce"),
+    )
 
     assert first.status_code == 200
     assert second.status_code == 401

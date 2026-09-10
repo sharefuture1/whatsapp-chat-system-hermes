@@ -88,7 +88,9 @@ def test_foreign_keys_are_enforced(factory):
 
     with factory() as session:
         session.add(
-            Contact(account_id="00000000-0000-0000-0000-000000000000", remote_jid="x@lid")
+            Contact(
+                account_id="00000000-0000-0000-0000-000000000000", remote_jid="x@lid"
+            )
         )
         with pytest.raises(IntegrityError):
             session.commit()
@@ -193,7 +195,9 @@ def test_row_level_locking_is_available_on_postgres(factory):
 
     with factory() as session:
         session.add(
-            WhatsAppAccount(id="account-lock", name="L", session_ref="account:account-lock")
+            WhatsAppAccount(
+                id="account-lock", name="L", session_ref="account:account-lock"
+            )
         )
         session.commit()
 
@@ -214,7 +218,9 @@ def test_case_insensitive_search_works(factory):
         account = WhatsAppAccount(name="WA", session_ref="sessions/wa")
         session.add(account)
         session.flush()
-        contact = Contact(account_id=account.id, remote_jid="p@lid", display_name="Alice")
+        contact = Contact(
+            account_id=account.id, remote_jid="p@lid", display_name="Alice"
+        )
         session.add(contact)
         session.flush()
         session.add(

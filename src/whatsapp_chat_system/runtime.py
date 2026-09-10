@@ -146,6 +146,7 @@ class StandaloneAISettingsManager:
         if self._ciphertext:
             try:
                 from .ai.crypto import decrypt_api_key
+
                 return decrypt_api_key(self._ciphertext)
             except Exception:
                 return ""

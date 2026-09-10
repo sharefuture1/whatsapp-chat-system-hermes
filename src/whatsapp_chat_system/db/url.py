@@ -85,6 +85,4 @@ def describe_database_url(url: str | None) -> str:
     user = parts.username or ""
     credentials = f"{user}:***@" if user else ""
     database = parts.path.lstrip("/")
-    return urlunsplit(
-        (parts.scheme, f"{credentials}{host}", f"/{database}", "", "")
-    )
+    return urlunsplit((parts.scheme, f"{credentials}{host}", f"/{database}", "", ""))

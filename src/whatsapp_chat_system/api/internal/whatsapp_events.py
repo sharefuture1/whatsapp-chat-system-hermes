@@ -25,23 +25,35 @@ from whatsapp_chat_system.security.internal_auth import (
 
 
 def _request_id(request: Request) -> str:
-    return getattr(request.state, 'request_id', None) or request.headers.get('X-Request-ID') or f'req_{uuid4().hex}'
+    return (
+        getattr(request.state, "request_id", None)
+        or request.headers.get("X-Request-ID")
+        or f"req_{uuid4().hex}"
+    )
 
 
-def error_response(request: Request, code: str, message: str, *, retryable: bool, status_code: int, details=None):
+def error_response(
+    request: Request,
+    code: str,
+    message: str,
+    *,
+    retryable: bool,
+    status_code: int,
+    details=None,
+):
     request_id = _request_id(request)
     return JSONResponse(
         {
-            'error': {
-                'code': code,
-                'message': message,
-                'retryable': retryable,
-                'request_id': request_id,
-                'details': details or {},
+            "error": {
+                "code": code,
+                "message": message,
+                "retryable": retryable,
+                "request_id": request_id,
+                "details": details or {},
             }
         },
         status_code=status_code,
-        headers={'X-Request-ID': request_id},
+        headers={"X-Request-ID": request_id},
     )
 
 
@@ -101,7 +113,7 @@ def create_whatsapp_events_router(
     max_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
     replay_guard: ReplayGuard | None = None,
 ) -> APIRouter:
-    router = APIRouter(prefix='/internal/events', tags=['internal-events'])
+    router = APIRouter(prefix="/internal/events", tags=["internal-events"])
     auth = _make_internal_auth_dependency(
         internal_token=internal_token,
         hmac_secret=hmac_secret,
@@ -109,7 +121,7 @@ def create_whatsapp_events_router(
         replay_guard=replay_guard,
     )
 
-    @router.post('/whatsapp')
+    @router.post("/whatsapp")
     def receive_whatsapp_event(
         request: Request,
         envelope: WhatsAppEventEnvelope,
@@ -123,12 +135,19 @@ def create_whatsapp_events_router(
             session.rollback()
             if isinstance(exc, EventProcessingError):
                 return error_response(
-                    request, exc.code, str(exc), retryable=exc.retryable,
+                    request,
+                    exc.code,
+                    str(exc),
+                    retryable=exc.retryable,
                     status_code=exc.status_code,
                 )
             return error_response(
-                request, 'validation_error', 'Invalid event payload', retryable=False,
-                status_code=422, details={'errors': exc.errors()},
+                request,
+                "validation_error",
+                "Invalid event payload",
+                retryable=False,
+                status_code=422,
+                details={"errors": exc.errors()},
             )
         except IntegrityError:
             session.rollback()
@@ -140,7 +159,10 @@ def create_whatsapp_events_router(
             except EventProcessingError as exc:
                 retry_session.rollback()
                 return error_response(
-                    request, exc.code, str(exc), retryable=exc.retryable,
+                    request,
+                    exc.code,
+                    str(exc),
+                    retryable=exc.retryable,
                     status_code=exc.status_code,
                 )
             finally:
@@ -149,17 +171,23 @@ def create_whatsapp_events_router(
             session.close()
 
         return JSONResponse(
-            {'accepted': True, 'duplicate': duplicate, 'event_id': envelope.event_id},
-            headers={'X-Request-ID': _request_id(request)},
+            {"accepted": True, "duplicate": duplicate, "event_id": envelope.event_id},
+            headers={"X-Request-ID": _request_id(request)},
         )
 
     return router
 
 
-def whatsapp_validation_exception_handler(request: Request, exc: RequestValidationError):
-    if request.url.path != '/internal/events/whatsapp':
+def whatsapp_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
+    if request.url.path != "/internal/events/whatsapp":
         return None
     return error_response(
-        request, 'validation_error', 'Invalid event envelope', retryable=False,
-        status_code=422, details={'errors': exc.errors()},
+        request,
+        "validation_error",
+        "Invalid event envelope",
+        retryable=False,
+        status_code=422,
+        details={"errors": exc.errors()},
     )
