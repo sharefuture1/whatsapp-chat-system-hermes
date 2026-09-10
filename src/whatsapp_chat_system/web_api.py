@@ -27,6 +27,7 @@ from .api.v1.conversations import create_conversations_router
 from .api.v1.personas import create_personas_router
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
+    internal_auth_exception_handler,
     whatsapp_validation_exception_handler,
 )
 from .bridge.client import BridgeClient, BridgeError
@@ -41,6 +42,7 @@ from .db import create_engine, create_session_factory, session_scope
 from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
 from .runtime import StandaloneRuntime
+from .security.internal_auth import InternalAuthError, ReplayGuard
 from .settings import AISettings
 from .memory_refresh import MemoryRefresher
 from .origins import OriginsCache
@@ -945,7 +947,12 @@ def _build_standalone_app(
     app.include_router(create_accounts_router(factory, bridge))
     app.include_router(create_conversations_router(factory, bridge))
     app.include_router(
-        create_whatsapp_events_router(factory, runtime.internal_event_token)
+        create_whatsapp_events_router(
+            factory,
+            runtime.internal_event_token,
+            hmac_secret=runtime.internal_event_hmac_secret,
+            replay_guard=ReplayGuard(),
+        )
     )
     app.include_router(create_personas_router(runtime, factory))
 
@@ -1299,9 +1306,23 @@ def build_app(
         if internal_event_token is not None
         else (os.getenv("WHATSAPP_BRIDGE_INTERNAL_TOKEN") or "").strip()
     )
+    resolved_hmac_secret = (
+        os.getenv("WHATSAPP_BRIDGE_HMAC_SECRET") or ""
+    ).strip() or None
     app.include_router(
-        create_whatsapp_events_router(resolved_account_factory, resolved_event_token)
+        create_whatsapp_events_router(
+            resolved_account_factory,
+            resolved_event_token,
+            hmac_secret=resolved_hmac_secret,
+            replay_guard=ReplayGuard(),
+        )
     )
+
+    @app.exception_handler(InternalAuthError)
+    async def internal_auth_exception_handler_legacy(
+        request: Request, exc: InternalAuthError
+    ):
+        return internal_auth_exception_handler(request, exc)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError):

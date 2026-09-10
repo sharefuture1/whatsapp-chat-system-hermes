@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .accounts.reconciler import AccountReconciler
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
+    internal_auth_exception_handler,
     whatsapp_validation_exception_handler,
 )
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
@@ -50,7 +51,7 @@ from .runtime import (
     save_runtime_settings,
     session_info as _session_info,  # noqa: F401 -- re-exported for users router
 )
-from .security.internal_auth import InternalAuthError, verify_internal_token
+from .security.internal_auth import InternalAuthError, ReplayGuard as InternalReplayGuard
 
 logger = logging.getLogger(__name__)
 
@@ -328,9 +329,20 @@ def build_standalone_app(
     app.state.runtime = runtime
     app.state.session_factory = factory
     app.state.ai_settings_manager = runtime_ai_settings
+    allowed_origins = _allowed_cors_origins()
+    # 前后端分开部署时最常见的排障点就是跨域来源没放行，这里显式打印出来
+    logger.info(
+        "Standalone API CORS allowlist resolved",
+        extra={
+            "allowed_origins": allowed_origins,
+            "source": "CHAT_SYSTEM_ALLOWED_ORIGINS"
+            if os.getenv("CHAT_SYSTEM_ALLOWED_ORIGINS", "").strip()
+            else "built-in defaults",
+        },
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_allowed_cors_origins(),
+        allow_origins=allowed_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
@@ -346,7 +358,12 @@ def build_standalone_app(
     app.include_router(create_accounts_router(factory, bridge))
     app.include_router(create_conversations_router(factory, bridge))
     app.include_router(
-        create_whatsapp_events_router(factory, runtime.internal_event_token)
+        create_whatsapp_events_router(
+            factory,
+            runtime.internal_event_token,
+            hmac_secret=runtime.internal_event_hmac_secret,
+            replay_guard=InternalReplayGuard(),
+        )
     )
     app.include_router(create_personas_router(runtime, factory))
     app.include_router(create_plugins_router(runtime))
@@ -362,26 +379,10 @@ def build_standalone_app(
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
         path = request.url.path
-        if path == "/internal/events/whatsapp":
-            try:
-                # Authenticate before FastAPI parses the event body, so an
-                # unauthenticated malformed payload cannot probe its schema.
-                verify_internal_token(
-                    runtime.internal_event_token,
-                    request.headers.get("X-Internal-Token"),
-                )
-            except InternalAuthError as exc:
-                return JSONResponse(
-                    {
-                        "error": {
-                            "code": exc.code,
-                            "message": str(exc),
-                            "retryable": False,
-                            "details": {},
-                        }
-                    },
-                    status_code=exc.status_code,
-                )
+        # `/internal/events/whatsapp` 的鉴权由 events 路由的依赖项负责：
+        # FastAPI 先解析依赖、后解析请求体，因此同样能保证
+        # 「未鉴权请求无法探测 payload schema」。放在依赖项里可以顺带拿到
+        # 被缓存的原始字节做 HMAC 校验，且只需校验一次（nonce 不可重复消费）。
         if path == "/api" or (
             path.startswith("/api/")
             and not path.startswith("/api/v1/")
@@ -413,6 +414,12 @@ def build_standalone_app(
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
         return response
+
+    @app.exception_handler(InternalAuthError)
+    async def standalone_internal_auth_exception_handler(
+        request: Request, exc: InternalAuthError
+    ):
+        return internal_auth_exception_handler(request, exc)
 
     @app.exception_handler(RequestValidationError)
     async def standalone_validation_exception_handler(

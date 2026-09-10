@@ -78,6 +78,7 @@ export async function startBridge(env = process.env) {
         spool: new FileSpool({ root: config.spoolRoot, accountId }),
         token: config.eventToken,
         url: config.eventUrl,
+        hmacSecret: config.hmacSecret,
       });
       replaySinks.set(accountId, sink);
       return sink;

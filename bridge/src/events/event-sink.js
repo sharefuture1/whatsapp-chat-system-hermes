@@ -1,3 +1,5 @@
+import { createHmac, randomUUID } from 'node:crypto';
+
 const DEFAULT_URL = 'http://127.0.0.1:8792/internal/events/whatsapp';
 
 const defaultScheduler = Object.freeze({
@@ -14,6 +16,7 @@ export class EventSink {
     spool,
     token,
     url = DEFAULT_URL,
+    hmacSecret = '',
     fetchImpl = globalThis.fetch,
     timeoutMs = 10_000,
     pollIntervalMs = 1_000,
@@ -28,6 +31,7 @@ export class EventSink {
     this.spool = spool;
     this.token = token.trim();
     this.url = url;
+    this.hmacSecret = typeof hmacSecret === 'string' ? hmacSecret.trim() : '';
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;
     this.pollIntervalMs = pollIntervalMs;
@@ -142,14 +146,30 @@ export class EventSink {
     const controller = new AbortController();
     const timer = this.scheduler.setTimeout(() => controller.abort(), this.timeoutMs);
     try {
+      // 序列化一次并复用同一份字节：签名必须与实际发送的 body 完全一致，
+      // 因此不能先签名再 JSON.stringify（键序或空格差异都会导致校验失败）。
+      const body = JSON.stringify(event);
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Internal-Token': this.token,
+        'X-Request-ID': event.event_id,
+      };
+      if (this.hmacSecret) {
+        // 口径与 API 端一致：hex(hmac_sha256(secret, `${timestamp}.${body}`))
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        const mac = createHmac('sha256', this.hmacSecret);
+        mac.update(`${timestamp}.`, 'utf8');
+        mac.update(Buffer.from(body, 'utf8'));
+        headers['X-Internal-Timestamp'] = timestamp;
+        headers['X-Internal-Signature'] = mac.digest('hex');
+        // nonce 每次投递都重新生成：重试同一事件不应被误判为重放，
+        // 真正的幂等由 event_id 唯一约束保证。
+        headers['X-Internal-Nonce'] = randomUUID();
+      }
       return await this.fetchImpl(this.url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-Token': this.token,
-          'X-Request-ID': event.event_id,
-        },
-        body: JSON.stringify(event),
+        headers,
+        body,
         signal: controller.signal,
       });
     } finally {

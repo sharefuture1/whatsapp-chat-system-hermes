@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable
 from uuid import uuid4
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -15,7 +15,13 @@ from whatsapp_chat_system.events.whatsapp import (
     WhatsAppEventEnvelope,
     WhatsAppEventService,
 )
-from whatsapp_chat_system.security.internal_auth import InternalAuthError, verify_internal_token
+from whatsapp_chat_system.security.internal_auth import (
+    DEFAULT_MAX_SKEW_SECONDS,
+    InternalAuthError,
+    InternalAuthHeaders,
+    ReplayGuard,
+    verify_internal_request,
+)
 
 
 def _request_id(request: Request) -> str:
@@ -39,24 +45,76 @@ def error_response(request: Request, code: str, message: str, *, retryable: bool
     )
 
 
+def internal_auth_exception_handler(request: Request, exc: InternalAuthError):
+    """把鉴权失败翻译成与其它内部接口一致的结构化错误体。"""
+
+    return error_response(
+        request, exc.code, str(exc), retryable=False, status_code=exc.status_code
+    )
+
+
+def _make_internal_auth_dependency(
+    *,
+    internal_token: str,
+    hmac_secret: str | None,
+    max_skew_seconds: int,
+    replay_guard: ReplayGuard | None,
+) -> Callable[..., object]:
+    """构造鉴权依赖。
+
+    以依赖（而非在端点函数体内）实现，是因为 FastAPI 会先解析依赖、
+    后解析请求体，这样鉴权在校验 payload 之前完成：未通过鉴权的请求
+    不会进入 pydantic 校验路径。依赖体内 `await request.body()` 读取的是
+    被 Starlette 缓存的原始字节，与签名口径一致。
+    """
+
+    async def dependency(
+        request: Request,
+        x_internal_token: str | None = Header(default=None),
+        x_internal_timestamp: str | None = Header(default=None),
+        x_internal_signature: str | None = Header(default=None),
+        x_internal_nonce: str | None = Header(default=None),
+    ) -> None:
+        body = await request.body()
+        verify_internal_request(
+            configured_token=internal_token,
+            headers=InternalAuthHeaders(
+                token=x_internal_token,
+                timestamp=x_internal_timestamp,
+                signature=x_internal_signature,
+                nonce=x_internal_nonce,
+            ),
+            body=body,
+            hmac_secret=hmac_secret,
+            max_skew_seconds=max_skew_seconds,
+            replay_guard=replay_guard,
+        )
+
+    return dependency
+
+
 def create_whatsapp_events_router(
-    session_factory: Callable[[], Session], internal_token: str
+    session_factory: Callable[[], Session],
+    internal_token: str,
+    *,
+    hmac_secret: str | None = None,
+    max_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
+    replay_guard: ReplayGuard | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix='/internal/events', tags=['internal-events'])
+    auth = _make_internal_auth_dependency(
+        internal_token=internal_token,
+        hmac_secret=hmac_secret,
+        max_skew_seconds=max_skew_seconds,
+        replay_guard=replay_guard,
+    )
 
     @router.post('/whatsapp')
     def receive_whatsapp_event(
         request: Request,
         envelope: WhatsAppEventEnvelope,
-        x_internal_token: str | None = Header(default=None),
+        _auth: None = Depends(auth),
     ):
-        try:
-            verify_internal_token(internal_token, x_internal_token)
-        except InternalAuthError as exc:
-            return error_response(
-                request, exc.code, str(exc), retryable=False, status_code=exc.status_code
-            )
-
         session = session_factory()
         try:
             duplicate = WhatsAppEventService(session).process(envelope)

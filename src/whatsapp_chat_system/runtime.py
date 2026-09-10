@@ -34,6 +34,8 @@ class StandaloneRuntime:
     paths: StandaloneRuntimePaths
     ai_settings: AISettings
     internal_event_token: str
+    #: 可选：启用内部事件接口的 HMAC 签名校验（推荐开启）
+    internal_event_hmac_secret: str | None = None
     forwarding_channels: list[dict[str, Any]] = field(default_factory=list)
     web_settings: dict[str, Any] = field(default_factory=dict)
 
@@ -43,6 +45,7 @@ class StandaloneRuntime:
         runtime_dir: str | Path | None = None,
         *,
         internal_event_token: str | None = None,
+        internal_event_hmac_secret: str | None = None,
     ) -> "StandaloneRuntime":
         root = _resolve_runtime_dir(runtime_dir)
         database_url = (os.getenv("DATABASE_URL") or "").strip()
@@ -52,6 +55,12 @@ class StandaloneRuntime:
             else os.getenv("WHATSAPP_BRIDGE_INTERNAL_TOKEN")
         )
         token = (token or "").strip()
+        hmac_secret = (
+            internal_event_hmac_secret
+            if internal_event_hmac_secret is not None
+            else os.getenv("WHATSAPP_BRIDGE_HMAC_SECRET")
+        )
+        hmac_secret = (hmac_secret or "").strip() or None
         if (
             not database_url
             or database_url == "sqlite:///./data/whatsapp-chat-system.db"
@@ -60,6 +69,11 @@ class StandaloneRuntime:
         if not token:
             raise RuntimeError(
                 "standalone runtime configuration requires WHATSAPP_BRIDGE_INTERNAL_TOKEN"
+            )
+        if hmac_secret and hmac_secret == token:
+            raise RuntimeError(
+                "WHATSAPP_BRIDGE_HMAC_SECRET must differ from "
+                "WHATSAPP_BRIDGE_INTERNAL_TOKEN"
             )
 
         root.mkdir(parents=True, exist_ok=True)
@@ -92,6 +106,7 @@ class StandaloneRuntime:
             paths=paths,
             ai_settings=AISettings.from_env(),
             internal_event_token=token,
+            internal_event_hmac_secret=hmac_secret,
             forwarding_channels=channels,
             web_settings=web_settings,
         )
