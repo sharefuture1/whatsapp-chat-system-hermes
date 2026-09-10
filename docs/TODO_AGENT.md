@@ -2,6 +2,20 @@
 
 ## 当前优先级排序
 
+### P1 — 部署能力验证（2026-09-10 落地，待环境验证）
+
+代码已实现并完成本机能验证的部分（见 `docs/CHANGELOG_AGENT.md` 2026-09-10）。
+以下两项**必须**在相应环境上真实执行后才能标 Verified：
+
+- [ ] **PostgreSQL 真机验证**：本机无 PG 且不使用 Docker，仅验证了 DDL 生成与 URL 归一化
+  - 前置：一个**可丢弃**的 PostgreSQL 测试库
+  - 命令：`TEST_DATABASE_URL='postgresql://user:pass@host:5432/whatsapp_test' pytest tests/test_postgres_backend.py -v`
+  - 注意：该套件会 `TRUNCATE` 目标库中本项目使用的表
+  - 覆盖：迁移建表、外键强制、事件幂等、Outbox CAS 抢占、行锁可用性、ILIKE 搜索
+- [ ] **Windows 实际运行验证**：`scripts/run_server.py` 已按跨平台实现（路径、权限、编码），但仅在 macOS 实测
+  - 验证点：`.env` 载入、`--check` 自检、`--migrate`、服务启动与 `/api/health`
+  - 参考：`docs/STANDALONE-DEPLOYMENT.md` §3.2
+
 ### P0 — Tauri 2 桌面安装包自动构建
 
 - [>] **GitHub Actions 自动构建测试安装包（FR-DESKTOP-001）**
@@ -36,13 +50,18 @@
 - [x] PERF-006 AutoReplyWorker 改为"短事务读 → 无 session 调 AI → 短事务重校验后写回"
 - [x] PERF-008 `mergeFreshMessages` 引用稳定；localStorage idle 批量写；缓存不短路网络请求
 - [x] UI：会话列表首载骨架屏
-- [ ] TranslationDispatcher 批处理事务隔离（同 PERF-006 模式，后续）
+- [x] **TranslationDispatcher 批处理事务隔离**（2026-09-10 落地，同 PERF-006 模式）
+  - [x] 三段式：短事务读快照 → 无 session 调 AI → 短事务写回
+  - [x] 窗口失败的条目按上限并发补齐（原为串行）
+  - [x] 过期 `running` 批次可被重新领取；`max_attempts` 上限
+  - [x] 回归断言：AI 被调用时打开的数据库会话数必须为 0
 
 ### P1 — 实时通道与 Vercel 部署（新规格已批准）
 
 - [ ] **SDD-P1-12 SSE 实时事件通道**（RT-001/002/003 + PERF-004 翻译入库 + PERF-007 索引对齐）
 - [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
-  - [ ] `api.js` 接入 `VITE_API_BASE_URL`（自托管行为不变）
+  - [x] `api.js` 接入 `VITE_API_BASE_URL`（2026-09-10；旧名 `VITE_API_BASE` 保留为兼容别名并告警）
+  - [x] 移除 `vercel.json` 硬编码后端代理改写，改为纯构建期变量驱动
   - [ ] API CORS allowlist 加入 Vercel 生产域；nginx SSE `proxy_buffering off`
   - [ ] Vercel 环境变量矩阵（Preview 禁止指向生产 API）
   - [ ] 版本哈希验证 + rollback 演练
@@ -310,7 +329,11 @@
 - [ ] **真实计数与可重复浏览器验收（SDD-P1-02 / P2-06）**
   - 未读迁移为后端真值；把临时 Chromium 审计转为仓库 Playwright 主链路测试
 
-### 当前验证结果（2026-07-10）
+### 当前验证结果（2026-07-10 快照，历史记录）
+
+> 以下数字是该日期的快照，请勿据此判断当前状态。
+> **当前门禁数字见 `docs/PROJECT_MEMORY.md` 的「验证状态」章节**
+> （2026-09-10：Python 353 passed / Web 117 passed / Bridge 85 passed）。
 
 - `npm run build`：✅ 通过，资源 `index-DRPbZjTf.js` / `index-n1Ei7oEG.css`
 - `pytest -q`：✅ 129 passed

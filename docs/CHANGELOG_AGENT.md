@@ -1,3 +1,79 @@
+## 2026-09-10：部署解耦、P0 修复、双数据库与跨平台运行
+
+### P0 正确性与安全（关联 `docs/sdd/09-performance-and-realtime.md` PERF-006、`04-api-and-events.md`）
+
+- **翻译 Worker 事务内网络 IO**：`translations_dispatcher.py` 原实现在 `with session_factory()`
+  事务内调用 AI（最长 Provider 超时 × 重试），期间连接与行锁不释放；失败后还对每条消息
+  **串行**再调一次 AI。重写为三段式（短事务读快照 → 无 session 调 AI → 短事务写回），
+  对齐 `ai/auto_reply_worker.py` 既有规范（PERF-006）。窗口失败的条目按 `max_fallback_concurrency`
+  并发补齐；新增过期 `running` 批次回收与 `max_attempts` 上限。
+  `TranslationMemory` 原先定义了 `_lock` 却未使用，补全锁边界（`_save_locked` 避免非重入死锁）。
+- **Webhook 批量事件 N+1**：`events/whatsapp.py` 原按 item 逐条 SELECT，`_upsert_message`
+  最多 3 次，单次 webhook 上限 100 条时约 300 次往返压在同一事务。新增 `_IngestLookup`
+  批量预载，实测 100 条由 300 次降为常数 3 次；同批次内重复 remote_jid / wa_message_id
+  语义与逐条 SELECT 一致。
+- **内部事件接口签名校验**：`security/internal_auth.py` 由「仅静态 token」升级为
+  token + 可选 HMAC-SHA256（`hex(hmac_sha256(secret, "{timestamp}.{raw_body}"))`）
+  + 时间戳窗口（±300s）+ nonce 重放防护。Bridge 侧 `bridge/src/events/event-sink.js`
+  同步实现，`bridge/src/config.js` 读取同一变量。鉴权改由 FastAPI 依赖实现，
+  已实测先于请求体校验执行；两侧签名口径以黄金向量固定（含中文与 emoji 的 UTF-8 字节）。
+  未配置密钥时保持旧行为并打印告警，不破坏既有部署。
+- **AI 密钥加密失效**：`ai/crypto.py` 的 `_load_or_generate_key` try/except 两个分支均返回
+  明文，加密形同虚设。改为真实校验 Fernet key 格式（非法密钥显式报错）、`_fernet_lock`
+  保护缓存、密钥文件权限收紧兼容 Windows、自动生成时显式告警；密钥路径解析对齐
+  `CHAT_SYSTEM_RUNTIME_DIR`（原先只认未被部署脚本使用的 `STATE_DIR`）。
+
+### 数据库（关联 `03-data-model.md`）
+
+- 新增 `psycopg[binary]>=3.1`，PostgreSQL 与 SQLite 同一条 `DATABASE_URL` 可切换。
+- 新增 `db/url.py`：`postgres://` / `postgresql://` / `+psycopg2` 统一归一为
+  `postgresql+psycopg://`；提供不含密码的连接描述用于日志。`migrations/env.py`
+  复用同一归一化，确保 alembic 与 API 连同一个库。
+- **Outbox 抢占修复**：`outbox.py` 原用 `SELECT ... FOR UPDATE SKIP LOCKED`，而 SQLite
+  会静默忽略该子句，多进程下同一行会被两个 worker 同时 claim 并重复发送。改为
+  带 `status` 守卫的条件 UPDATE（CAS），两种数据库均原子；`attempts` 递增语义不变。
+- 新增 opt-in PostgreSQL 集成套件 `tests/test_postgres_backend.py`（`TEST_DATABASE_URL`
+  门控，覆盖迁移 DDL、外键、事件幂等、CAS 抢占、行锁、ILIKE）。
+
+### 前后端独立部署（关联 `docs/sdd/10-frontend-vercel-deployment.md` VCL-002）
+
+- 移除根 `vercel.json` 与 `web/vercel.json` 中硬编码的 `https://whats.future1.us` API
+  代理改写，仅保留 SPA 回退；前端后端地址完全由构建期变量决定。
+- **VCL-002 对齐**：`web/src/api.js` 接入权威变量 `VITE_API_BASE_URL`，历史名
+  `VITE_API_BASE` 保留为兼容别名并打印弃用告警（`resolveApiBase` 导出以便测试）；
+  `.env.production` / `.env.tauri` / `web/.env.example` / `docs/TAURI2.md` 同步更新。
+- 后端纯 API 模式默认成立（`--web-dist` 可选）；CORS 启动日志打印最终生效白名单。
+
+### 跨平台运行
+
+- 新增 `scripts/run_server.py`：Linux / macOS / Windows 通用启动器，支持 `.env` 载入、
+  `--check` 配置自检、`--migrate` 启动前迁移、`--web-dist` 单进程模式。
+  自检将「缺失内部 token」「首次启动缺引导密码（≥12 位）」「web-dist 无 index.html」
+  转为可操作指引并返回退出码 2，而非抛底层堆栈。
+- 新增根 `.env.example`（完整环境变量参考）。
+- `deploy/systemd/` 原单元补充必需/建议变量说明；新增
+  `whatsapp-chat-system-api-only.service`（纯 API，前端独立部署）。
+
+### 文档与测试入口
+
+- 新增 `docs/STANDALONE-DEPLOYMENT.md`：三平台部署、分离/单进程形态、签名启用流程、
+  验收清单与常见问题；`docs/DEPLOYMENT.md` 增加指引。
+- 重写 `README.md`：产品名更正为 WhatsApp Chat System，结构对齐当前实现（`api/`、`ai/`、
+  `db/`、`events/`、`security/`、`bridge/`、`src-tauri/`），补充部署、测试与安全模型章节。
+- 补齐测试入口：`web/package.json` 新增 `test`（此前 25 个测试文件无任何入口），
+  根 `package.json` 新增 `web:test` / `bridge:test` / `test` 聚合脚本。
+
+### 门禁
+
+- Python `353 passed, 7 skipped`（较基线 +90，新增 `test_ai_crypto`、`test_database_url`、
+  `test_internal_event_auth`、`test_outbox_claim_cas`、`test_postgres_backend`、
+  `test_translations_dispatcher`、`test_whatsapp_ingest_query_budget`）。
+- Web `117 passed`（+9，新增 `apiBase.test.js`）；Bridge `85 passed`（+9，新增
+  `event-sink-signing.test.js`）；`vite build` 与 `vite build --mode tauri` 均 PASS。
+- 关键回归断言经反向验证：模拟旧写法可被 `test_ai_is_never_called_while_a_db_session_is_open`
+  与 `test_claim_is_expressed_as_guarded_update` 捕获。
+- 未在本机验证：真实 PostgreSQL 行为、Windows 实际运行（本机为 macOS，且不使用 Docker）。
+
 ## 2026-07-19：PR #2 rebase 冲突收敛
 
 - 将 Tauri/RBAC 安全加固分支 rebase 到已合入 SDD-P0-10 性能快赢包的最新 `main`。

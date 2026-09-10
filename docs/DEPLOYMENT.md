@@ -3,6 +3,9 @@
 > **阻断：本文件和 `deploy/apply-production.sh` 仅适用于 Legacy Hermes/profile 服务，绝不得用于 Standalone 切换或生产切流。**
 > Standalone API 必须通过独立运行目录、`DATABASE_URL` 和 `WHATSAPP_BRIDGE_INTERNAL_TOKEN` 启动；实际切换步骤在独立迁移清单完成后另行批准。
 
+> Standalone 的落地说明（前后端独立部署、SQLite/PostgreSQL、Linux/Windows/macOS、
+> 内部事件签名校验）见 [`STANDALONE-DEPLOYMENT.md`](./STANDALONE-DEPLOYMENT.md)。
+
 ## Legacy development and rollback only
 
 这些历史命令保留给回滚/兼容诊断，仍依赖 Hermes profile：

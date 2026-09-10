@@ -1,7 +1,8 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-09-06 UTC
+> 最后更新：2026-09-10 UTC
 
+- 2026-09-10：**Standalone 部署能力与 P0 修复**。修复翻译 Worker 事务内调用 AI（`translations_dispatcher.py` 改三段式）、webhook 批量事件 N+1（查询次数由 3N 降为常数级）、内部事件接口无签名校验（新增 HMAC-SHA256 + 时间戳窗口 + nonce，Bridge 侧同步实现）、AI 密钥加密逻辑失效（`ai/crypto.py` try/except 双分支返回明文）。新增 SQLite/PostgreSQL 双支持（`psycopg[binary]` + `db/url.py` 归一化），并修复 Outbox 抢占在 SQLite 下因 `FOR UPDATE` 被静默忽略而重复投递的问题（改为条件 UPDATE / CAS）。前后端解耦：移除 `vercel.json` 硬编码后端代理，统一走 `VITE_API_BASE_URL`（SDD VCL-002，旧名兼容）。新增跨平台启动器 `scripts/run_server.py`、根 `.env.example`、API-only systemd 单元、`docs/STANDALONE-DEPLOYMENT.md`。质量门禁：Python 353 passed / Web 117 passed / Bridge 85 passed / Vite build PASS（两种 mode）。
 - 2026-09-06：完成项目全景架构深度分析与优化蓝图规划（`docs/ARCHITECTURE_OPTIMIZATION.md`）；安全清理强化 `.gitignore`（隔离 `.runtime/`、`.backup/`、本地运行脚本等敏感资产）；Standalone API 补齐标准 CORS `Authorization` 标头支持；开发启动模板 `scripts/start-standalone-dev.sh.example` 归档。全量自动化测试（Python 263 passed / Web 108 passed / Bridge 76 passed）100% 绿灯。
 
 - 2026-07-19：设置页新增独立滚动与内容渲染隔离，桌面最大宽度 760px，移动端适配安全区；Vite build 与相关 11 项 Web 测试通过。
@@ -113,22 +114,27 @@
 ## 验证状态
 
 ```text
-pytest -q                          129 passed, 1 warning
-bridge npm test                   63 passed
-bridge npm run lint               PASS
-bridge npm audit --omit=dev       0 vulnerabilities
-web node --test tests/*.test.js     35 passed
-web npm run build                 PASS
-Alembic upgrade→downgrade→upgrade PASS
-git diff --check                  PASS
-FastAPI /api/health               200
-Legacy web reply sync probe       PASS (real WhatsApp ID + local ID + delta API)
-V2 shadow live/ready              200
-V2 unauth API                     401
-V2 create/status/stop             200
+pytest -q                          353 passed, 7 skipped, 1 warning
+  └ skipped 为 PostgreSQL 集成套件（需 TEST_DATABASE_URL）
+web npm run test                   117 passed
+bridge npm test                     85 passed
+bridge npm run lint                 PASS
+web npm run build                   PASS
+web vite build --mode tauri         PASS
+Alembic upgrade head (SQLite)       19 tables, 5 revisions
+Alembic upgrade --sql (postgres)    PostgresqlImpl, 无 SQLite 专有语法
+scripts/run_server.py --check       配置自检通过
+FastAPI /api/health                 200（纯 API 模式实测启动）
+内部事件未鉴权请求                   401
+内部事件 HMAC 六种情形               全部按预期返回
+CORS 允许/拒绝来源                   按白名单生效
 ```
 
 唯一警告是 FastAPI/Starlette TestClient 上游弃用提醒。
+
+**未在本机验证**：真实 PostgreSQL 行为（本机无 PG 且不使用 Docker，仅验证了
+DDL 生成与 URL 归一化）、Windows 实际运行（启动器已按跨平台实现但仅在 macOS 实测）。
+两者均有对应验证入口，见 `docs/STANDALONE-DEPLOYMENT.md` §6。
 
 ## 下一阶段阻断
 

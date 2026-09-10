@@ -1,3 +1,27 @@
+## 2026-09-10：Outbox 抢占改用条件 UPDATE，不依赖行锁
+
+**决策**：`OutboxDispatcher` 的抢占从 `SELECT ... FOR UPDATE SKIP LOCKED` 改为带 `status = 'pending'` 守卫的条件 UPDATE（CAS），`rowcount` 即抢占结果。`ai/job_repository.py` 保持现有 dialect 分支（PostgreSQL 走行锁，SQLite 走候选 id + CAS）不变。
+
+**原因**：SQLite 会**静默忽略** `FOR UPDATE`，不报错也不加锁，导致多进程部署下同一个 `OutboxMessage` 可被两个 worker 同时 claim 并重复发送。条件 UPDATE 在 SQLite 与 PostgreSQL 上语义一致且原子，不需要按 dialect 分叉，也免受"静默忽略"这类不可见失效的影响。此决策同时覆盖了未来切换到 PostgreSQL 前后的行为一致性。
+
+**关联规格**：`docs/sdd/03-data-model.md`（消息状态机）、`docs/sdd/09-performance-and-realtime.md`。回归测试：`tests/test_outbox_claim_cas.py`。
+
+## 2026-09-10：数据库同时支持 SQLite 与 PostgreSQL，驱动选用 psycopg 3
+
+**决策**：保留 SQLite 作为零配置默认后端，同时正式支持 PostgreSQL。驱动选用 `psycopg[binary]`（psycopg 3），并在 `db/url.py` 把 `postgres://`、`postgresql://`、`postgresql+psycopg2://` 统一归一为 `postgresql+psycopg://`。
+
+**原因**：服务器与多副本部署需要 PostgreSQL 的并发能力与运维工具，但本地开发、演示和单机场景不应被迫安装数据库。选用 psycopg 3 的 binary 发行版是因为它自带 libpq，同一条 `DATABASE_URL` 在 Linux / Windows / macOS 上都能直接工作，无需系统级依赖——这与"后端可在主流操作系统原生运行"的要求一致。URL 归一化集中在一处并被 `migrations/env.py` 复用，避免 alembic 与 API 连到不同库。
+
+**关联规格**：`docs/sdd/03-data-model.md`；验证入口 `tests/test_postgres_backend.py`（opt-in）。
+
+## 2026-09-10：内部事件接口在静态 token 之上叠加 HMAC 签名
+
+**决策**：`/internal/events/whatsapp` 保留静态共享 token 作为基础层，并支持通过 `WHATSAPP_BRIDGE_HMAC_SECRET` 启用 HMAC-SHA256 请求签名、±300s 时间戳窗口与 nonce 重放防护。签名口径为 `hex(hmac_sha256(secret, "{timestamp}.{raw_body}"))`。鉴权通过 FastAPI 依赖实现，使其先于请求体校验执行。**不配置该变量时保持原行为**，只在启动日志给出告警。
+
+**原因**：仅靠静态 token 时，token 一旦泄露即可注入任意事件，且抓包得到的请求可无限期重放；而 `event_id` 幂等只能挡住"已成功处理过"的重放，挡不住构造新 event_id 的注入。选择"可配置、默认不启用"而非强制启用，是为了不把已部署的 Bridge 一次性打断——两侧必须同步配置同名变量。鉴权放在依赖而非中间件，是因为 FastAPI 先解析依赖、后解析请求体，这样未鉴权的畸形 payload 返回 401 而非 422，不会成为 schema 探测通道；同时避免了中间件与依赖两层校验重复消费同一个 nonce 而被误判为重放。
+
+**关联规格**：`docs/sdd/04-api-and-events.md`。回归测试：`tests/test_internal_event_auth.py`、`bridge/tests/event-sink-signing.test.js`。
+
 ## 2026-07-16：Tauri 2 测试安装包必须由锁定依赖的多平台 CI 构建
 
 **决策**：Tauri 2 桌面端保持薄客户端；GitHub Actions 使用 `Cargo.lock + npm lockfile` 自动构建 Linux `.deb/.AppImage`、Windows NSIS `.exe` 和 macOS `.dmg`，并上传短期 artifact。未配置平台签名和 notarization 前，这些产物只定义为内部测试安装包。
