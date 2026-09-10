@@ -1,7 +1,8 @@
 # PROJECT_MEMORY.md — 项目状态快照
 
-> 最后更新：2026-09-10 UTC
+> 最后更新：2026-09-11（Asia/Bangkok）
 
+- 2026-09-11：**`whats.wending.ai` Standalone 生产后端已落地并通过基础验收**。GCP `gcptw` 以专用低权限系统账户运行 FastAPI `127.0.0.1:8792` 与 Bridge V2 `127.0.0.1:3100`；SQLite 已迁移到 Alembic `0005 (head)`，API `/api/health`、Bridge `/health/live`/`ready` 均 200。Nginx 新增 API-only `whats.wending.ai`：公网仅代理 `/api/*`，`/internal/*` 直接 404，SSE 路径关闭 buffering；Let's Encrypt 独立证书已签发，Cloudflare 525 已消失，公网 `https://whats.wending.ai/api/health` 为 HTTP/2 200。Vercel Production 构建默认且只能使用 `https://whats.wending.ai/api`，Preview 指向生产 API 会 fail-closed；Tauri CSP/capability 同步迁移到新域。现有 `https://wt.v.future1.us` 仍是旧线上 bundle，待本次分支提交后手动发布新 Vercel Production。真实 WhatsApp 扫码、收发、24h 自动回复与 Vercel rollback 仍不得标 Verified。
 - 2026-09-10：**Standalone 部署能力与 P0 修复**。修复翻译 Worker 事务内调用 AI（`translations_dispatcher.py` 改三段式）、webhook 批量事件 N+1（查询次数由 3N 降为常数级）、内部事件接口无签名校验（新增 HMAC-SHA256 + 时间戳窗口 + nonce，Bridge 侧同步实现）、AI 密钥加密逻辑失效（`ai/crypto.py` try/except 双分支返回明文）。新增 SQLite/PostgreSQL 双支持（`psycopg[binary]` + `db/url.py` 归一化），并修复 Outbox 抢占在 SQLite 下因 `FOR UPDATE` 被静默忽略而重复投递的问题（改为条件 UPDATE / CAS）。前后端解耦：移除 `vercel.json` 硬编码后端代理，统一走 `VITE_API_BASE_URL`（SDD VCL-002，旧名兼容）。新增跨平台启动器 `scripts/run_server.py`、根 `.env.example`、API-only systemd 单元、`docs/STANDALONE-DEPLOYMENT.md`。质量门禁：Python 353 passed / Web 117 passed / Bridge 85 passed / Vite build PASS（两种 mode）。
 - 2026-09-06：完成项目全景架构深度分析与优化蓝图规划（`docs/ARCHITECTURE_OPTIMIZATION.md`）；安全清理强化 `.gitignore`（隔离 `.runtime/`、`.backup/`、本地运行脚本等敏感资产）；Standalone API 补齐标准 CORS `Authorization` 标头支持；开发启动模板 `scripts/start-standalone-dev.sh.example` 归档。全量自动化测试（Python 263 passed / Web 108 passed / Bridge 76 passed）100% 绿灯。
 

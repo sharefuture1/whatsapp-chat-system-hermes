@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { PRODUCTION_API_BASE, resolveDeploymentApiBase } from '../web/deploymentEnv.js'
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 function read(path) {
@@ -55,7 +57,8 @@ assert(mainWindow?.minWidth == null && mainWindow?.minHeight == null, 'native wi
 const csp = config.app?.security?.csp || ''
 for (const directive of ['connect-src', 'img-src', 'media-src']) {
   const segment = csp.split(';').find(value => value.trim().startsWith(directive)) || ''
-  assert(segment.includes('https://whats.future1.us'), `${directive} must scope the production API/media origin explicitly`)
+  assert(segment.includes('https://whats.wending.ai'), `${directive} must scope the production API/media origin explicitly`)
+  assert(!segment.includes('https://whats.future1.us'), `${directive} must not retain the retired production API origin`)
   assert(!segment.split(/\s+/).some(value => ['*', 'http:', 'https:'].includes(value)), `${directive} must not contain a network wildcard`)
 }
 
@@ -64,17 +67,16 @@ assert(JSON.stringify(capability.windows) === JSON.stringify(['main']), 'capabil
 assert(capability.permissions?.length === 1, 'native permissions must remain minimal')
 const httpPermission = capability.permissions[0]
 assert(httpPermission.identifier === 'http:default', 'only the scoped HTTP permission is expected')
-assert(JSON.stringify(httpPermission.allow) === JSON.stringify([{ url: 'https://whats.future1.us/api/**' }]), 'HTTP permission must allow only the exact production API path')
+assert(JSON.stringify(httpPermission.allow) === JSON.stringify([{ url: 'https://whats.wending.ai/api/**' }]), 'HTTP permission must allow only the exact production API path')
 
 const webProductionEnv = publicEnv('web/.env.production')
 const tauriEnv = publicEnv('web/.env.tauri')
 // 权威变量名是 VITE_API_BASE_URL（SDD VCL-002）。旧名 VITE_API_BASE 仍被
 // api.js 识别为兼容别名，但不得再作为仓库中的配置源。
 const expectedApiBaseKey = 'VITE_API_BASE_URL'
-assert(JSON.stringify(Object.keys(webProductionEnv)) === JSON.stringify([expectedApiBaseKey]), `browser production may expose only ${expectedApiBaseKey}`)
+assert(Object.keys(webProductionEnv).length === 0, 'browser .env.production must not force Preview deployments onto the production API')
 assert(JSON.stringify(Object.keys(tauriEnv)) === JSON.stringify([expectedApiBaseKey]), `Tauri mode may expose only ${expectedApiBaseKey}`)
-assert(webProductionEnv[expectedApiBaseKey] === 'https://whats.future1.us/api', 'browser production must use the verified public API base')
-assert(tauriEnv[expectedApiBaseKey] === 'https://whats.future1.us/api', 'Tauri mode must use the approved remote API base')
+assert(tauriEnv[expectedApiBaseKey] === 'https://whats.wending.ai/api', 'Tauri mode must use the approved remote API base')
 assert(webProductionEnv.VITE_API_BASE == null && tauriEnv.VITE_API_BASE == null, 'legacy VITE_API_BASE must not be reintroduced as a configuration source')
 for (const [path, values] of Object.entries({ 'web/.env.production': webProductionEnv, 'web/.env.tauri': tauriEnv })) {
   for (const key of Object.keys(values)) {
@@ -91,6 +93,16 @@ assert(/^rust-version\s*=\s*"1\.77\.2"\s*$/m.test(cargo), 'Tauri HTTP plugin min
 assert(rustEntry.includes('.plugin(tauri_plugin_http::init())'), 'Rust HTTP plugin is not initialized')
 assert(apiClient.includes("from '@tauri-apps/plugin-http'"), 'Web API client is not wired to the Tauri HTTP plugin')
 assert(apiClient.includes('globalThis.fetch'), 'browser fetch fallback must remain available')
+assert(PRODUCTION_API_BASE === 'https://whats.wending.ai/api', 'Vercel production fallback must use the approved API origin')
+assert(resolveDeploymentApiBase({ vercelEnv: 'production' }) === PRODUCTION_API_BASE, 'Vercel Production must resolve the approved API origin')
+let previewProductionRejected = false
+try {
+  resolveDeploymentApiBase({ vercelEnv: 'preview', configuredBase: PRODUCTION_API_BASE })
+} catch {
+  previewProductionRejected = true
+}
+assert(previewProductionRejected, 'Vercel Preview must reject the production API origin')
+assert(viteConfig.includes('resolveDeploymentApiBase'), 'Vite config must apply the deployment API resolver')
 assert(viteConfig.includes('process.env.TAURI_DEV_HOST'), 'physical mobile development host handling is missing')
 assert(viteConfig.includes('strictPort: true'), 'Vite must not drift away from Tauri devUrl')
 assert(!viteConfig.includes('allowedHosts: true'), 'Vite must not allow arbitrary Host headers')

@@ -61,7 +61,7 @@ cp .env.example .env
 | `CHAT_SYSTEM_BOOTSTRAP_PASSWORD` | 至少 12 位。仅用于初始化运行目录下的 `web-settings.json`，初始化完成后可从环境移除 |
 
 > 已存在于进程环境中的变量优先于 `.env` 文件，因此 systemd / Windows 服务 /
-> 平台面板注入的配置不会被仓库里的 `.env` 覆盖。
+> 平台面板注入的配置不会被仓库里的 `.env` 覆盖。首次初始化成功、`web-settings.json` 已生成后，应从持久环境文件移除 `CHAT_SYSTEM_BOOTSTRAP_PASSWORD`。
 
 ### 2.3 数据库
 
@@ -110,10 +110,10 @@ python -m whatsapp_chat_system.cli serve --host 0.0.0.0 --port 8792
 
 ### 3.1 Linux（systemd）
 
-单元文件：`deploy/systemd/whatsapp-chat-system.service`（API）与
-`whatsapp-bridge-v2.service`（Bridge）。
+单元文件：`deploy/systemd/whatsapp-chat-system.service` / `whatsapp-chat-system-api-only.service`（API）与 `whatsapp-bridge-v2.service`（Bridge）。正式分离部署使用 API-only 单元，并以专用低权限账户 `whatsapp-chat-system` 运行 API/Bridge。
 
 ```bash
+sudo useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin whatsapp-chat-system
 sudo install -d -m 0750 /etc/whatsapp-chat-system
 sudo install -m 0640 deploy/systemd/whatsapp-chat-system.service /etc/systemd/system/
 sudo install -m 0640 deploy/systemd/whatsapp-bridge-v2.service /etc/systemd/system/
@@ -135,8 +135,7 @@ sudo -u whatsapp-chat-system env $(cat /etc/whatsapp-chat-system/api.env | xargs
   /opt/whatsapp-chat-system/.venv/bin/alembic upgrade head
 ```
 
-Nginx 反向代理参考 `deploy/nginx/`。CSP 头已由 `vercel.json`（前端侧）与
-Nginx 共同约束，按你的域名调整 `server_name` 与 `root`。
+当前正式 API 域为 `https://whats.wending.ai`，Nginx 参考 `deploy/nginx/whats.wending.ai.conf`：只代理 `/api/*`，公网 `/internal/*` 必须拒绝，SSE 路径关闭 buffering。CSP 头由前端/Tauri 与 Nginx 各自约束。
 
 ### 3.2 Windows
 

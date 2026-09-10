@@ -1,3 +1,13 @@
+## 2026-09-11：正式 API 域切换为 whats.wending.ai，并对 Vercel Preview fail-closed
+
+**决策**：Standalone 正式公网 API 固定为 `https://whats.wending.ai/api`。Vercel Production 未显式配置 `VITE_API_BASE_URL` 时使用这一受审计的公开默认值；若显式配置则必须仍为该正式地址。Vercel Preview 不继承正式地址，并在显式指向生产 API 时直接构建失败。Tauri CSP 与 HTTP capability 同步只允许 `whats.wending.ai`。旧 `whats.future1.us` 只保留在历史记录/回滚资产中，不再作为当前客户端默认地址。
+
+**决策**：公网 `whats.wending.ai` 是 API-only Nginx 入口：`/api/*` 代理到 loopback FastAPI `127.0.0.1:8792`；`/internal/*` 永不暴露并直接 404；SSE 路径关闭 Nginx buffering。FastAPI 与 Bridge 均使用专用低权限账户 `whatsapp-chat-system`，启用 `UMask=0077`、`NoNewPrivileges=true` 与 `PrivateTmp=true`，Bridge 仅监听 `127.0.0.1:3100`。
+
+**原因**：前端与桌面端必须共享同一正式 API 契约，同时 Preview 不能因为仓库默认配置误写生产数据；服务进程也不应因 systemd 默认行为以 root 运行。API-only 域把浏览器静态托管与后端安全边界彻底分开，并阻止内部事件端点被公网探测。
+
+**关联规格**：`VCL-002/003/004/005`、`MIG-001`、`SEC-DESKTOP-001`、`QA-001`；实施计划：`docs/plans/2026-09-11-whats-wending-ai-production-deploy.md`。
+
 ## 2026-09-10：Outbox 抢占改用条件 UPDATE，不依赖行锁
 
 **决策**：`OutboxDispatcher` 的抢占从 `SELECT ... FOR UPDATE SKIP LOCKED` 改为带 `status = 'pending'` 守卫的条件 UPDATE（CAS），`rowcount` 即抢占结果。`ai/job_repository.py` 保持现有 dialect 分支（PostgreSQL 走行锁，SQLite 走候选 id + CAS）不变。

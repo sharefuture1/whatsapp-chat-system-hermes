@@ -1,3 +1,26 @@
+## 2026-09-11：`whats.wending.ai` 正式 API、Vercel 隔离与生产部署
+
+### Web / Vercel
+
+- 正式 API 从 `whats.future1.us` 迁移到 `https://whats.wending.ai/api`；新增 `web/deploymentEnv.js`。
+- Vercel Production 未配置 API base 时自动使用正式公开地址；显式配置为其他地址时 fail-closed。
+- Vercel Preview 不继承 Production API，误配 `whats.wending.ai` 时构建直接失败；`.env.production` 不再把 Preview 静默带到生产。
+- Tauri `.env.tauri`、CSP、HTTP capability 与静态 validator 全部切到新域；新增部署环境 6 项回归测试。
+
+### Backend / host hardening
+
+- FastAPI 默认 CORS 正式来源切到 `whats.wending.ai`；生产环境显式允许现有 Vercel 前端 `https://wt.v.future1.us`。
+- API 与 Bridge systemd unit 改为专用低权限账户 `whatsapp-chat-system`，增加 `UMask=0077`、`NoNewPrivileges=true`、`PrivateTmp=true`；8792/3100 都只监听 loopback。
+- 新增 `deploy/nginx/whats.wending.ai.conf`：API-only、`/internal/*` 404、SSE `proxy_buffering off`、独立 TLS 证书。
+
+### Production verification（gcptw）
+
+- SQLite 已执行 Alembic `0001 -> 0005`，`0005 (head)`；API `/api/health` 200，Bridge `/health/live` 与 `/health/ready` 200。
+- Let's Encrypt 已签发 `whats.wending.ai` 独立证书；Cloudflare 525 已消失，公网 `https://whats.wending.ai/api/health` 返回 HTTP/2 200。
+- 公网 `/` 与 `/internal/events/whatsapp` 均 404；来自 `https://wt.v.future1.us` 的 CORS preflight 返回精确 `access-control-allow-origin`。
+- Web 生产构建与 Tauri build 通过；Vercel Production bundle 确认嵌入 `https://whats.wending.ai/api`，Preview 误配生产 API 的构建被正确阻止。
+- 真实 WhatsApp 扫码/收发、24h 自动回复、Vercel Production 新 bundle 发布与 rollback 演练仍需单独验收，不在本条中标 Verified。
+
 ## 2026-09-10：部署解耦、P0 修复、双数据库与跨平台运行
 
 ### P0 正确性与安全（关联 `docs/sdd/09-performance-and-realtime.md` PERF-006、`04-api-and-events.md`）

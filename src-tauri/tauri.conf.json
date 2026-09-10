@@ -22,7 +22,7 @@
     ],
     "security": {
       "capabilities": ["main"],
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://whats.future1.us; img-src 'self' data: blob: https://whats.future1.us; media-src 'self' blob: https://whats.future1.us; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://whats.wending.ai; img-src 'self' data: blob: https://whats.wending.ai; media-src 'self' blob: https://whats.wending.ai; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {

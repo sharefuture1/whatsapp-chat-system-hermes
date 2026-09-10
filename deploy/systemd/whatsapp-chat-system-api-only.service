@@ -6,6 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=whatsapp-chat-system
+Group=whatsapp-chat-system
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
 WorkingDirectory=/opt/whatsapp-chat-system
 EnvironmentFile=-/etc/whatsapp-chat-system/api.env
 # Required from api.env:
@@ -20,11 +25,10 @@ EnvironmentFile=-/etc/whatsapp-chat-system/api.env
 #   CHAT_SYSTEM_BOOTSTRAP_PASSWORD (至少 12 位，初始化完成后可移除)
 #
 # 本单元不传 --web-dist，因此不托管前端静态文件：
-# 前端请独立部署，并在构建时用 VITE_API_BASE 指向本服务。
+# 前端请独立部署，并在构建时用 VITE_API_BASE_URL 指向 https://whats.wending.ai/api。
 Environment=CHAT_SYSTEM_RUNTIME_DIR=/var/lib/whatsapp-chat-system/api
 Environment=PYTHONUNBUFFERED=1
-# 绑定 0.0.0.0 以匹配反向代理；若 Nginx 与本服务同机，可改回 127.0.0.1 并相应
-# 调整该 unit 中的监听地址。
+# Nginx 与 API 同机，FastAPI 仅监听 loopback，不直接暴露 8792 到公网。
 ExecStart=/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli serve --host 127.0.0.1 --port 8792
 Restart=always
 RestartSec=3

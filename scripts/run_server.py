@@ -274,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"单进程模式：同时托管前端 {web_dist}")
     else:
         web_dist = None
-        print("纯 API 模式：前端请独立部署，并通过 VITE_API_BASE 指向本服务")
+        print("纯 API 模式：前端请独立部署，并通过 VITE_API_BASE_URL 指向本服务")
 
     print("-" * 68)
     print(f"监听 http://{args.host}:{args.port}")

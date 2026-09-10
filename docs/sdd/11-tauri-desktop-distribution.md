@@ -11,11 +11,11 @@
 - Windows x64：NSIS `.exe`；
 - macOS：`.dmg`。
 
-桌面客户端不内嵌 Python、数据库或 WhatsApp Bridge；所有业务继续通过 `https://whats.future1.us/api` 调用服务器。
+桌面客户端不内嵌 Python、数据库或 WhatsApp Bridge；所有业务通过正式 API `https://whats.wending.ai/api` 调用服务器。
 
 ## 2. 安全边界
 
-- Tauri HTTP capability 只允许 `https://whats.future1.us/api/**`；
+- Tauri HTTP capability 只允许 `https://whats.wending.ai/api/**`；
 - 不开放 filesystem、shell、process、clipboard、updater；
 - Tauri 模式不把 session token 写入 `localStorage`；关闭应用后必须重新登录；
 - Tauri 模式消息与翻译缓存仅存内存；浏览器缓存按用户名隔离，logout/401 时清理；

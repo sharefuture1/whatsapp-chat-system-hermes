@@ -25,6 +25,8 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from .accounts.reconciler import AccountReconciler
+from .ai.auto_reply_reconciler import AutoReplyReconciler
+from .ai.auto_reply_worker import AutoReplyWorker
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
     internal_auth_exception_handler,
@@ -32,34 +34,34 @@ from .api.internal.whatsapp_events import (
 )
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
+from .api.v1.operations import create_operations_router
 from .api.v1.personas import create_personas_router
 from .api.v1.plugins import create_plugins_router
-from .api.v1.operations import create_operations_router
 from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
-from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
+from .db import (
+    models as _models,  # noqa: F401 -- registers every mapped table in Base.metadata
+)
 from .outbox import OutboxDispatcher
-from .ai.auto_reply_worker import AutoReplyWorker
-from .ai.auto_reply_reconciler import AutoReplyReconciler
-from .translations_dispatcher import TranslationDispatcher
 from .runtime import (
-    StandaloneRuntime,
     StandaloneAISettingsManager,
-    is_authenticated as _is_authenticated,
-    verify_password as _verify_password,
+    StandaloneRuntime,
     save_runtime_settings,
+)
+from .runtime import is_authenticated as _is_authenticated
+from .runtime import (
     session_info as _session_info,  # noqa: F401 -- re-exported for users router
 )
-from .security.internal_auth import (
-    InternalAuthError,
-    ReplayGuard as InternalReplayGuard,
-)
+from .runtime import verify_password as _verify_password
+from .security.internal_auth import InternalAuthError
+from .security.internal_auth import ReplayGuard as InternalReplayGuard
+from .translations_dispatcher import TranslationDispatcher
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ALLOWED_ORIGINS = (
-    "https://whats.future1.us",
+    "https://whats.wending.ai",
     "http://127.0.0.1:38998",
     "http://localhost:38998",
 )
@@ -371,8 +373,8 @@ def build_standalone_app(
     app.include_router(create_personas_router(runtime, factory))
     app.include_router(create_plugins_router(runtime))
     # Lazy import to avoid circular dependency at module load time
-    from .api.v1.users import create_users_router as _create_users_router
     from .api.v1.messages import create_messages_router as _create_messages_router
+    from .api.v1.users import create_users_router as _create_users_router
 
     app.include_router(create_settings_router(runtime, factory))
     app.include_router(create_operations_router(runtime, factory))

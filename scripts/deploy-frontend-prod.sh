@@ -5,7 +5,7 @@ ROOT_DIR="/home/young11/workspace/whatsapp-chat-system-hermes"
 WEB_DIR="$ROOT_DIR/web"
 DIST_DIR="$WEB_DIR/dist"
 DEPLOY_DIR="/opt/whatsapp-chat-system/web/dist"
-PUBLIC_BASE="https://whats.future1.us"
+PUBLIC_BASE="https://whats.wending.ai"
 HEALTH_URL="$PUBLIC_BASE/api/health"
 
 cd "$WEB_DIR"

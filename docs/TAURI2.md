@@ -12,7 +12,7 @@ the server and are reached through the existing HTTPS API.
 - A packaged Tauri build uses the Tauri HTTP plugin when `VITE_API_BASE_URL` is
   an absolute URL. `vite build --mode tauri` loads `.env.tauri`; the committed
   production scope allows only
-  `https://whats.future1.us/**`.
+  `https://whats.wending.ai/**`.
 - The API base is public configuration, not a credential. Every `VITE_*` value
   is embedded in the frontend bundle. Never put passwords, session tokens,
   signing keys, Bridge tokens, or AI keys in a Vite variable or Tauri config.
@@ -27,7 +27,7 @@ These explicit overrides are useful for CI and release jobs:
 VITE_API_BASE_URL=/api npm --prefix web run build
 
 # Desktop/mobile package (the Tauri mode already has this public default)
-VITE_API_BASE_URL=https://whats.future1.us/api npm run tauri:build
+VITE_API_BASE_URL=https://whats.wending.ai/api npm run tauri:build
 ```
 
 > The legacy name `VITE_API_BASE` is still honoured for backward compatibility

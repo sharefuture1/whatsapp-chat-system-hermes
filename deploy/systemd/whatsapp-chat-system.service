@@ -5,6 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=whatsapp-chat-system
+Group=whatsapp-chat-system
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
 WorkingDirectory=/opt/whatsapp-chat-system
 EnvironmentFile=-/etc/whatsapp-chat-system/api.env
 # Required from api.env:

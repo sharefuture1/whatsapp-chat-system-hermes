@@ -5,6 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=whatsapp-chat-system
+Group=whatsapp-chat-system
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
 WorkingDirectory=/opt/whatsapp-chat-system/bridge
 EnvironmentFile=-/etc/whatsapp-chat-system/bridge.env
 # bridge.env supplies WHATSAPP_BRIDGE_INTERNAL_TOKEN and optional event tuning.

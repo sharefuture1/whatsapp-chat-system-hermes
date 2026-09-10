@@ -62,8 +62,9 @@
 - [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
   - [x] `api.js` 接入 `VITE_API_BASE_URL`（2026-09-10；旧名 `VITE_API_BASE` 保留为兼容别名并告警）
   - [x] 移除 `vercel.json` 硬编码后端代理改写，改为纯构建期变量驱动
-  - [ ] API CORS allowlist 加入 Vercel 生产域；nginx SSE `proxy_buffering off`
-  - [ ] Vercel 环境变量矩阵（Preview 禁止指向生产 API）
+  - [x] API CORS allowlist + nginx SSE `proxy_buffering off`：2026-09-11 已在 `whats.wending.ai` 生产源站验收，`wt.v.future1.us` 预检返回精确 allow-origin
+  - [x] Vercel 环境隔离代码门禁：Production 固定 `https://whats.wending.ai/api`；Preview 指向生产 API 时构建 fail-closed
+  - [>] Vercel Production 手动发布：当前 `wt.v.future1.us` 仍是旧 bundle，待本次分支提交后发布并验证新 bundle API base
   - [ ] 版本哈希验证 + rollback 演练
 
 ### P0 — 24x7 AI 自动回复

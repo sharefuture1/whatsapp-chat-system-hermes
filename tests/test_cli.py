@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD = ROOT / "deploy" / "systemd"
 API_UNIT = SYSTEMD / "whatsapp-chat-system.service"
@@ -47,6 +46,16 @@ def test_bridge_v2_unit_is_loopback_and_uses_only_independent_runtime_root():
     assert "/usr/bin/node /opt/whatsapp-chat-system/bridge/src/index.js" in text
     assert ".hermes" not in text.lower()
     assert "--profile" not in text
+
+
+def test_services_run_as_unprivileged_account_with_basic_systemd_hardening():
+    for unit_path in (API_UNIT, BRIDGE_UNIT):
+        text = unit_path.read_text(encoding="utf-8")
+        assert "User=whatsapp-chat-system" in text
+        assert "Group=whatsapp-chat-system" in text
+        assert "UMask=0077" in text
+        assert "NoNewPrivileges=true" in text
+        assert "PrivateTmp=true" in text
 
 
 def test_service_assets_do_not_embed_credentials_or_legacy_runtime_paths():
