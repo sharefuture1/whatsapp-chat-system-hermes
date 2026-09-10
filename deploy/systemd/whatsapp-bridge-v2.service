@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/whatsapp-chat-system/bridge
 EnvironmentFile=-/etc/whatsapp-chat-system/bridge.env
-# bridge.env supplies WHATSAPP_BRIDGE_INTERNAL_TOKEN and optional event tuning only.
+# bridge.env supplies WHATSAPP_BRIDGE_INTERNAL_TOKEN and optional event tuning.
+# 启用事件签名校验时，还需提供与 API 侧完全一致的 WHATSAPP_BRIDGE_HMAC_SECRET
+# （且不得与内部 token 相同），否则 API 会以 401 missing_signature 拒绝事件。
 Environment=BRIDGE_HOST=127.0.0.1
 Environment=BRIDGE_PORT=3100
 Environment=BRIDGE_RUNTIME_ROOT=/var/lib/whatsapp-chat-system/bridge

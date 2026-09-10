@@ -1,5 +1,6 @@
 [Unit]
-Description=WhatsApp Chat System standalone API (single-process, also serves frontend)
+Description=WhatsApp Chat System standalone API (API-only, frontend deployed separately)
+Documentation=file:/opt/whatsapp-chat-system/docs/STANDALONE-DEPLOYMENT.md
 After=network-online.target
 Wants=network-online.target
 
@@ -10,16 +11,21 @@ EnvironmentFile=-/etc/whatsapp-chat-system/api.env
 # Required from api.env:
 #   DATABASE_URL                  (sqlite:////abs/path/app.db 或 postgresql://...)
 #   WHATSAPP_BRIDGE_INTERNAL_TOKEN
+# Required when the frontend is served from another origin:
+#   CHAT_SYSTEM_ALLOWED_ORIGINS   (例如 https://console.example.com)
 # Strongly recommended:
 #   WHATSAPP_BRIDGE_HMAC_SECRET   (须与 bridge.env 中同名变量一致)
 #   AI_SECRET_ENCRYPTION_KEY      (生产必须显式设置并备份)
-#   CHAT_SYSTEM_ALLOWED_ORIGINS   (前后端同源时可省略)
 # First boot only:
 #   CHAT_SYSTEM_BOOTSTRAP_PASSWORD (至少 12 位，初始化完成后可移除)
+#
+# 本单元不传 --web-dist，因此不托管前端静态文件：
+# 前端请独立部署，并在构建时用 VITE_API_BASE 指向本服务。
 Environment=CHAT_SYSTEM_RUNTIME_DIR=/var/lib/whatsapp-chat-system/api
-Environment=CHAT_SYSTEM_WEB_DIST=/opt/whatsapp-chat-system/web/dist
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli serve --host 127.0.0.1 --port 8792 --web-dist /opt/whatsapp-chat-system/web/dist
+# 绑定 0.0.0.0 以匹配反向代理；若 Nginx 与本服务同机，可改回 127.0.0.1 并相应
+# 调整该 unit 中的监听地址。
+ExecStart=/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli serve --host 127.0.0.1 --port 8792
 Restart=always
 RestartSec=3
 
