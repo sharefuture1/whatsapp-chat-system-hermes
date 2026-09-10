@@ -68,10 +68,14 @@ assert(JSON.stringify(httpPermission.allow) === JSON.stringify([{ url: 'https://
 
 const webProductionEnv = publicEnv('web/.env.production')
 const tauriEnv = publicEnv('web/.env.tauri')
-assert(JSON.stringify(Object.keys(webProductionEnv)) === JSON.stringify(['VITE_API_BASE']), 'browser production may expose only VITE_API_BASE')
-assert(JSON.stringify(Object.keys(tauriEnv)) === JSON.stringify(['VITE_API_BASE']), 'Tauri mode may expose only VITE_API_BASE')
-assert(webProductionEnv.VITE_API_BASE === 'https://whats.future1.us/api', 'browser production must use the verified public API base')
-assert(tauriEnv.VITE_API_BASE === 'https://whats.future1.us/api', 'Tauri mode must use the approved remote API base')
+// 权威变量名是 VITE_API_BASE_URL（SDD VCL-002）。旧名 VITE_API_BASE 仍被
+// api.js 识别为兼容别名，但不得再作为仓库中的配置源。
+const expectedApiBaseKey = 'VITE_API_BASE_URL'
+assert(JSON.stringify(Object.keys(webProductionEnv)) === JSON.stringify([expectedApiBaseKey]), `browser production may expose only ${expectedApiBaseKey}`)
+assert(JSON.stringify(Object.keys(tauriEnv)) === JSON.stringify([expectedApiBaseKey]), `Tauri mode may expose only ${expectedApiBaseKey}`)
+assert(webProductionEnv[expectedApiBaseKey] === 'https://whats.future1.us/api', 'browser production must use the verified public API base')
+assert(tauriEnv[expectedApiBaseKey] === 'https://whats.future1.us/api', 'Tauri mode must use the approved remote API base')
+assert(webProductionEnv.VITE_API_BASE == null && tauriEnv.VITE_API_BASE == null, 'legacy VITE_API_BASE must not be reintroduced as a configuration source')
 for (const [path, values] of Object.entries({ 'web/.env.production': webProductionEnv, 'web/.env.tauri': tauriEnv })) {
   for (const key of Object.keys(values)) {
     assert(!/(?:PASSWORD|TOKEN|SECRET|PRIVATE_KEY|API_KEY)/i.test(key), `${path} must not contain client-bundled credentials`)
@@ -90,8 +94,18 @@ assert(apiClient.includes('globalThis.fetch'), 'browser fetch fallback must rema
 assert(viteConfig.includes('process.env.TAURI_DEV_HOST'), 'physical mobile development host handling is missing')
 assert(viteConfig.includes('strictPort: true'), 'Vite must not drift away from Tauri devUrl')
 assert(!viteConfig.includes('allowedHosts: true'), 'Vite must not allow arbitrary Host headers')
+// 前端改为直连 API（VITE_API_BASE_URL 注入绝对地址），因此 Vercel 侧不再需要
+// `/api` 代理改写。这里保留护栏的**反向**形式：任何把 /api 代理到第三方域的
+// rewrite 都不允许回归，否则又会把后端地址硬编码进部署配置。
 for (const [name, vercel] of Object.entries({ root: rootVercel, web: webVercel })) {
-  assert(vercel.rewrites?.[0]?.source === '/api/(.*)', `${name} Vercel deployment must preserve the same-origin API rewrite`)
+  const rewrites = vercel.rewrites ?? []
+  assert(rewrites.length === 1, `${name} Vercel deployment must keep only the SPA fallback rewrite`)
+  assert(rewrites[0].source === '/((?!api/).*)', `${name} Vercel deployment must keep the SPA fallback rewrite`)
+  assert(rewrites[0].destination === '/index.html', `${name} SPA fallback must target index.html`)
+  for (const rewrite of rewrites) {
+    assert(!/\/api\//.test(rewrite.source ?? ''), `${name} must not proxy /api requests to a third-party host`)
+    assert(!/https?:\/\//.test(rewrite.destination ?? ''), `${name} rewrite must not hardcode an external destination`)
+  }
 }
 assert(rootVercel.installCommand === 'npm ci --prefix web', 'root Vercel deployment must use the committed Web lockfile')
 
