@@ -5,7 +5,6 @@
   "buildCommand": "npm --prefix web run build",
   "outputDirectory": "web/dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://whats.future1.us/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

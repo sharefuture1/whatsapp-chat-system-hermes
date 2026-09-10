@@ -1,7 +1,30 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
-const DEFAULT_API_BASE = import.meta.env?.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+/**
+ * 解析后端 API 基址。
+ *
+ * 权威变量名是 `VITE_API_BASE_URL`（SDD VCL-002：前端直连自托管 API 的
+ * 构建期开关）。历史实现使用 `VITE_API_BASE`，为避免已有部署静默失效，
+ * 这里保留为兼容别名，但会给出弃用告警。
+ * 两者都未设置时回退相对路径 `/api`，对应自托管同源或反代部署。
+ */
+export function resolveApiBase(env = import.meta.env ?? {}) {
+  const canonical = typeof env.VITE_API_BASE_URL === 'string' ? env.VITE_API_BASE_URL.trim() : ''
+  if (canonical) return canonical.replace(/\/$/, '')
+
+  const legacy = typeof env.VITE_API_BASE === 'string' ? env.VITE_API_BASE.trim() : ''
+  if (legacy) {
+    console.warn(
+      '[api] VITE_API_BASE 已弃用，请改用 VITE_API_BASE_URL（SDD VCL-002）。' +
+        ' 当前仍按旧值工作以保证向后兼容。',
+    )
+    return legacy.replace(/\/$/, '')
+  }
+  return '/api'
+}
+
+const DEFAULT_API_BASE = resolveApiBase()
 
 let sessionToken = ''
 let onUnauthorized = null
