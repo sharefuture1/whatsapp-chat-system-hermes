@@ -32,6 +32,89 @@ def _fallback_name(remote_jid: str) -> str:
     return 'WhatsApp 联系人' if remote_jid.endswith('@lid') else remote_jid
 
 
+# SQLite 默认参数上限 999，批量 IN 查询按此分片
+_QUERY_CHUNK = 500
+
+
+def _chunked(values: list[str]) -> list[list[str]]:
+    return [values[i : i + _QUERY_CHUNK] for i in range(0, len(values), _QUERY_CHUNK)]
+
+
+class _IngestLookup:
+    """单次 webhook 内共享的联系人/会话/消息查找缓存。
+
+    原实现每个 item 都单独 SELECT，且 `_upsert_message` 内部最多 3 次 SELECT：
+    单次 webhook 上限 100 条消息 ⇒ 约 300 次数据库往返全部压在同一个事务里。
+    这里改为每类实体各一次 IN 查询，新建的行即时登记进缓存，
+    保证同一批次内针对同一 remote_jid / wa_message_id 的后续 item
+    仍能命中（与原先逐条 SELECT 的可见性一致）。
+    """
+
+    def __init__(self, session: Session, account_id: str) -> None:
+        self.session = session
+        self.account_id = account_id
+        self._contacts: dict[str, Contact] = {}
+        self._conversations: dict[str, Conversation] = {}
+        self._messages: dict[str, Message] = {}
+
+    @classmethod
+    def preload(
+        cls,
+        session: Session,
+        account_id: str,
+        *,
+        remote_jids: list[str],
+        wa_message_ids: list[str],
+    ) -> '_IngestLookup':
+        lookup = cls(session, account_id)
+        for chunk in _chunked(sorted(set(remote_jids))):
+            for row in session.scalars(
+                select(Contact).where(
+                    Contact.account_id == account_id,
+                    Contact.remote_jid.in_(chunk),
+                )
+            ):
+                lookup._contacts[row.remote_jid] = row
+        for chunk in _chunked(sorted(set(remote_jids))):
+            for row in session.scalars(
+                select(Conversation).where(
+                    Conversation.account_id == account_id,
+                    Conversation.remote_jid.in_(chunk),
+                )
+            ):
+                lookup._conversations[row.remote_jid] = row
+        for chunk in _chunked(sorted(set(wa_message_ids))):
+            for row in session.scalars(
+                select(Message).where(
+                    Message.account_id == account_id,
+                    Message.wa_message_id.in_(chunk),
+                )
+            ):
+                lookup._messages[row.wa_message_id] = row
+        return lookup
+
+    def contact(self, remote_jid: str) -> Contact | None:
+        return self._contacts.get(remote_jid)
+
+    def add_contact(self, contact: Contact) -> Contact:
+        self._contacts[contact.remote_jid] = contact
+        return contact
+
+    def conversation(self, remote_jid: str) -> Conversation | None:
+        return self._conversations.get(remote_jid)
+
+    def add_conversation(self, conversation: Conversation) -> Conversation:
+        self._conversations[conversation.remote_jid] = conversation
+        return conversation
+
+    def message(self, wa_message_id: str) -> Message | None:
+        return self._messages.get(wa_message_id)
+
+    def add_message(self, message: Message) -> Message:
+        self._messages[message.wa_message_id] = message
+        return message
+
+
 class WhatsAppEventEnvelope(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -181,13 +264,20 @@ class WhatsAppEventService:
         self.session.add(event)
 
         if envelope.event_type == 'message.upsert':
-            self._upsert_message(account, MessageUpsertPayload.model_validate(envelope.payload))
+            payload = MessageUpsertPayload.model_validate(envelope.payload)
+            lookup = _IngestLookup.preload(
+                self.session,
+                account.id,
+                remote_jids=[payload.remote_jid],
+                wa_message_ids=[payload.wa_message_id],
+            )
+            message = self._upsert_message(account, payload, lookup=lookup)
             from whatsapp_chat_system.ai.auto_reply import enqueue_for_inbound_message
-            message = self.session.scalar(select(Message).where(
-                Message.account_id == account.id,
-                Message.wa_message_id == envelope.payload.get('wa_message_id'),
-            ))
-            conversation = self.session.get(Conversation, message.conversation_id) if message else None
+            conversation = (
+                self.session.get(Conversation, message.conversation_id)
+                if message is not None
+                else None
+            )
             if message is not None and conversation is not None:
                 enqueue_for_inbound_message(self.session, account, conversation, message)
         elif envelope.event_type in {'contacts.upsert', 'contacts.update'}:
@@ -195,9 +285,18 @@ class WhatsAppEventService:
         elif envelope.event_type in {'chats.upsert', 'chats.update'}:
             self._upsert_chats(account, ChatBatchPayload.model_validate(envelope.payload))
         elif envelope.event_type == 'history.messages.upsert':
-            for item in HistoryBatchPayload.model_validate(envelope.payload).items:
+            items = HistoryBatchPayload.model_validate(envelope.payload).items
+            # 整批一次性预载，避免每条消息各 3 次 SELECT
+            lookup = _IngestLookup.preload(
+                self.session,
+                account.id,
+                remote_jids=[item.remote_jid for item in items],
+                wa_message_ids=[item.wa_message_id for item in items],
+            )
+            for item in items:
                 self._upsert_message(
-                    account, item, update_contact_name=False, historical=True
+                    account, item, update_contact_name=False, historical=True,
+                    lookup=lookup,
                 )
         elif envelope.event_type.startswith('message.'):
             self._apply_receipt(account, envelope.event_type, ReceiptPayload.model_validate(envelope.payload))
@@ -209,32 +308,44 @@ class WhatsAppEventService:
         return False
 
     def _upsert_contacts(self, account: WhatsAppAccount, payload: ContactBatchPayload) -> None:
+        lookup = _IngestLookup.preload(
+            self.session,
+            account.id,
+            remote_jids=[item.remote_jid for item in payload.items],
+            wa_message_ids=[],
+        )
         for item in payload.items:
-            contact = self.session.scalar(select(Contact).where(
-                Contact.account_id == account.id, Contact.remote_jid == item.remote_jid))
+            contact = lookup.contact(item.remote_jid)
             if contact is None:
                 contact = Contact(account_id=account.id, remote_jid=item.remote_jid)
                 self.session.add(contact)
+                lookup.add_contact(contact)
             for field in ('display_name', 'phone_number', 'lid', 'avatar_url'):
                 if field in item.model_fields_set:
                     setattr(contact, field, getattr(item, field))
 
     def _upsert_chats(self, account: WhatsAppAccount, payload: ChatBatchPayload) -> None:
+        lookup = _IngestLookup.preload(
+            self.session,
+            account.id,
+            remote_jids=[item.remote_jid for item in payload.items],
+            wa_message_ids=[],
+        )
         for item in payload.items:
             contact = None
             if item.conversation_type == 'dm':
-                contact = self.session.scalar(select(Contact).where(
-                    Contact.account_id == account.id, Contact.remote_jid == item.remote_jid))
+                contact = lookup.contact(item.remote_jid)
                 if contact is None:
                     contact = Contact(account_id=account.id, remote_jid=item.remote_jid)
                     self.session.add(contact)
                     self.session.flush()
-            conversation = self.session.scalar(select(Conversation).where(
-                Conversation.account_id == account.id, Conversation.remote_jid == item.remote_jid))
+                    lookup.add_contact(contact)
+            conversation = lookup.conversation(item.remote_jid)
             if conversation is None:
                 conversation = Conversation(account_id=account.id, remote_jid=item.remote_jid,
                     contact_id=contact.id if contact else None, type=item.conversation_type)
                 self.session.add(conversation)
+                lookup.add_conversation(conversation)
             elif contact:
                 conversation.contact_id = contact.id
             if 'title' in item.model_fields_set:
@@ -250,12 +361,18 @@ class WhatsAppEventService:
     def _upsert_message(
         self, account: WhatsAppAccount, payload: MessageUpsertPayload,
         *, update_contact_name: bool = True, historical: bool = False,
-    ) -> None:
+        lookup: _IngestLookup | None = None,
+    ) -> Message | None:
+        if lookup is None:
+            lookup = _IngestLookup.preload(
+                self.session,
+                account.id,
+                remote_jids=[payload.remote_jid],
+                wa_message_ids=[payload.wa_message_id],
+            )
         contact = None
         if payload.conversation_type == 'dm':
-            contact = self.session.scalar(select(Contact).where(
-                Contact.account_id == account.id, Contact.remote_jid == payload.remote_jid
-            ))
+            contact = lookup.contact(payload.remote_jid)
             if contact is None:
                 contact = Contact(
                     account_id=account.id,
@@ -264,13 +381,11 @@ class WhatsAppEventService:
                 )
                 self.session.add(contact)
                 self.session.flush()
+                lookup.add_contact(contact)
             elif update_contact_name and payload.push_name:
                 contact.display_name = payload.push_name
 
-        conversation = self.session.scalar(select(Conversation).where(
-            Conversation.account_id == account.id,
-            Conversation.remote_jid == payload.remote_jid,
-        ))
+        conversation = lookup.conversation(payload.remote_jid)
         if conversation is None:
             conversation = Conversation(
                 account_id=account.id,
@@ -281,15 +396,13 @@ class WhatsAppEventService:
             )
             self.session.add(conversation)
             self.session.flush()
+            lookup.add_conversation(conversation)
         elif conversation.account_id != account.id:
             raise EventProcessingError('cross-account conversation reference')
         else:
             conversation.contact_id = contact.id if contact else None
 
-        message = self.session.scalar(select(Message).where(
-            Message.account_id == account.id,
-            Message.wa_message_id == payload.wa_message_id,
-        ))
+        message = lookup.message(payload.wa_message_id)
         is_new = message is None
         if message is None:
             message = Message(
@@ -302,6 +415,7 @@ class WhatsAppEventService:
                 received_at=utc_now(),
             )
             self.session.add(message)
+            lookup.add_message(message)
         elif message.account_id != account.id:
             raise EventProcessingError('cross-account message reference')
 
@@ -322,6 +436,7 @@ class WhatsAppEventService:
             conversation.last_message_preview = payload.text or f'[{payload.message_type}]'
             if payload.push_name:
                 conversation.title = payload.push_name
+        return message
 
     def _apply_account_status(
         self, account: WhatsAppAccount, envelope: WhatsAppEventEnvelope
