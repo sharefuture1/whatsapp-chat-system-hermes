@@ -64,7 +64,7 @@
   - [x] 移除 `vercel.json` 硬编码后端代理改写，改为纯构建期变量驱动
   - [x] API CORS allowlist + nginx SSE `proxy_buffering off`：2026-09-11 已在 `whats.wending.ai` 生产源站验收，`wt.v.future1.us` 预检返回精确 allow-origin
   - [x] Vercel 环境隔离代码门禁：Production 固定 `https://whats.wending.ai/api`；Preview 指向生产 API 时构建 fail-closed
-  - [>] Vercel Production 手动发布：当前 `wt.v.future1.us` 仍是旧 bundle，待本次分支提交后发布并验证新 bundle API base
+  - [>] Vercel Production 手动发布：当前 `wt.v.future1.us` 仍是旧 bundle；2026-09-11 已尝试发布但被项目当天 `>100 deployments` 配额拒绝，配额恢复后需重新发布并验证新 bundle API base
   - [ ] 版本哈希验证 + rollback 演练
 
 ### P0 — 24x7 AI 自动回复
@@ -334,7 +334,7 @@
 
 > 以下数字是该日期的快照，请勿据此判断当前状态。
 > **当前门禁数字见 `docs/PROJECT_MEMORY.md` 的「验证状态」章节**
-> （2026-09-10：Python 353 passed / Web 117 passed / Bridge 85 passed）。
+> （2026-09-11：Python 354 passed / Web 124 passed / Bridge 85 passed；API/Bridge live/readiness 已生产验证）。
 
 - `npm run build`：✅ 通过，资源 `index-DRPbZjTf.js` / `index-n1Ei7oEG.css`
 - `pytest -q`：✅ 129 passed

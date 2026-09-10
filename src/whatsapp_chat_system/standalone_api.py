@@ -435,6 +435,19 @@ def build_standalone_app(
             return response
         return await request_validation_exception_handler(request, exc)
 
+    @app.get("/health/live")
+    def live_health() -> dict[str, Any]:
+        """Liveness only proves the API process can answer HTTP."""
+        return {"live": True, "runtime_mode": "standalone"}
+
+    @app.get("/health/ready")
+    def readiness_health() -> JSONResponse:
+        """Readiness reflects whether startup/schema validation completed."""
+        return JSONResponse(
+            {"ready": bool(app.state.ready), "runtime_mode": "standalone"},
+            status_code=200 if app.state.ready else 503,
+        )
+
     @app.get("/api/health")
     def health() -> JSONResponse:
         if not app.state.ready:

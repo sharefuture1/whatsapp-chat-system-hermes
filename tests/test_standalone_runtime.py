@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from whatsapp_chat_system.cli import build_parser
-from whatsapp_chat_system.db.base import Base
 from whatsapp_chat_system.db import models as _models  # noqa: F401
+from whatsapp_chat_system.db.base import Base
 from whatsapp_chat_system.runtime import StandaloneRuntime
 from whatsapp_chat_system.standalone_api import (
     _current_alembic_head,
@@ -59,6 +59,21 @@ def test_standalone_build_does_not_import_legacy_web_api_and_health_is_safe(
         assert response.status_code == 200
         assert response.json()["runtime_mode"] == "standalone"
         assert "profile" not in response.json()
+
+        live = client.get("/health/live")
+        assert live.status_code == 200
+        assert live.json() == {"live": True, "runtime_mode": "standalone"}
+
+        ready = client.get("/health/ready")
+        assert ready.status_code == 200
+        assert ready.json() == {"ready": True, "runtime_mode": "standalone"}
+        app.state.ready = False
+        not_ready = client.get("/health/ready")
+        assert not_ready.status_code == 503
+        assert not_ready.json() == {"ready": False, "runtime_mode": "standalone"}
+        assert client.get("/health/live").status_code == 200
+        app.state.ready = True
+
         assert client.get("/api/v1/accounts").status_code == 401
     assert not sentinel.exists()
     assert runtime_dir.is_dir()
@@ -88,9 +103,8 @@ def test_legacy_apis_are_410_before_auth_for_anonymous_and_authenticated(
 
 def test_empty_database_refuses_startup(tmp_path, monkeypatch):
     app, _ = standalone_app(tmp_path, monkeypatch, migrated=False)
-    with pytest.raises(RuntimeError, match="schema is not ready"):
-        with TestClient(app):
-            pass
+    with pytest.raises(RuntimeError, match="schema is not ready"), TestClient(app):
+        pass
 
 
 def test_create_all_database_without_alembic_revision_refuses_startup(
@@ -102,9 +116,8 @@ def test_create_all_database_without_alembic_revision_refuses_startup(
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    with pytest.raises(RuntimeError, match="schema is not ready"):
-        with TestClient(app):
-            pass
+    with pytest.raises(RuntimeError, match="schema is not ready"), TestClient(app):
+        pass
 
 
 def test_database_with_wrong_alembic_revision_refuses_startup(tmp_path, monkeypatch):
@@ -121,9 +134,8 @@ def test_database_with_wrong_alembic_revision_refuses_startup(tmp_path, monkeypa
         )
     engine.dispose()
 
-    with pytest.raises(RuntimeError, match="schema is not ready"):
-        with TestClient(app):
-            pass
+    with pytest.raises(RuntimeError, match="schema is not ready"), TestClient(app):
+        pass
 
 
 @pytest.mark.parametrize("missing_or_weak", [None, "short"])
@@ -144,7 +156,7 @@ def test_standalone_bootstrap_password_is_required_and_strong(
 def test_bootstrap_password_is_only_required_on_first_initialization(
     tmp_path, monkeypatch
 ):
-    app, runtime_dir = standalone_app(tmp_path, monkeypatch)
+    _, runtime_dir = standalone_app(tmp_path, monkeypatch)
     assert (runtime_dir / "web-settings.json").is_file()
 
     monkeypatch.delenv("CHAT_SYSTEM_BOOTSTRAP_PASSWORD", raising=False)

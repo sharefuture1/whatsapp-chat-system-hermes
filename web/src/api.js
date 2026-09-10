@@ -1,5 +1,4 @@
 import { isTauri } from '@tauri-apps/api/core'
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http'
 
 /**
  * 解析后端 API 基址。
@@ -94,11 +93,28 @@ const inflightRequests = new Map()
 
 function cacheKey(path, method) { return `${sessionToken}:${method}:${path}` }
 
-function transportFetch(input, init) {
-  // Relative URLs keep the browser/Vite same-origin path. Packaged Tauri apps
-  // use the scoped HTTP plugin for an absolute remote API, avoiding WebView
-  // CORS differences without widening the server's browser origin allowlist.
-  if (isTauri() && /^https?:\/\//i.test(input)) return tauriFetch(input, init)
+let tauriFetchLoader = null
+
+async function loadTauriFetch() {
+  if (!tauriFetchLoader) {
+    tauriFetchLoader = import('@tauri-apps/plugin-http')
+      .then(module => module.fetch)
+      .catch(error => {
+        tauriFetchLoader = null
+        throw error
+      })
+  }
+  return tauriFetchLoader
+}
+
+async function transportFetch(input, init) {
+  // Browser requests never load the native HTTP plugin. Packaged Tauri apps
+  // lazy-load it only for absolute remote URLs, keeping the Web entry bundle
+  // independent from the desktop transport implementation.
+  if (isTauri() && /^https?:\/\//i.test(input)) {
+    const tauriFetch = await loadTauriFetch()
+    return tauriFetch(input, init)
+  }
   return globalThis.fetch(input, init)
 }
 

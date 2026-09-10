@@ -30,7 +30,8 @@
 - `vercel.json` 是 Vercel 侧构建/路由的唯一权威：`installCommand`/`buildCommand` 固定走 `npm --prefix web`，`outputDirectory: web/dist`。
 - SPA 回退：除静态资源与 `/api/*` 外的所有路径 rewrite 到 `/index.html`。
 - 构建产物必须与自托管部署使用同一份 `web/dist` 语义（同一 commit 构建结果等价），不允许 Vercel 专属源码分支。
-- 验收：Vercel Preview 构建通过；直接访问深链（如 `/settings`）返回 SPA 而非 404。
+- Browser 入口不得静态加载 Tauri 原生 HTTP transport；`@tauri-apps/plugin-http` 只能在 Tauri 运行时按需加载，避免把桌面 transport 作为 Web 首屏依赖。
+- 验收：Vercel Preview 构建通过；直接访问深链（如 `/settings`）返回 SPA 而非 404；Browser 主入口不静态 import Tauri HTTP plugin。
 
 ### VCL-002 API 基址与访问模式 [Approved]
 

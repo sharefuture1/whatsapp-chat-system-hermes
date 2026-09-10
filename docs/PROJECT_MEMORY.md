@@ -2,14 +2,14 @@
 
 > 最后更新：2026-09-11（Asia/Bangkok）
 
-- 2026-09-11：**`whats.wending.ai` Standalone 生产后端已落地并通过基础验收**。GCP `gcptw` 以专用低权限系统账户运行 FastAPI `127.0.0.1:8792` 与 Bridge V2 `127.0.0.1:3100`；SQLite 已迁移到 Alembic `0005 (head)`，API `/api/health`、Bridge `/health/live`/`ready` 均 200。Nginx 新增 API-only `whats.wending.ai`：公网仅代理 `/api/*`，`/internal/*` 直接 404，SSE 路径关闭 buffering；Let's Encrypt 独立证书已签发，Cloudflare 525 已消失，公网 `https://whats.wending.ai/api/health` 为 HTTP/2 200。Vercel Production 构建默认且只能使用 `https://whats.wending.ai/api`，Preview 指向生产 API 会 fail-closed；Tauri CSP/capability 同步迁移到新域。现有 `https://wt.v.future1.us` 仍是旧线上 bundle，待本次分支提交后手动发布新 Vercel Production。真实 WhatsApp 扫码、收发、24h 自动回复与 Vercel rollback 仍不得标 Verified。
+- 2026-09-11：**`whats.wending.ai` Standalone 生产后端已落地并通过基础验收**。GCP `gcptw` 以专用低权限系统账户运行 FastAPI `127.0.0.1:8792` 与 Bridge V2 `127.0.0.1:3100`；SQLite 已迁移到 Alembic `0005 (head)`。API `/api/health`、新增 `/health/live`、`/health/ready` 与 Bridge live/ready 均已生产返回 200；Nginx 公网仅代理 `/api/*` 与两个精确 health 路径，`/internal/*` 直接 404，SSE 关闭 buffering。Let's Encrypt 独立证书已签发，Cloudflare 525 已消失。Vercel Production 构建默认且只能使用 `https://whats.wending.ai/api`，Preview 指向生产 API 会 fail-closed；Tauri CSP/capability 同步迁移到新域，Web `api.js` 对 native HTTP plugin 改为按需动态加载。现有 `https://wt.v.future1.us` 仍是旧线上 bundle；手动 Production 发布已尝试，但被 Vercel 当天 `>100 deployments` 配额拒绝。真实 WhatsApp 扫码、收发、24h 自动回复与 Vercel rollback 仍不得标 Verified。
 - 2026-09-10：**Standalone 部署能力与 P0 修复**。修复翻译 Worker 事务内调用 AI（`translations_dispatcher.py` 改三段式）、webhook 批量事件 N+1（查询次数由 3N 降为常数级）、内部事件接口无签名校验（新增 HMAC-SHA256 + 时间戳窗口 + nonce，Bridge 侧同步实现）、AI 密钥加密逻辑失效（`ai/crypto.py` try/except 双分支返回明文）。新增 SQLite/PostgreSQL 双支持（`psycopg[binary]` + `db/url.py` 归一化），并修复 Outbox 抢占在 SQLite 下因 `FOR UPDATE` 被静默忽略而重复投递的问题（改为条件 UPDATE / CAS）。前后端解耦：移除 `vercel.json` 硬编码后端代理，统一走 `VITE_API_BASE_URL`（SDD VCL-002，旧名兼容）。新增跨平台启动器 `scripts/run_server.py`、根 `.env.example`、API-only systemd 单元、`docs/STANDALONE-DEPLOYMENT.md`。质量门禁：Python 353 passed / Web 117 passed / Bridge 85 passed / Vite build PASS（两种 mode）。
 - 2026-09-06：完成项目全景架构深度分析与优化蓝图规划（`docs/ARCHITECTURE_OPTIMIZATION.md`）；安全清理强化 `.gitignore`（隔离 `.runtime/`、`.backup/`、本地运行脚本等敏感资产）；Standalone API 补齐标准 CORS `Authorization` 标头支持；开发启动模板 `scripts/start-standalone-dev.sh.example` 归档。全量自动化测试（Python 263 passed / Web 108 passed / Bridge 76 passed）100% 绿灯。
 
 - 2026-07-19：设置页新增独立滚动与内容渲染隔离，桌面最大宽度 760px，移动端适配安全区；Vite build 与相关 11 项 Web 测试通过。
 
 - Tauri 2 桌面薄客户端已进入安全加固/自动构建阶段：Rust `Cargo.lock`、多平台图标和 GitHub Actions 安装包矩阵已加入；目标 artifacts 为 Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg`。当前产物定义为未签名内部测试包，需等待 GitHub 三平台真实运行并上传 artifact 后才可标 Verified。
-- Tauri 模式不持久化 session token，聊天/翻译缓存只存内存；浏览器缓存按用户隔离并在 logout 清除。HTTP capability 仅允许 `https://whats.future1.us/api/**`。
+- Tauri 模式不持久化 session token，聊天/翻译缓存只存内存；浏览器缓存按用户隔离并在 logout 清除。HTTP capability 仅允许 `https://whats.wending.ai/api/**`；Browser 主包不静态加载 Tauri HTTP transport。
 - P0 安全补强：旧格式 Session 不再默认 admin；AI Base URL 换域必须同请求提交新 key；完整 settings/AI settings 仅 admin 可读，普通用户使用最小 capabilities DTO。
 
 - LaoTalk 翻译保底已接入：`message_ops.translation_provider` / `translation_fallback_provider` 生效，默认主翻译 `wendingai`，失败自动回退 `laotalk`；`/api/v1/messages/{id}/translate` 生产实测可直接走 LaoTalk 返回中文译文。
@@ -115,17 +115,18 @@
 ## 验证状态
 
 ```text
-pytest -q                          353 passed, 7 skipped, 1 warning
+pytest -q                          354 passed, 7 skipped
   └ skipped 为 PostgreSQL 集成套件（需 TEST_DATABASE_URL）
-web npm run test                   117 passed
+web npm run test                   124 passed
 bridge npm test                     85 passed
 bridge npm run lint                 PASS
-web npm run build                   PASS
+web npm run build                   PASS（Tauri HTTP transport 动态拆包）
 web vite build --mode tauri         PASS
 Alembic upgrade head (SQLite)       19 tables, 5 revisions
 Alembic upgrade --sql (postgres)    PostgresqlImpl, 无 SQLite 专有语法
 scripts/run_server.py --check       配置自检通过
 FastAPI /api/health                 200（纯 API 模式实测启动）
+FastAPI /health/live,/health/ready  200（whats.wending.ai 公网实测）
 内部事件未鉴权请求                   401
 内部事件 HMAC 六种情形               全部按预期返回
 CORS 允许/拒绝来源                   按白名单生效

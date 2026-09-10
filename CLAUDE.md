@@ -84,8 +84,8 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 ## 测试命令
 
 ```bash
-pytest -q                      # 后端（当前 353 passed, 7 skipped）
-npm run web:test               # 前端 node:test（当前 117 passed）
+pytest -q                      # 后端（当前 354 passed, 7 skipped）
+npm run web:test               # 前端 node:test（当前 124 passed）
 npm run bridge:test            # Bridge node:test（当前 85 passed）
 npm test                       # 前端 + Bridge
 
@@ -119,7 +119,7 @@ TEST_DATABASE_URL='postgresql://user:pass@host:5432/whatsapp_test' \
 
 - **CSS 类命名**：`.wx-*` 前缀，所有 WeChat 设计 token 用 CSS 变量
 - **i18n**：所有用户可见字符串必须用 `t('key')`，4个语言块 key 必须完全对齐
-- **构建 gate**：`vite build` 与 `vite build --mode tauri` 必须通过；`pytest -q` 不得低于 353 passed；`npm run web:test` 不得低于 117；`npm run bridge:test` 不得低于 85
+- **构建 gate**：`vite build` 与 `vite build --mode tauri` 必须通过；`pytest -q` 不得低于 354 passed；`npm run web:test` 不得低于 124；`npm run bridge:test` 不得低于 85
 - **StaticFiles bug**：Starlette StaticFiles mount 到 `/assets` 时 URL strip prefix，directory 应指向 `dist/assets/` 而非 `dist/`
 
 ## 关键陷阱

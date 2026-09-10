@@ -1,3 +1,13 @@
+## 2026-09-11：API readiness 与 Tauri transport 均保持窄边界
+
+**决策**：Standalone API 对外提供 `/health/live` 与 `/health/ready` 两个无鉴权窄探针；live 不依赖业务账号/Bridge，ready 只反映 API startup/schema readiness。详细 Worker 状态继续留在 `/api/health`，不把昂贵诊断逻辑塞进 liveness。
+
+**决策**：Browser 与 Tauri 共用 `api.js`，但 Browser 入口不得静态加载 `@tauri-apps/plugin-http`。仅当 `isTauri()` 且请求为绝对远端 URL 时动态加载 native HTTP plugin，并缓存加载 Promise；失败后清空缓存以允许后续重试。
+
+**原因**：liveness 必须稳定、低成本，readiness 必须能阻止未完成启动的实例接流量；同时 Web 不应把桌面原生 transport 作为首屏依赖。两者都遵循“只把运行环境真正需要的能力暴露/加载出来”的最小边界原则。
+
+**关联规格**：`NFR-OPS-002`、`VCL-001`、`VCL-004`、`SEC-DESKTOP-001`；计划：`docs/plans/2026-09-11-health-tauri-web-split.md`。
+
 ## 2026-09-11：正式 API 域切换为 whats.wending.ai，并对 Vercel Preview fail-closed
 
 **决策**：Standalone 正式公网 API 固定为 `https://whats.wending.ai/api`。Vercel Production 未显式配置 `VITE_API_BASE_URL` 时使用这一受审计的公开默认值；若显式配置则必须仍为该正式地址。Vercel Preview 不继承正式地址，并在显式指向生产 API 时直接构建失败。Tauri CSP 与 HTTP capability 同步只允许 `whats.wending.ai`。旧 `whats.future1.us` 只保留在历史记录/回滚资产中，不再作为当前客户端默认地址。

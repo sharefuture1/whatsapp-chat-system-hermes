@@ -126,7 +126,7 @@
 - **NFR-PERF-002 [Approved]**：账号状态、任务进度和新消息通过 SSE/WebSocket 或可控增量轮询更新。
 - **NFR-OBS-001 [Approved]**：记录账号在线状态、事件积压、发送成功率、AI 延迟、429/5xx 和 Worker 队列深度。
 - **NFR-OPS-001 [Approved]**：生产由 systemd 或容器编排管理 API、Bridge、Worker。
-- **NFR-OPS-002 [Approved]**：提供 live/readiness health checks。
+- **NFR-OPS-002 [Verified]**：提供 live/readiness health checks。2026-09-11 已在 `whats.wending.ai` 生产环境验证 API `/health/live`、`/health/ready` 与 Bridge `/health/live`、`/health/ready` 均返回 200；API readiness 在非 ready 状态返回 503 的回归测试已固定。
 - **NFR-PORT-001 [Approved]**：开发环境可用 SQLite，生产推荐 PostgreSQL；业务逻辑不得依赖 SQLite 特有行为。
 
 ## 5. 安全需求

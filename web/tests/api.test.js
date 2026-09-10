@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { api, ApiError } from '../src/api.js'
@@ -37,6 +38,12 @@ test('standalone mode degrades explicitly disabled legacy list endpoints', async
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('browser API transport lazy-loads the Tauri HTTP plugin', () => {
+  const source = readFileSync(new URL('../src/api.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /^import .*@tauri-apps\/plugin-http/m)
+  assert.match(source, /import\(['"]@tauri-apps\/plugin-http['"]\)/)
 })
 
 test('non-legacy errors retain structured messages and codes', async () => {

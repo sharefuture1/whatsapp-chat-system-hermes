@@ -1,3 +1,12 @@
+## 2026-09-11：API live/readiness + Web/Tauri transport 拆包
+
+- `NFR-OPS-002` 补齐 Standalone API `GET /health/live` 与 `GET /health/ready`：live 只表示进程可响应；ready 仅在 startup/schema readiness 完成时为 200，否则 503；保留 `/api/health` 作为聚合 Worker 诊断。
+- `deploy/nginx/whats.wending.ai.conf` 只额外公开两个精确 health 路径，`/internal/*` 仍保持公网 404；已在生产验证 `https://whats.wending.ai/health/live`、`/health/ready` 均为 HTTP 200。
+- `web/src/api.js` 不再顶层静态 import `@tauri-apps/plugin-http`，仅在 Tauri + 绝对远端 URL 场景动态加载并缓存 module Promise；Browser 始终走 `globalThis.fetch`。
+- Web Production 主 JS 从约 343.27 kB 降到 342.46 kB，并将 Tauri transport 拆为约 2.02 kB 的按需 chunk；Browser 首屏不加载该桌面 transport。
+- 门禁：Python `354 passed / 7 skipped`；Web `124 passed`；Bridge `85 passed` + lint；Tauri validator、Vercel Production build、Tauri build、`git diff --check` 全部通过。
+- Vercel Production 实际发布仍被项目当天 `>100 deployments` 配额拒绝；该阻塞属于平台配额，不是构建或测试失败。
+
 ## 2026-09-11：`whats.wending.ai` 正式 API、Vercel 隔离与生产部署
 
 ### Web / Vercel
