@@ -24,8 +24,11 @@ class DatabaseSettings:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> 'DatabaseSettings':
         values = environ if env is None else env
-        database_url = (values.get('DATABASE_URL') or '').strip() or DEFAULT_DATABASE_URL
-        return cls(database_url=database_url)
+        raw = (values.get('DATABASE_URL') or '').strip() or DEFAULT_DATABASE_URL
+        # 归一化 postgres:// 等写法，避免运行时才因缺驱动报错
+        from whatsapp_chat_system.db.url import normalize_database_url
+
+        return cls(database_url=normalize_database_url(raw))
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,6 +7,7 @@ from typing import TypeVar
 from sqlalchemy import Engine, create_engine as sqlalchemy_create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from whatsapp_chat_system.db.url import normalize_database_url
 from whatsapp_chat_system.settings import DatabaseSettings
 
 
@@ -27,12 +28,15 @@ def _engine_kwargs(database_url: str) -> dict[str, object]:
 
 
 def create_engine(settings: DatabaseSettings | None = None) -> Engine:
-    """创建业务数据库 Engine；SQLite 连接自动启用外键约束。"""
+    """创建业务数据库 Engine；SQLite 连接自动启用外键约束与 WAL。"""
 
     resolved_settings = settings or DatabaseSettings.from_env()
+    database_url = normalize_database_url(resolved_settings.database_url)
+    if not database_url:
+        raise ValueError("DATABASE_URL is required")
     engine = sqlalchemy_create_engine(
-        resolved_settings.database_url,
-        **_engine_kwargs(resolved_settings.database_url),
+        database_url,
+        **_engine_kwargs(database_url),
     )
     if engine.dialect.name == "sqlite":
         event.listen(engine, "connect", _enable_sqlite_foreign_keys)

@@ -7,12 +7,14 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from whatsapp_chat_system.db.base import Base
+from whatsapp_chat_system.db.url import normalize_database_url
 import whatsapp_chat_system.db.models  # noqa: F401
 
 
 config = context.config
 if environ.get('DATABASE_URL') and not config.attributes.get('ignore_database_url_env'):
-    config.set_main_option('sqlalchemy.url', environ['DATABASE_URL'])
+    # 与运行时保持同一套归一化规则，确保 alembic 与 API 连的是同一个数据库
+    config.set_main_option('sqlalchemy.url', normalize_database_url(environ['DATABASE_URL']))
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

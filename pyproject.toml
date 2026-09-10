@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "whatsapp-chat-system"
 version = "0.2.0"
-description = "WhatsApp support chat automation system for Hermes workspaces"
+description = "WhatsApp support chat automation system"
 requires-python = ">=3.11"
 dependencies = [
   "PyYAML>=6.0",
@@ -16,6 +16,15 @@ dependencies = [
   "SQLAlchemy>=2.0",
   "Alembic>=1.13.0",
   "cryptography>=42.0.0",
+  # PostgreSQL 驱动。使用 psycopg 3（binary 版自带 libpq，免去系统依赖，
+  # 因此同一条 DATABASE_URL 在 Linux / Windows / macOS 上都能直接跑）。
+  "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+# 生产部署建议同时装上进程管理与 Gunicorn 风格的并发后端
+production = [
+  "uvicorn[standard]>=0.30.0",
 ]
 
 [dependency-groups]
