@@ -1,7 +1,7 @@
 # WhatsApp Chat System — 架构深度分析与优化全景规划
 
-> **文档状态**：Active / Architecture Blueprint  
-> **更新时间**：2026-09-06  
+> **文档状态**：Active / Architecture Blueprint
+> **更新时间**：2026-09-06
 > **关联规格**：[`docs/sdd/README.md`](./sdd/README.md), [`docs/sdd/02-system-architecture.md`](./sdd/02-system-architecture.md), [`docs/sdd/09-performance-and-realtime.md`](./sdd/09-performance-and-realtime.md)
 
 ---
