@@ -212,7 +212,7 @@ export default function ChatPane({
     messagesRef.current = messages
   }, [messages])
   const translationQueueVersion = messages.reduce((version, message) => {
-    if (message.hidden || message.pending || message.failed || String(message.message_id || '').startsWith('tmp-') || message.translated || !message.content || message.lang === 'Chinese') return version
+    if (message.hidden || message.pending || message.failed || String(message.message_id || '').startsWith('tmp-') || message.translated || !message.content || message.lang === 'Chinese' || !/[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(message.content)) return version
     return `${version}|${message.message_id}`
   }, '')
   if (translationQueueVersionRef.current !== translationQueueVersion) translationQueueVersionRef.current = translationQueueVersion
@@ -487,7 +487,7 @@ export default function ChatPane({
             continue
           }
         }
-        const msg = [...messagesRef.current].reverse().find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
+        const msg = [...messagesRef.current].reverse().find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && /[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(m.content) && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
         if (!msg) break
         const id = String(msg.message_id || '')
         attempted.add(id)
@@ -499,7 +499,7 @@ export default function ChatPane({
       if (translationAbortRef.current === controller) translationAbortRef.current = null
       translationWorkerRunningRef.current = false
       if (!controller.signal.aborted && generation === translationGenerationRef.current) {
-        const hasMore = messagesRef.current.some(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')))
+        const hasMore = messagesRef.current.some(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && /[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(m.content) && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')))
         if (hasMore) setTranslationWorkerTick(prev => prev + 1)
         clearTimeout(translationRetryTimerRef.current)
         const retryDelay = nextTranslationRetryDelay(messagesRef.current)

@@ -226,10 +226,56 @@ class TranslationDispatcher:
             session, batch.target_lang, [message.id for message, _, _ in candidates]
         )
 
+        unresolved_candidates = [
+            (msg, text, shash)
+            for msg, text, shash in candidates
+            if (msg.id, shash) not in done
+        ]
+
+        # 全局翻译记忆库（按原文哈希查询任一已完成译文）
+        global_cache: dict[str, tuple[str, str, str | None]] = {}
+        if unresolved_candidates:
+            remaining_hashes = list({shash for _, _, shash in unresolved_candidates})
+            for chunk in _chunked(remaining_hashes):
+                cached_rows = session.execute(
+                    select(
+                        MessageTranslation.source_text_hash,
+                        MessageTranslation.translated_text,
+                        MessageTranslation.source_lang,
+                        MessageTranslation.model,
+                    ).where(
+                        MessageTranslation.source_text_hash.in_(chunk),
+                        MessageTranslation.target_lang == batch.target_lang,
+                        MessageTranslation.status == "completed",
+                        MessageTranslation.translated_text.is_not(None),
+                    )
+                ).all()
+                for row in cached_rows:
+                    global_cache[row[0]] = (row[1], row[2], row[3])
+
         items: list[_PendingItem] = []
         for message, text, source_hash in candidates:
             if (message.id, source_hash) in done:
                 continue
+
+            # 1. 全局哈希命中：复用全库历史译文，0 次外部 AI 调用
+            if source_hash in global_cache:
+                cached_trans, cached_lang, _ = global_cache[source_hash]
+                self._write_translation(
+                    session,
+                    message_id=message.id,
+                    account_id=message.account_id,
+                    conversation_id=message.conversation_id,
+                    content=message.content or "",
+                    target_lang=batch.target_lang,
+                    window_size=batch.window_size,
+                    batch_id=batch.id,
+                    source_lang=cached_lang or self._language_hint_for(text),
+                    translated_text=cached_trans,
+                    status="completed",
+                )
+                continue
+
             source_lang = self._language_hint_for(text)
             if source_lang == "Chinese":
                 # 原文已是中文，无需调用 AI，直接落一条 completed
@@ -247,6 +293,27 @@ class TranslationDispatcher:
                     status="completed",
                 )
                 continue
+
+            # 纯数字、符号、URL 拦截，不送入大模型
+            if re.match(r"^https?://\S+$", text, re.IGNORECASE) or (
+                re.match(r"^[\d\s\W_]+$", text)
+                and not re.search(r"[\u0E80-\u0EFF\u0E00-\u0E7FA-Za-z]", text)
+            ):
+                self._write_translation(
+                    session,
+                    message_id=message.id,
+                    account_id=message.account_id,
+                    conversation_id=message.conversation_id,
+                    content=message.content or "",
+                    target_lang=batch.target_lang,
+                    window_size=batch.window_size,
+                    batch_id=batch.id,
+                    source_lang=source_lang,
+                    translated_text=None,
+                    status="completed",
+                )
+                continue
+
             items.append(
                 _PendingItem(
                     message_id=message.id,

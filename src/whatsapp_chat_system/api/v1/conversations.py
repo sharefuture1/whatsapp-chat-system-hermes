@@ -958,7 +958,34 @@ def create_conversations_router(
             if existing is not None:
                 cached_message_ids.append(message.id)
             else:
-                queued_message_ids.append(message.id)
+                # 全局翻译记忆库查询：若其他消息曾翻译过相同原文，直接复用
+                global_hit = session.scalar(
+                    select(MessageTranslation).where(
+                        MessageTranslation.target_lang == payload.target_lang,
+                        MessageTranslation.source_text_hash == _source_text_hash(text),
+                        MessageTranslation.status == "completed",
+                        MessageTranslation.translated_text.is_not(None),
+                    ).order_by(MessageTranslation.id.desc()).limit(1)
+                )
+                if global_hit is not None:
+                    new_trans = MessageTranslation(
+                        account_id=conversation.account_id,
+                        conversation_id=conversation.id,
+                        message_id=message.id,
+                        source_text=text,
+                        source_text_hash=_source_text_hash(text),
+                        source_lang=global_hit.source_lang or lang,
+                        target_lang=payload.target_lang,
+                        translated_text=global_hit.translated_text,
+                        status="completed",
+                        provider=global_hit.provider or "cache_memory",
+                        model=global_hit.model or "cache_memory",
+                        context_window_size=payload.window_size,
+                    )
+                    session.add(new_trans)
+                    cached_message_ids.append(message.id)
+                else:
+                    queued_message_ids.append(message.id)
         if not queued_message_ids:
             return {
                 "batch_id": None,

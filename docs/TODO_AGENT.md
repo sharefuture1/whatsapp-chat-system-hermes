@@ -7,6 +7,7 @@
 - [x] 共享 AI 配置保存后热更新；缓存 Rewriter 跟随当前全局模型，联系人/账号覆盖优先。
 - [x] 翻译空/原文照抄结果与部分失败不再伪装成功；精确原文 hash、活动批次复用、状态 API、页面 fresh GET 与可中断轮询。
 - [x] 自动回复入站语言提示、明确错误文字系统拦截、生成后 opt-out/新消息重查、Job 当前版本失败 CAS 与完整超时预算 lease；Provider 复用。
+- [x] 入站自动翻译异步化（`events/whatsapp.py`），解除前端作为伪 Worker 驱动翻译的架构倒置；落地全局翻译记忆库（Translation Memory）跨会话文本哈希复用（0ms 零 AI 调用）；纯中文/纯符号拦截与前端非外文过滤。
 - [x] Python wheel 安装到生产虚拟环境，保留旧源码回滚；前端构建到 Nginx dist 并验证新 JS/CSS；无数据库迁移、无重置 WhatsApp session。API/Bridge 与公共端点验收正常。
 - [x] GitHub CLI 使用已配置登录环境验证 sharefuture1，标准 Git credential helper dry-run 成功；Vercel Git 自动构建关闭。
 - [ ] 真实测试联系人四语自动收发验收：当前账号/会话 off 未改变，不以临时 mock 测试代替真实发送；上游 35 秒探针有超时，继续观测。

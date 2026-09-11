@@ -305,6 +305,13 @@ class WhatsAppEventService:
                 enqueue_for_inbound_message(
                     self.session, account, conversation, message
                 )
+                from whatsapp_chat_system.events.inbound_translation import (
+                    enqueue_for_inbound_translation,
+                )
+
+                enqueue_for_inbound_translation(
+                    self.session, account, conversation, message
+                )
         elif envelope.event_type in {"contacts.upsert", "contacts.update"}:
             self._upsert_contacts(
                 account, ContactBatchPayload.model_validate(envelope.payload)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.ai.job_repository import AnalysisJobRepository
 from whatsapp_chat_system.db.models import Conversation, ContactAIOverride, Message, WhatsAppAccount
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,13 @@ def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conv
     )) if conversation.contact_id else None
     decision = decide_auto_reply(account, conversation, contact_enabled=override.auto_reply_enabled if override else None)
     if not decision.enabled:
+        logger.info(
+            "Auto-reply skipped for inbound message %s: reason=%s (account=%s, conv=%s)",
+            message.wa_message_id,
+            decision.reason,
+            account.id,
+            conversation.id,
+        )
         return None
     source = json.dumps({'message_id': message.id, 'account_id': account.id, 'content': message.content or '', 'policy': account.auto_reply_mode}, sort_keys=True)
     input_hash = hashlib.sha256(source.encode()).hexdigest()
@@ -57,5 +67,12 @@ def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conv
         priority=10,
         max_attempts=6,
         max_queued_per_account=100,
+    )
+    logger.info(
+        "Auto-reply enqueued for inbound message %s: job_id=%s (account=%s, conv=%s)",
+        message.wa_message_id,
+        job.id,
+        account.id,
+        conversation.id,
     )
     return job.id

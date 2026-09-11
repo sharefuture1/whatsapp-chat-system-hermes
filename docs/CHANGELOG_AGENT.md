@@ -1,3 +1,11 @@
+## 2026-09-11：入站自动翻译异步化、全局内容哈希去重（零 AI 调用）与前端非外文拦截（PERF-004 / SDD-P1-05）
+
+- **PERF-004 / SDD-P1-05（入站自动翻译后端化）**：新增 `src/whatsapp_chat_system/events/inbound_translation.py`，并在 `events/whatsapp.py` 的 `message.upsert` 中接线。入站外语消息由服务端自动入队 `TranslationBatch`，彻底消除前端充当伪 Worker 循环扫描未翻译消息并发起 AI 调用的问题。
+- **全局翻译记忆库（Translation Memory）**：在 `TranslationDispatcher._build_plan` 与 `api/v1/conversations.py` 的 `queue_translation_batch` 中增加全库 `(source_text_hash, target_lang)` 历史译文匹配。凡是系统内曾经成功翻译过的相同文本，立即复用既有译文并标为 `completed`，耗时 0ms，外部 AI Provider 调用次数归零。
+- **非外文/空/符号快速拦截**：入站及前端 `ChatPane.jsx` 增加外文字符快速判定。纯中文、纯数字、电话号码、金额、纯符号、Emoji 与独立 URL 直接放行或就地标为 `completed`，不再提交到翻译队列或大模型。
+- **自动回复策略透明化**：`auto_reply.py` 补充结构化策略决策日志（记录 `account_disabled`、`account_policy_disabled` 等原因），方便排查为何未触发自动回复。
+- **门禁全绿**：新增 `tests/test_inbound_translation_dedupe.py` 5 项测试全部通过；全量 Python `374 passed / 7 skipped`；Web `130 passed`；Bridge `87 passed`；`ruff check` 与 `git diff --check` 均 0 错误。
+
 ## 2026-09-11：AI 配置热更新、回复语言与翻译状态可靠性（Python/Web 已发布）
 
 - FR-AI-008/010：设置 API 提交数据库后刷新共享 `StandaloneAISettingsManager`；缓存 Rewriter 的模型优先级改为联系人 > 账号 > 当前运行时全局模型。修复“界面已配置 Key，后台仍报 configuration_error”。
