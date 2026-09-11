@@ -1,0 +1,30 @@
+name: Source snapshot
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/source-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-snapshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Archive tracked source for reproducible offline review
+        run: git archive --format=tar --output="${RUNNER_TEMP}/hermes-source.tar" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-source-${{ github.sha }}
+          path: ${{ runner.temp }}/hermes-source.tar
+          retention-days: 1
+          if-no-files-found: error
