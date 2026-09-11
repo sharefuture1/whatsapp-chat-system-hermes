@@ -24,7 +24,7 @@ from ...runtime import StandaloneRuntime
 
 class UserSummary(BaseModel):
     username: str
-    role: str = 'operator'
+    role: str = "operator"
     allowed_account_ids: list[str] = Field(default_factory=list)
     created_at: float | None = None
 
@@ -37,7 +37,7 @@ class ChangePasswordRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=8, max_length=128)
-    role: str = Field(default='operator', pattern='^(admin|operator|viewer)$')
+    role: str = Field(default="operator", pattern="^(admin|operator|viewer)$")
     allowed_account_ids: list[str] = Field(default_factory=list)
 
 
@@ -59,8 +59,14 @@ def _list_users(runtime: StandaloneRuntime) -> list[UserSummary]:
     return [
         UserSummary(
             username=name,
-            role=str(record.get('role') or ('admin' if name == 'admin' else 'operator')),
-            allowed_account_ids=[str(x).strip() for x in (record.get('allowed_account_ids') or []) if str(x).strip()],
+            role=str(
+                record.get("role") or ("admin" if name == "admin" else "operator")
+            ),
+            allowed_account_ids=[
+                str(x).strip()
+                for x in (record.get("allowed_account_ids") or [])
+                if str(x).strip()
+            ],
             created_at=record.get("created_at"),
         )
         for name, record in users.items()
@@ -107,7 +113,9 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
             "hash": derived.hex(),
             "created_at": now,
             "role": body.role,
-            "allowed_account_ids": [str(x).strip() for x in body.allowed_account_ids if str(x).strip()],
+            "allowed_account_ids": [
+                str(x).strip() for x in body.allowed_account_ids if str(x).strip()
+            ],
         }
         runtime.web_settings["users"] = users
         save_runtime_settings(runtime)
@@ -175,14 +183,15 @@ def create_users_router(runtime: StandaloneRuntime) -> APIRouter:
         )
         user_record["salt"] = salt
         user_record["hash"] = derived.hex()
+        user_record["iterations"] = 600_000
+        user_record.pop("password_change_required", None)
         users[current_user] = user_record
         runtime.web_settings["users"] = users
 
-        # Invalidate all other sessions for this user (keep current one)
+        # SEC-AUTH-015: revoke the restricted session as well. Sign in with the new password.
         sessions: dict[str, Any] = dict(runtime.web_settings.get("sessions") or {})
-        current_token = request.headers.get("x-session-token", "")
         for tok, sess in list(sessions.items()):
-            if sess.get("username") == current_user and tok != current_token:
+            if sess.get("username") == current_user:
                 sessions.pop(tok, None)
         runtime.web_settings["sessions"] = sessions
 

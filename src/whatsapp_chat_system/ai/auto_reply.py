@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.ai.job_repository import AnalysisJobRepository
-from whatsapp_chat_system.db.models import Conversation, ContactAIOverride, Message, WhatsAppAccount
+from whatsapp_chat_system.db.models import (
+    Conversation,
+    ContactAIOverride,
+    Message,
+    WhatsAppAccount,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,31 +25,51 @@ class AutoReplyDecision:
     reason: str
 
 
-def decide_auto_reply(account: WhatsAppAccount, conversation: Conversation, *, contact_enabled: bool | None) -> AutoReplyDecision:
+def decide_auto_reply(
+    account: WhatsAppAccount,
+    conversation: Conversation,
+    *,
+    contact_enabled: bool | None,
+) -> AutoReplyDecision:
     if not account.enabled:
-        return AutoReplyDecision(False, 'account_disabled')
-    if account.status != 'online':
-        return AutoReplyDecision(False, 'account_offline')
-    if account.auto_reply_mode != 'auto':
-        return AutoReplyDecision(False, 'account_policy_disabled')
-    if conversation.ai_mode != 'auto':
-        return AutoReplyDecision(False, 'conversation_policy_disabled')
+        return AutoReplyDecision(False, "account_disabled")
+    if account.status != "online":
+        return AutoReplyDecision(False, "account_offline")
+    if account.auto_reply_mode != "auto":
+        return AutoReplyDecision(False, "account_policy_disabled")
+    if conversation.ai_mode != "auto":
+        return AutoReplyDecision(False, "conversation_policy_disabled")
     if contact_enabled is False:
-        return AutoReplyDecision(False, 'contact_policy_disabled')
-    return AutoReplyDecision(True, 'enabled')
+        return AutoReplyDecision(False, "contact_policy_disabled")
+    return AutoReplyDecision(True, "enabled")
 
 
-def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conversation: Conversation, message: Message) -> str | None:
+def enqueue_for_inbound_message(
+    session: Session,
+    account: WhatsAppAccount,
+    conversation: Conversation,
+    message: Message,
+) -> str | None:
     """Create one durable auto-reply analysis job; never call the provider here."""
-    if message.direction != 'inbound' or not message.wa_message_id:
+    if message.direction != "inbound" or not message.wa_message_id:
         return None
-    if message.message_type == 'system':
+    if message.message_type == "system":
         return None
-    override = session.scalar(select(ContactAIOverride).where(
-        ContactAIOverride.account_id == account.id,
-        ContactAIOverride.contact_id == conversation.contact_id,
-    )) if conversation.contact_id else None
-    decision = decide_auto_reply(account, conversation, contact_enabled=override.auto_reply_enabled if override else None)
+    override = (
+        session.scalar(
+            select(ContactAIOverride).where(
+                ContactAIOverride.account_id == account.id,
+                ContactAIOverride.contact_id == conversation.contact_id,
+            )
+        )
+        if conversation.contact_id
+        else None
+    )
+    decision = decide_auto_reply(
+        account,
+        conversation,
+        contact_enabled=override.auto_reply_enabled if override else None,
+    )
     if not decision.enabled:
         logger.info(
             "Auto-reply skipped for inbound message %s: reason=%s (account=%s, conv=%s)",
@@ -54,12 +79,20 @@ def enqueue_for_inbound_message(session: Session, account: WhatsAppAccount, conv
             conversation.id,
         )
         return None
-    source = json.dumps({'message_id': message.id, 'account_id': account.id, 'content': message.content or '', 'policy': account.auto_reply_mode}, sort_keys=True)
+    source = json.dumps(
+        {
+            "message_id": message.id,
+            "account_id": account.id,
+            "content": message.content or "",
+            "policy": account.auto_reply_mode,
+        },
+        sort_keys=True,
+    )
     input_hash = hashlib.sha256(source.encode()).hexdigest()
-    key = f'auto-reply:{account.id}:{message.wa_message_id}:{account.auto_reply_mode}'
+    key = f"auto-reply:{account.id}:{message.wa_message_id}:{account.auto_reply_mode}"
     job = AnalysisJobRepository(session).enqueue(
         account_id=account.id,
-        job_type='auto_reply',
+        job_type="auto_reply",
         idempotency_key=key,
         input_hash=input_hash,
         contact_id=conversation.contact_id,

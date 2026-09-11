@@ -28,6 +28,7 @@ from whatsapp_chat_system.db.models import (
     WhatsAppAccount,
 )
 from whatsapp_chat_system.outbox import enqueue_outbox_message
+from whatsapp_chat_system.translation_hash import source_text_hash
 
 PLATFORM = "whatsapp"
 
@@ -43,7 +44,7 @@ def _display_name(*values: Any) -> str | None:
 
 
 def _source_text_hash(text: str) -> str:
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+    return source_text_hash(text)
 
 
 def _fallback_contact_name(remote_jid: str) -> str:
@@ -949,44 +950,60 @@ def create_conversations_router(
                 continue
             existing = session.scalar(
                 select(MessageTranslation).where(
+                    MessageTranslation.account_id == conversation.account_id,
                     MessageTranslation.message_id == message.id,
                     MessageTranslation.target_lang == payload.target_lang,
                     MessageTranslation.source_text_hash == _source_text_hash(text),
-                    MessageTranslation.status == "completed",
                 )
             )
-            if existing is not None:
+            if existing is not None and existing.status == "completed":
                 cached_message_ids.append(message.id)
             else:
-                # 全局翻译记忆库查询：若其他消息曾翻译过相同原文，直接复用
+                # 账号内翻译记忆库查询：若本账号其他消息曾翻译过相同原文，直接复用
                 global_hit = session.scalar(
-                    select(MessageTranslation).where(
+                    select(MessageTranslation)
+                    .where(
+                        MessageTranslation.account_id == conversation.account_id,
                         MessageTranslation.target_lang == payload.target_lang,
                         MessageTranslation.source_text_hash == _source_text_hash(text),
                         MessageTranslation.status == "completed",
                         MessageTranslation.translated_text.is_not(None),
-                    ).order_by(MessageTranslation.id.desc()).limit(1)
-                )
-                if global_hit is not None:
-                    new_trans = MessageTranslation(
-                        account_id=conversation.account_id,
-                        conversation_id=conversation.id,
-                        message_id=message.id,
-                        source_text=text,
-                        source_text_hash=_source_text_hash(text),
-                        source_lang=global_hit.source_lang or lang,
-                        target_lang=payload.target_lang,
-                        translated_text=global_hit.translated_text,
-                        status="completed",
-                        provider=global_hit.provider or "cache_memory",
-                        model=global_hit.model or "cache_memory",
-                        context_window_size=payload.window_size,
                     )
-                    session.add(new_trans)
+                    .order_by(
+                        MessageTranslation.updated_at.desc(),
+                        MessageTranslation.id.desc(),
+                    )
+                    .limit(1)
+                )
+                if global_hit is not None and global_hit.translated_text:
+                    new_trans = existing
+                    if new_trans is None:
+                        new_trans = MessageTranslation(
+                            account_id=conversation.account_id,
+                            conversation_id=conversation.id,
+                            message_id=message.id,
+                            target_lang=payload.target_lang,
+                            source_text_hash=_source_text_hash(text),
+                        )
+                        session.add(new_trans)
+                    new_trans.source_text = text
+                    new_trans.source_lang = global_hit.source_lang or lang
+                    new_trans.translated_text = global_hit.translated_text
+                    new_trans.status = "completed"
+                    new_trans.provider = global_hit.provider or "cache_memory"
+                    new_trans.model = global_hit.model or "cache_memory"
+                    new_trans.context_window_size = payload.window_size
+                    new_trans.error_code = None
+                    new_trans.error_message = None
+                    new_trans.retry_after = None
+                    new_trans.completed_at = datetime.now(timezone.utc)
                     cached_message_ids.append(message.id)
                 else:
                     queued_message_ids.append(message.id)
         if not queued_message_ids:
+            # A cache-only response may have inserted/updated translations above.
+            # Commit before acknowledging completion; dependency teardown only closes.
+            session.commit()
             return {
                 "batch_id": None,
                 "status": "completed",

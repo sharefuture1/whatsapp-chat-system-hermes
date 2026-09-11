@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from uuid import uuid4
 from sqlalchemy import select
@@ -15,8 +14,7 @@ from whatsapp_chat_system.db.models import (
 )
 
 
-def source_text_hash(text: str) -> str:
-    return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
+from whatsapp_chat_system.translation_hash import source_text_hash
 
 
 def detect_language_hint(text: str) -> str:
@@ -41,7 +39,9 @@ def is_translatable_text(text: str) -> bool:
     if re.match(r"^https?://\S+$", content, re.IGNORECASE):
         return False
     # Filter pure digits, punctuation, and spaces
-    if re.match(r"^[\d\s\W_]+$", content) and not re.search(r"[\u0E80-\u0EFF\u0E00-\u0E7FA-Za-z]", content):
+    if re.match(r"^[\d\s\W_]+$", content) and not re.search(
+        r"[\u0E80-\u0EFF\u0E00-\u0E7FA-Za-z]", content
+    ):
         return False
     lang = detect_language_hint(content)
     if lang == "Chinese":
@@ -60,13 +60,13 @@ def enqueue_for_inbound_translation(
     """入站消息翻译异步入队或就地完成。
 
     1. 纯中文消息：直接落 completed 记录，无需调用 AI；
-    2. 全局哈希命中：复用全库相同原文的已完成译文，0 次外部 AI 调用直接落库；
+    2. 账号内哈希命中：复用当前账号相同原文的已完成译文，0 次外部 AI 调用直接落库；
     3. 首次出现外语：入队 TranslationBatch，由后台 TranslationDispatcher 异步处理。
     """
     if message.direction != "inbound":
         return None
-    content = (message.content or "").strip()
-    if not content:
+    content = message.content or ""
+    if not content.strip():
         return None
 
     lang = detect_language_hint(content)
@@ -75,8 +75,11 @@ def enqueue_for_inbound_translation(
     # 1. 如果已存在当前消息的翻译记录，直接跳过
     current_trans = session.scalar(
         select(MessageTranslation).where(
+            MessageTranslation.account_id == account.id,
+            MessageTranslation.conversation_id == conversation.id,
             MessageTranslation.message_id == message.id,
             MessageTranslation.target_lang == target_lang,
+            MessageTranslation.source_text_hash == text_hash,
         )
     )
     if current_trans is not None and current_trans.status == "completed":
@@ -104,20 +107,21 @@ def enqueue_for_inbound_translation(
                 session.add(trans)
         return None
 
-    # 3. 全局翻译记忆库查询（Translation Memory）：全库查找相同原文哈希的历史译文
+    # 3. 账号内翻译记忆库查询（Translation Memory）：当前账号查找相同原文哈希的历史译文
     cached = session.scalar(
         select(MessageTranslation)
         .where(
+            MessageTranslation.account_id == account.id,
             MessageTranslation.target_lang == target_lang,
             MessageTranslation.source_text_hash == text_hash,
             MessageTranslation.status == "completed",
             MessageTranslation.translated_text.is_not(None),
         )
-        .order_by(MessageTranslation.id.desc())
+        .order_by(MessageTranslation.updated_at.desc(), MessageTranslation.id.desc())
         .limit(1)
     )
     if cached is not None and cached.translated_text:
-        # 全局缓存命中！复用历史译文，无需创建批次，无需调用 AI
+        # 账号内缓存命中！复用历史译文，无需创建批次，无需调用 AI
         if current_trans is None:
             trans = MessageTranslation(
                 id=str(uuid4()),
@@ -136,6 +140,9 @@ def enqueue_for_inbound_translation(
             )
             session.add(trans)
         else:
+            current_trans.source_text = content
+            current_trans.error_code = None
+            current_trans.error_message = None
             current_trans.source_text_hash = text_hash
             current_trans.source_lang = cached.source_lang or lang
             current_trans.translated_text = cached.translated_text
@@ -160,7 +167,7 @@ def enqueue_for_inbound_translation(
     if active_batch is not None:
         return active_batch.id
 
-    # 5. 未命中全局缓存：入队 TranslationBatch，交由后台 Worker 处理
+    # 5. 未命中账号内缓存：入队 TranslationBatch，交由后台 Worker 处理
     batch = TranslationBatch(
         id=str(uuid4()),
         account_id=account.id,
