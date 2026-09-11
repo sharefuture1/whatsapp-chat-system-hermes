@@ -263,11 +263,22 @@ class WhatsAppEventService:
             )
         )
         if existing is not None:
-            if existing.payload_hash != payload_hash:
-                raise EventConflictError(
-                    "event identity already exists with different payload"
-                )
-            return True
+            if existing.payload_hash == payload_hash:
+                return True
+            # Bridge intentionally gives message.upsert a stable event_id derived
+            # from the WhatsApp message ID. Baileys can redeliver the same message
+            # in a later callback, which changes transport metadata (sequence and
+            # occurred_at) without changing the business event. Accept that as an
+            # idempotent duplicate, while still rejecting a real payload collision.
+            if (
+                envelope.event_type == "message.upsert"
+                and existing.event_type == envelope.event_type
+                and existing.payload == envelope.payload
+            ):
+                return True
+            raise EventConflictError(
+                "event identity already exists with different payload"
+            )
 
         account = self.session.get(WhatsAppAccount, envelope.account_id)
         if account is None:
