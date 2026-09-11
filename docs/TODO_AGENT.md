@@ -56,7 +56,7 @@
   - [x] 过期 `running` 批次可被重新领取；`max_attempts` 上限
   - [x] 回归断言：AI 被调用时打开的数据库会话数必须为 0
 
-### P1 — 实时通道与 Vercel 部署（新规格已批准）
+### P1 — 实时通道与 Vercel 备用部署（当前生产前端已服务器同域托管）
 
 - [ ] **SDD-P1-12 SSE 实时事件通道**（RT-001/002/003 + PERF-004 翻译入库 + PERF-007 索引对齐）
 - [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
@@ -64,7 +64,7 @@
   - [x] 移除 `vercel.json` 硬编码后端代理改写，改为纯构建期变量驱动
   - [x] API CORS allowlist + nginx SSE `proxy_buffering off`：2026-09-11 已在 `whats.wending.ai` 生产源站验收，`wt.v.future1.us` 预检返回精确 allow-origin
   - [x] Vercel 环境隔离代码门禁：Production 固定 `https://whats.wending.ai/api`；Preview 指向生产 API 时构建 fail-closed
-  - [>] Vercel Production 手动发布：当前 `wt.v.future1.us` 仍是旧 bundle；2026-09-11 已尝试发布但被项目当天 `>100 deployments` 配额拒绝，配额恢复后需重新发布并验证新 bundle API base
+  - [>] Vercel Production 作为备用发布路径：当前生产已改为 `whats.wending.ai` 服务器同域 SPA；`wt.v.future1.us` 仍是旧 bundle，配额恢复后可更新作为灾备/CDN 入口
   - [ ] 版本哈希验证 + rollback 演练
 
 ### P0 — 24x7 AI 自动回复

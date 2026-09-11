@@ -1,3 +1,11 @@
+## 2026-09-11：当前生产前端使用服务器同域托管，Vercel 作为可选备用
+
+**决策**：`https://whats.wending.ai` 当前同时承载 React SPA 与 Standalone API。Nginx 从 `/opt/whatsapp-chat-system/web/dist` 服务静态前端，Browser 构建使用相对 `/api`；`/api/*` 继续代理 loopback FastAPI，`/internal/*` 不暴露。Vercel 保留为未来 CDN/备用发布路径，但不作为当前生产前端依赖。
+
+**原因**：当前 Vercel 项目存在每日部署配额限制，而用户明确要求前后端都部署到服务器。同域部署同时消除 Browser CORS 依赖，减少一个生产故障域，并保持 Vercel 拓扑可随时恢复。
+
+**关联规格**：`VCL-001/002/006`、`NFR-OPS-001`、`QA-001`。
+
 ## 2026-09-11：API readiness 与 Tauri transport 均保持窄边界
 
 **决策**：Standalone API 对外提供 `/health/live` 与 `/health/ready` 两个无鉴权窄探针；live 不依赖业务账号/Bridge，ready 只反映 API startup/schema readiness。详细 Worker 状态继续留在 `/api/health`，不把昂贵诊断逻辑塞进 liveness。

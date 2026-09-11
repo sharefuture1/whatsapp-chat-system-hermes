@@ -1,3 +1,10 @@
+## 2026-09-11：生产前端切回服务器同域托管 + admin 认证初始化
+
+- `whats.wending.ai` 由 Nginx 直接服务 `/opt/whatsapp-chat-system/web/dist`，React SPA 根路径与深链均返回 200；Browser 构建使用相对 `/api`，前端不再依赖 Vercel Production。
+- Nginx 保留 `/api/*` 反代、SSE 关闭 buffering、`/internal/*` 公网 404；静态 `assets/*` 长缓存，`index.html` no-cache。
+- 生产认证从 legacy 单密码结构迁移为正式 `admin` 用户，旧 session 清空；PBKDF2-SHA256 认证记录保持 600k iterations，密码仅交付用户，不写入 Git。
+- 生产验证：`/` 200、`/settings` 200、`/api/health` 200、API/Bridge systemd 均 active。
+
 ## 2026-09-11：API live/readiness + Web/Tauri transport 拆包
 
 - `NFR-OPS-002` 补齐 Standalone API `GET /health/live` 与 `GET /health/ready`：live 只表示进程可响应；ready 仅在 startup/schema readiness 完成时为 200，否则 503；保留 `/api/health` 作为聚合 Worker 诊断。
