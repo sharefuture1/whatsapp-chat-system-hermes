@@ -4,7 +4,7 @@ import hashlib
 import re
 from collections.abc import Callable, Generator
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -12,22 +12,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
 from whatsapp_chat_system.authz import (
     require_object_account_access,
     restrict_account_id,
     visible_account_ids_for,
 )
 from whatsapp_chat_system.db.models import (
-    Conversation,
     Contact,
     ContactAIOverride,
+    Conversation,
     Message,
     MessageTranslation,
     TranslationBatch,
     WhatsAppAccount,
 )
 from whatsapp_chat_system.outbox import enqueue_outbox_message
-
 
 PLATFORM = "whatsapp"
 
@@ -74,7 +74,7 @@ class TranslateRequest(BaseModel):
 
 class TranslationBatchRequest(BaseModel):
     anchor_message_id: str = Field(..., max_length=36)
-    target_lang: str = Field(default="zh-CN", max_length=32)
+    target_lang: Literal["zh-CN"] = "zh-CN"
     window_size: int = Field(default=10, ge=1, le=20)
 
 
@@ -214,6 +214,7 @@ def create_conversations_router(
                 )
                 or _fallback_contact_name(conversation.remote_jid),
                 "contact_id": conversation.contact_id,
+                "avatar_url": contact.avatar_url if contact else None,
                 "contact_profile": {
                     "remark": contact.remark if contact else None,
                     "notes": contact.notes if contact else None,
@@ -899,6 +900,22 @@ def create_conversations_router(
         )
         if anchor is None:
             raise HTTPException(status_code=404, detail="Anchor message not found")
+        active_batch = session.scalar(
+            select(TranslationBatch).where(
+                TranslationBatch.account_id == conversation.account_id,
+                TranslationBatch.conversation_id == conversation.id,
+                TranslationBatch.anchor_message_id == anchor.id,
+                TranslationBatch.target_lang == payload.target_lang,
+                TranslationBatch.window_size == payload.window_size,
+                TranslationBatch.status.in_(("pending", "claimed", "running")),
+            ).order_by(TranslationBatch.created_at.desc()).limit(1)
+        )
+        if active_batch is not None:
+            return {
+                "batch_id": active_batch.id, "status": active_batch.status,
+                "queued_message_ids": [], "cached_message_ids": [],
+                "target_lang": payload.target_lang, "window_size": payload.window_size,
+            }
         rows = session.scalars(
             select(Message)
             .where(
@@ -936,6 +953,12 @@ def create_conversations_router(
                 cached_message_ids.append(message.id)
             else:
                 queued_message_ids.append(message.id)
+        if not queued_message_ids:
+            return {
+                "batch_id": None, "status": "completed",
+                "queued_message_ids": [], "cached_message_ids": cached_message_ids,
+                "target_lang": payload.target_lang, "window_size": payload.window_size,
+            }
         batch = TranslationBatch(
             account_id=conversation.account_id,
             conversation_id=conversation.id,
@@ -954,6 +977,28 @@ def create_conversations_router(
             "target_lang": payload.target_lang,
             "window_size": payload.window_size,
         }
+
+    @router.get("/conversations/{conversation_id}/translations/{batch_id}")
+    def translation_batch_status(
+        request: Request, conversation_id: str, batch_id: str,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime, request, conversation.account_id,
+            not_found_detail="Conversation not found",
+        )
+        batch = session.scalar(select(TranslationBatch).where(
+            TranslationBatch.id == batch_id,
+            TranslationBatch.conversation_id == conversation.id,
+            TranslationBatch.account_id == conversation.account_id,
+        ))
+        if batch is None:
+            raise HTTPException(status_code=404, detail="Translation batch not found")
+        return {"batch_id": batch.id, "status": batch.status,
+                "error_code": batch.error_code, "target_lang": batch.target_lang}
 
     @router.post(
         "/conversations/{conversation_id}/translate",

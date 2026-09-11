@@ -696,6 +696,7 @@ function AppInner() {
               accountStatus={selectedConversationAccount?.status || 'offline'}
               platform={selectedConversation?.platform || ''}
               userName={selectedName}
+              avatarUrl={selectedConversation?.avatar_url || ''}
               contactProfile={selectedContactProfile}
               userOverride={selectedUserOverride}
               defaultReplyStyle={settings.web_settings?.reply?.default_reply_style || ''}

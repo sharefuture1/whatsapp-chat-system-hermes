@@ -39,7 +39,7 @@ export function setSessionToken(token) {
 }
 
 export function clearSessionToken() {
-  sessionToken = ''
+  setSessionToken('')
 }
 
 export function setUnauthorizedHandler(handler) {
@@ -118,15 +118,18 @@ async function transportFetch(input, init) {
   return globalThis.fetch(input, init)
 }
 
-async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = {}) {
+async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0, dedupe = true } = {}) {
   const key = cacheKey(path, method)
   if (method === 'GET' && cacheTtlMs > 0) {
     const cached = requestCache.get(key)
     if (cached && cached.expiresAt > Date.now()) return cached.data
   }
-  if (method === 'GET' && inflightRequests.has(key)) return inflightRequests.get(key)
+  if (method === 'GET' && dedupe && !signal && inflightRequests.has(key)) return inflightRequests.get(key)
   const operation = (async () => {
-    if (method !== 'GET') requestCache.clear()
+    if (method !== 'GET') {
+      requestCache.clear()
+      inflightRequests.clear()
+    }
     const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (sessionToken) headers['x-session-token'] = sessionToken
@@ -150,7 +153,7 @@ async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = 
   }
   return data
   })()
-  if (method === 'GET') {
+  if (method === 'GET' && dedupe && !signal) {
     inflightRequests.set(key, operation)
     operation.then(
       () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },

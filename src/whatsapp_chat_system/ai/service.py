@@ -33,6 +33,7 @@ class AIService:
         self.provider = provider
         self.settings = settings
         self.audit_logger = audit_logger
+        self.runtime_manager: Any = None
 
     def resolve_model(
         self,
@@ -46,7 +47,12 @@ class AIService:
         account = (account_model or '').strip()
         if account:
             return ModelResolution(account, 'account_profile')
-        return ModelResolution(self.settings.default_model, 'global_default')
+        model = (
+            self.runtime_manager.effective_model
+            if self.runtime_manager is not None
+            else self.settings.default_model
+        )
+        return ModelResolution(model, 'global_default')
 
     def chat(
         self,

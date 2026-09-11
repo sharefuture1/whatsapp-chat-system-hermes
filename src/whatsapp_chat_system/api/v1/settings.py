@@ -406,6 +406,9 @@ def create_settings_router(
         if payload.max_retries is not None:
             row.max_retries = payload.max_retries
         session.commit()
+        manager = getattr(request.app.state, "ai_settings_manager", None)
+        if manager is not None:
+            manager.apply_record(row)
         return {"success": True, **_ai_payload(runtime, row)}
 
     @router.post("/ai/test")

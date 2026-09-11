@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from conftest import create_profile
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from conftest import create_profile
 from whatsapp_chat_system.db.base import Base
 from whatsapp_chat_system.db.models import (
     Contact,
@@ -18,7 +18,6 @@ from whatsapp_chat_system.db.models import (
 )
 from whatsapp_chat_system.events.whatsapp import WhatsAppEventEnvelope, canonical_hash
 from whatsapp_chat_system.web_api import build_app
-
 
 TOKEN = "internal-test-secret"
 
@@ -217,7 +216,7 @@ def test_message_upsert_is_atomic_scoped_and_duplicate_does_not_increment_unread
         assert message.contact_id == contact.id
         assert message.direction == "inbound"
         assert message.occurred_at == datetime(
-            2026, 7, 10, tzinfo=timezone.utc
+            2026, 7, 10, tzinfo=UTC
         ).replace(tzinfo=None)
         assert message.received_at is not None
         assert event.status == "processed"
@@ -361,9 +360,15 @@ def test_v1_conversation_prefers_contact_name_and_only_then_chat_title(events_ap
     login = client.post("/api/login", json={"password": "test-pass"})
     client.headers.update({"x-session-token": login.json()["session_token"]})
 
+    with factory() as db:
+        contact = db.scalar(select(Contact).where(Contact.remote_jid == "person@lid"))
+        contact.avatar_url = "https://cdn.example/person.jpg"
+        db.commit()
+
     response = client.get("/api/v1/conversations?account_id=account-a")
     assert response.status_code == 200
     assert response.json()["items"][0]["user_name"] == "WhatsApp 原始名称"
+    assert response.json()["items"][0]["avatar_url"] == "https://cdn.example/person.jpg"
 
     with factory() as db:
         contact = db.scalar(select(Contact).where(Contact.remote_jid == "person@lid"))
@@ -510,6 +515,60 @@ def test_contact_chat_history_batches_preserve_manual_fields_and_group_boundary(
             ).unread_count
             == 0
         )
+
+
+def test_sparse_contact_updates_preserve_existing_name_avatar_and_history_backfills_only_missing_name(events_api):
+    client, factory = events_api
+    initial = {
+        "schema_version": 1,
+        "items": [{
+            "remote_jid": "named@lid",
+            "display_name": "Synced Name",
+            "avatar_url": "https://cdn.example/named.jpg",
+        }],
+    }
+    assert post(client, envelope("contact-initial", "contacts.upsert", payload=initial)).status_code == 200
+
+    sparse = {
+        "schema_version": 1,
+        "items": [{
+            "remote_jid": "named@lid",
+            "display_name": None,
+            "avatar_url": None,
+        }],
+    }
+    assert post(client, envelope("contact-sparse", "contacts.update", sequence=2, payload=sparse)).status_code == 200
+
+    history_named = {
+        "schema_version": 1,
+        "items": [message_payload(
+            wa_message_id="hist-named",
+            remote_jid="named@lid",
+            sender_jid="named@lid",
+            push_name="Old History Name",
+            timestamp="2026-07-09T00:00:00Z",
+        )],
+    }
+    assert post(client, envelope("hist-named", "history.messages.upsert", sequence=3, payload=history_named)).status_code == 200
+
+    history_missing = {
+        "schema_version": 1,
+        "items": [message_payload(
+            wa_message_id="hist-missing",
+            remote_jid="missing@lid",
+            sender_jid="missing@lid",
+            push_name="Recovered From History",
+            timestamp="2026-07-09T00:01:00Z",
+        )],
+    }
+    assert post(client, envelope("hist-missing", "history.messages.upsert", sequence=4, payload=history_missing)).status_code == 200
+
+    with factory() as db:
+        named = db.scalar(select(Contact).where(Contact.remote_jid == "named@lid"))
+        missing = db.scalar(select(Contact).where(Contact.remote_jid == "missing@lid"))
+        assert named.display_name == "Synced Name"
+        assert named.avatar_url == "https://cdn.example/named.jpg"
+        assert missing.display_name == "Recovered From History"
 
 
 def test_chat_unread_is_authoritative_when_present_and_partial_update_preserves_it(

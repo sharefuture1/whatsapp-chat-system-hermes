@@ -7,15 +7,40 @@ function jidKind(jid) {
   return null;
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const text = value.trim();
+    if (text) return text;
+  }
+  return null;
+}
+
 export function normalizeContact(item = {}) {
   const jid = item.id ?? item.remote_jid;
   if (jidKind(jid) !== 'dm') return null;
+  const displayName = firstText(
+    item.name,
+    item.notify,
+    item.verifiedName,
+    item.verifiedBizName,
+    item.shortName,
+    item.formattedName,
+    item.pushName,
+    item.displayName,
+    item.display_name,
+    item.push_name,
+  );
+  const explicitPhone = firstText(item.phone_number, item.phoneNumber, item.pn);
+  const phoneNumber = explicitPhone ?? (jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : null);
+  const lid = firstText(item.lid) ?? (jid.endsWith('@lid') ? jid : null);
+  const avatarUrl = firstText(item.imgUrl, item.avatarUrl, item.avatar_url);
   return {
     remote_jid: jid,
-    display_name: item.name ?? item.notify ?? item.verifiedName ?? item.display_name ?? item.push_name ?? null,
-    phone_number: item.phone_number ?? (jid.endsWith('@s.whatsapp.net') ? jid.split('@')[0] : null),
-    lid: item.lid ?? (jid.endsWith('@lid') ? jid : null),
-    avatar_url: item.imgUrl ?? item.avatar_url ?? null,
+    ...(displayName ? { display_name: displayName } : {}),
+    ...(phoneNumber ? { phone_number: phoneNumber } : {}),
+    ...(lid ? { lid } : {}),
+    ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
   };
 }
 
@@ -24,12 +49,16 @@ export function normalizeChat(item = {}) {
   const kind = jidKind(jid);
   if (!kind) return null;
   const timestamp = Number(item.conversationTimestamp ?? item.last_message_timestamp);
+  const title = firstText(item.name, item.subject, item.title, item.notify, item.pushName);
+  const preview = firstText(item.last_message_preview, item.lastMessagePreview);
   return {
     remote_jid: jid,
     conversation_type: kind,
-    title: item.name ?? item.subject ?? item.title ?? null,
-    last_message_at: Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000).toISOString() : null,
-    last_message_preview: item.last_message_preview ?? null,
+    ...(title ? { title } : {}),
+    ...(Number.isFinite(timestamp) && timestamp > 0
+      ? { last_message_at: new Date(timestamp * 1000).toISOString() }
+      : {}),
+    ...(preview ? { last_message_preview: preview } : {}),
     ...(item.unreadCount !== undefined || item.unread_count !== undefined
       ? { unread_count: Math.max(0, Number(item.unreadCount ?? item.unread_count) || 0) }
       : {}),

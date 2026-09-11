@@ -12,7 +12,8 @@ from sqlalchemy import select
 from .job_repository import AnalysisJobRepository, JobLease, claim_next_committed
 from .provider import AIProvider, AIProviderError
 from .service import AIService
-from ..db.models import ContactAIOverride, Conversation, Message, WhatsAppAccount
+from ..db.models import AnalysisJob, Contact, ContactAIOverride, Conversation, Message, WhatsAppAccount
+from .reply_language import matches_reply_language, reply_language, reply_language_instruction
 from ..outbox import enqueue_outbox_message
 from ..settings import AISettings
 
@@ -50,6 +51,8 @@ class AutoReplyWorker:
         self.failed = 0
         self.recovered_leases = 0
         self._last_recovery_second: int | None = None
+        self._cached_provider: AIProvider | None = None
+        self._cached_settings: AISettings | None = None
 
     def _settings(self) -> AISettings:
         return AISettings(
@@ -65,15 +68,28 @@ class AutoReplyWorker:
             return self.provider_factory(settings)
         from .provider import WendingAIProvider
 
-        return WendingAIProvider(settings)
+        if self._cached_provider is None or self._cached_settings != settings:
+            self.close()
+            self._cached_provider = WendingAIProvider(settings)
+            self._cached_settings = settings
+        return self._cached_provider
+
+    def close(self) -> None:
+        if self._cached_provider is not None:
+            self._cached_provider.close()
+            self._cached_provider = None
 
     def run_once(self) -> bool:
         self.last_heartbeat = datetime.now(timezone.utc)
         self._recover_if_due()
+        settings = self._settings()
+        # The lease must cover bounded provider retries, not expire mid-generation.
+        lease_seconds = min(3600, max(self.config.lease_seconds,
+            settings.timeout_seconds * (settings.max_retries + 1) + 30))
         lease = claim_next_committed(
             self.session_factory,
             worker_id=self.worker_id,
-            lease_seconds=self.config.lease_seconds,
+            lease_seconds=lease_seconds,
             max_active_global=self.config.max_active,
             max_active_per_account=self.config.max_active,
         )
@@ -81,6 +97,7 @@ class AutoReplyWorker:
             return False
         try:
             self._process(lease)
+            self.last_error = None
             self.processed += 1
         except AIProviderError as exc:
             self.failed += 1
@@ -156,7 +173,6 @@ class AutoReplyWorker:
                 select(Message.id)
                 .where(
                     Message.conversation_id == conversation.id,
-                    Message.direction == "outbound",
                     Message.occurred_at > message.occurred_at,
                 )
                 .limit(1)
@@ -176,12 +192,13 @@ class AutoReplyWorker:
                 ).all()
             )
             recent.reverse()
-            messages = [
-                {
-                    "role": "system",
-                    "content": "Reply concisely in the user's language. Return only the reply text. Do not claim actions you did not take.",
-                }
-            ]
+            contact = session.get(Contact, conversation.contact_id) if conversation.contact_id else None
+            language = reply_language(
+                message.content or "", contact.language if contact else None,
+                [item.content or "" for item in recent if item.direction == "inbound"],
+            )
+            contact_model = override.model if override else None
+            messages = [{"role": "system", "content": reply_language_instruction(language)}]
             messages.extend(
                 {
                     "role": "user" if item.direction == "inbound" else "assistant",
@@ -194,8 +211,9 @@ class AutoReplyWorker:
             source_occurred_at = message.occurred_at
 
         # 阶段二：无 session 状态下调用 AI（最长可达 Provider 超时+重试时长）
-        service = AIService(self._provider(self._settings()), self._settings())
-        result = service.chat(messages=messages).result.content.strip()
+        settings = self._settings()
+        service = AIService(self._provider(settings), settings)
+        result = service.chat(messages=messages, contact_model=contact_model).result.content.strip()
         if not result:
             raise AIProviderError(
                 code="empty_ai_reply",
@@ -203,11 +221,22 @@ class AutoReplyWorker:
                 retryable=True,
             )
 
+        if not matches_reply_language(result, language):
+            raise AIProviderError(code="reply_language_mismatch", message="Reply language did not match customer input", retryable=True)
+
         # 阶段三：新短事务——重校验人工回复竞态后写回；complete 走 version CAS
         with self.session_factory() as session:
             repo = AnalysisJobRepository(session)
             conversation = session.get(Conversation, conversation_id)
-            if conversation is None:
+            account = session.get(WhatsAppAccount, lease.account_id)
+            override = session.scalar(select(ContactAIOverride).where(
+                ContactAIOverride.account_id == lease.account_id,
+                ContactAIOverride.contact_id == conversation.contact_id,
+            )) if conversation and conversation.contact_id else None
+            if (conversation is None or account is None or not account.enabled
+                    or account.auto_reply_mode != "auto" or conversation.ai_mode != "auto"
+                    or conversation.deleted_at is not None
+                    or (override and override.auto_reply_enabled is False)):
                 repo.cancel(lease.account_id, lease.id, job_version)
                 session.commit()
                 return
@@ -215,7 +244,6 @@ class AutoReplyWorker:
                 select(Message.id)
                 .where(
                     Message.conversation_id == conversation.id,
-                    Message.direction == "outbound",
                     Message.occurred_at > source_occurred_at,
                 )
                 .limit(1)
@@ -237,6 +265,13 @@ class AutoReplyWorker:
         with self.session_factory() as session:
             repo = AnalysisJobRepository(session)
             try:
+                current = session.get(AnalysisJob, lease.id)
+                if current is None or current.account_id != lease.account_id or current.lease_owner != self.worker_id:
+                    return
+                if not retryable:
+                    repo.cancel(lease.account_id, lease.id, current.version)
+                    session.commit()
+                    return
                 delay = 0
                 if retryable:
                     base = min(300, 30 * (2 ** max(0, lease.attempts - 1)))
@@ -245,7 +280,7 @@ class AutoReplyWorker:
                     lease.account_id,
                     lease.id,
                     self.worker_id,
-                    lease.version,
+                    current.version,
                     code,
                     delay,
                 )

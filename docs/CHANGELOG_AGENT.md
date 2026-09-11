@@ -1,3 +1,27 @@
+## 2026-09-11：AI 配置热更新、回复语言与翻译状态可靠性（Python/Web 已发布）
+
+- FR-AI-008/010：设置 API 提交数据库后刷新共享 `StandaloneAISettingsManager`；缓存 Rewriter 的模型优先级改为联系人 > 账号 > 当前运行时全局模型。修复“界面已配置 Key，后台仍报 configuration_error”。
+- FR-AI-013：自动回复从最新有意义入站文本选择语言，模糊输入使用联系人偏好/近期入站；明确文字系统的错误语言输出不入 Outbox。AI 返回后重查停止开关及新消息竞态；失败持久化使用 start 后的实际 job version，lease 覆盖超时/重试预算；复用 Provider 连接。
+- FR-AI-014：空/照抄译文不再标成功；含失败条目的批次返回 failed；原文哈希保持精确空白；相同活动窗口复用批次，无待译项不创建空任务；新增 account-scoped 批次状态 API。当前目标支持简体中文，其他目标显式拒绝，不伪造支持。
+- 页面通过可中断、逐步放缓轮询读取真实批次状态，fresh GET 绕过旧缓存和 in-flight 合并，优先翻译最近消息。删除损坏的硬编码泰/老词义及强制 60 字摘要限制，保留原文语义与数字。
+- 全量回归：Python 367 passed / 7 skipped（PostgreSQL）；Web 130 passed；Bridge 87 passed + lint；Browser/Tauri 构建及 Tauri 配置校验通过。核心静态检查 E4/E7/E9/F 与 diff check 通过；完整 Ruff 风格/额外规则尚有既存与改动文件问题，未宣称全量 Ruff 通过。
+- 生产实际操作仅重启现有稳定 API，加载已经保存的 DB AI 配置；API/Bridge 均 active。随后用既有合法会话将一条已失败泰语消息重新提交翻译，5.0 秒内完成，生成 8 字译文，无错误、无 WhatsApp 出站发送。
+- 实际 Provider 探针：早先泰/老 -> 中文 JSON 成功（5.268 秒）；后续四语回复探针只有泰语在 35 秒测试预算内成功，其余及另一批翻译超时。不得把 mock 回归或单条恢复当作四语生产稳定性验收。
+- 账号与 95 个会话自动回复仍关闭，未批量启用。联系人开关与账号/会话策略联动 UI 仍需单独完善，当前不能据开关外观认定已自动发送。
+- 发布通过标准构建产物路径完成：新增 wheel 运行时迁移定位（两个 RED/GREEN 用例）；wheel 安装到生产虚拟环境、API 正常重启。Python 实际加载 site-packages，不再直接加载旧生产源码。前端由 Vite 构建到 Nginx dist，未清空旧 hash assets；公网新 JS `index-D8sPGRC4.js` 为 200 / 364932 bytes，CSS 为 200 / 85377 bytes；首页、深链、API 和 live/ready 均 200，内部事件仍 404。未执行数据库迁移、未重置会话或 Bridge。全量回归加 wheel 用例合计 369 passed / 7 skipped。
+- 认证改用发行版 GitHub CLI 与已配置登录环境，账户核验 sharefuture1、标准 credential helper dry-run 成功，不输出 token。Vercel 根/web 配置关闭自动 Git 部署。前次 Bridge JS 改动未由本轮 wheel 发布；旧联系人 shell 脚本不能作为完整的新版本部署入口。
+
+## 2026-09-11：联系人姓名/头像/历史同步算法修复（待生产 root 切换）
+
+- 修复 `contacts.update/chats.update` 稀疏事件把缺失字段序列化成 `null`，导致后端误清空 `display_name/avatar_url/title` 的问题；现在仅同步 WhatsApp 实际提供的字段。
+- 历史消息 `pushName` 改为只补空名称/占位名称，不覆盖已有真实姓名或人工备注；会话 API 增加 `avatar_url`。
+- Bridge 新增非阻塞头像 enrichment：`profilePictureUrl(jid)` 走独立 2-lane 队列，成功缓存 6h、失败缓存 1h、队列上限 200，不阻塞 message/contact 事件主链路。
+- 历史同步从“按输入顺序满 2000 即截断”改为“每会话最多 200 + 全局选择最近 2000”，避免前几个活跃会话饿死后续联系人。
+- Web 会话列表、聊天头部、入站气泡、通讯录和联系人详情均接入真实 `avatar_url`，加载失败回退 initials；图片启用 lazy loading。
+- 回归：Python `356 passed / 7 skipped`，Web `126 passed`，Bridge `87 passed` + lint，Web build/Tauri validator 通过；专项验证 11 个会话在全局 2000 历史上限下仍有覆盖，头像网络 IO 不阻塞消息事件。
+- 当前生产基线：106 contacts、24 个真人名、1 个头像、95 conversations、953 messages；账号状态为 1 个 online、1 个 qr_pending，spool pending/inflight 均为 0。
+- `/opt/whatsapp-chat-system` 仍是 root:root 只读运行副本；DevSpace shell 按策略不能执行系统文件修改。已生成 `/home/young11/deploy-whatsapp-contact-sync-fix.sh`，包含备份/回滚、运行文件同步、Web bundle 发布、Bridge→API 顺序重启、账号 reconciliation、55 秒同步等待、覆盖率/spool/线上 health 验收。需由主机 sudo 执行一次后才可标 Production Verified。
+
 ## 2026-09-11：六小时优化轮次——spool HMAC 重放修复、systemd 沙箱与静态缓存
 
 - 修复 Bridge 启动 replay 既有 spool 时未把 `WHATSAPP_BRIDGE_HMAC_SECRET` 传给 `EventSink` 的缺陷；此前服务重启后 replay sink 会持续向已启用 HMAC 的 API 发送无签名请求并得到 401。新增真实 `startBridge` replay 回归，校验 timestamp / nonce / HMAC 签名与实际 body 一致。

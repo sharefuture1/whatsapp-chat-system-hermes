@@ -2,6 +2,18 @@
 
 ## 当前优先级排序
 
+### P0 — AI 语言与翻译可靠性（2026-09-11）
+
+- [x] 共享 AI 配置保存后热更新；缓存 Rewriter 跟随当前全局模型，联系人/账号覆盖优先。
+- [x] 翻译空/原文照抄结果与部分失败不再伪装成功；精确原文 hash、活动批次复用、状态 API、页面 fresh GET 与可中断轮询。
+- [x] 自动回复入站语言提示、明确错误文字系统拦截、生成后 opt-out/新消息重查、Job 当前版本失败 CAS 与完整超时预算 lease；Provider 复用。
+- [x] Python wheel 安装到生产虚拟环境，保留旧源码回滚；前端构建到 Nginx dist 并验证新 JS/CSS；无数据库迁移、无重置 WhatsApp session。API/Bridge 与公共端点验收正常。
+- [x] GitHub CLI 使用已配置登录环境验证 sharefuture1，标准 Git credential helper dry-run 成功；Vercel Git 自动构建关闭。
+- [ ] 真实测试联系人四语自动收发验收：当前账号/会话 off 未改变，不以临时 mock 测试代替真实发送；上游 35 秒探针有超时，继续观测。
+- [ ] 联系人自动回复 UI 与账号/会话策略联动：原端点仅保存 override，不能仅凭 UI enabled 判断 ready。
+- [ ] 完整 Ruff 风格/额外规则清理；本轮核心 E4/E7/E9/F、全量功能测试与构建已通过。
+- [ ] 前一轮 Bridge JS 头像补拉/历史选择发布（Python wheel 不包含 Bridge JS）；旧联系人复制脚本不能覆盖新 wheel 发布流程。
+
 ### P1 — 部署能力验证（2026-09-10 落地，待环境验证）
 
 代码已实现并完成本机能验证的部分（见 `docs/CHANGELOG_AGENT.md` 2026-09-10）。
@@ -324,6 +336,14 @@
 - [x] **中文文案覆盖 + 联系人显示名优先级（FR-CON-013 / UX-011）**
   - 中文 locale 已补齐遗留英文文案，并由静态测试阻止未翻译英文回归
   - 联系人显示固定为人工备注 → WhatsApp 同步名称 → 会话标题 → 远端 ID
+- [>] **联系人姓名/头像/历史同步修复（FR-CON-011/013）**
+  - [x] 稀疏 contact/chat update 不再用 null 清空已有 display_name/avatar_url/title
+  - [x] 历史 pushName 只补空名称/占位名称，不覆盖已有真实姓名或人工备注
+  - [x] Bridge `profilePictureUrl` 独立 2-lane enrichment 队列，成功 TTL 6h / 失败 TTL 1h，不阻塞消息事件
+  - [x] 历史全局 2000 上限改为每会话最多 200 + 全局最近优先，避免后续会话饿死
+  - [x] Web 会话列表/聊天头部/入站气泡/通讯录/联系人详情接入 avatar_url + initials fallback
+  - [x] 门禁：Python 356 passed / 7 skipped；Web 126 passed；Bridge 87 passed + lint
+  - [ ] root 执行 `/home/young11/deploy-whatsapp-contact-sync-fix.sh`，完成 `/opt` 切换并对比生产 106 contacts / 24 真人名 / 1 头像基线
 - [x] **中文最高优先级 + 认证 API 可见性**
   - 语言默认/未知/缺失 key 统一回退中文；升级语言缓存 key，旧英文缓存不再覆盖默认中文
   - 人设目录使用统一 session API 客户端，401/5xx 显示错误而不是伪装为空人设目录

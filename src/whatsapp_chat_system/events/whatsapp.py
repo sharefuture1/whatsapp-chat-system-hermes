@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +17,6 @@ from whatsapp_chat_system.db.models import (
     WhatsAppEvent,
     utc_now,
 )
-
 
 EventType = Literal[
     "account.qr",
@@ -41,6 +40,11 @@ EventType = Literal[
 
 def _fallback_name(remote_jid: str) -> str:
     return "WhatsApp 联系人" if remote_jid.endswith("@lid") else remote_jid
+
+
+def _is_placeholder_name(value: str | None, remote_jid: str) -> bool:
+    text = str(value or "").strip()
+    return not text or text in {"WhatsApp 联系人", remote_jid} or "@" in text
 
 
 # SQLite 默认参数上限 999，批量 IN 查询按此分片
@@ -76,7 +80,7 @@ class _IngestLookup:
         *,
         remote_jids: list[str],
         wa_message_ids: list[str],
-    ) -> "_IngestLookup":
+    ) -> _IngestLookup:
         lookup = cls(session, account_id)
         for chunk in _chunked(sorted(set(remote_jids))):
             for row in session.scalars(
@@ -232,7 +236,7 @@ def canonical_hash(envelope: WhatsAppEventEnvelope) -> str:
 def _naive_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _safe_payload(envelope: WhatsAppEventEnvelope) -> dict[str, Any]:
@@ -322,7 +326,7 @@ class WhatsAppEventService:
                 self._upsert_message(
                     account,
                     item,
-                    update_contact_name=False,
+                    update_contact_name=True,
                     historical=True,
                     lookup=lookup,
                 )
@@ -355,8 +359,15 @@ class WhatsAppEventService:
                 self.session.add(contact)
                 lookup.add_contact(contact)
             for field in ("display_name", "phone_number", "lid", "avatar_url"):
-                if field in item.model_fields_set:
-                    setattr(contact, field, getattr(item, field))
+                if field not in item.model_fields_set:
+                    continue
+                value = getattr(item, field)
+                # WhatsApp partial contact updates routinely omit optional fields.
+                # Older Bridge versions serialized those omissions as null; never
+                # erase an already synchronized truth with such sparse updates.
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    continue
+                setattr(contact, field, value)
 
     def _upsert_chats(
         self, account: WhatsAppAccount, payload: ChatBatchPayload
@@ -388,7 +399,7 @@ class WhatsAppEventService:
                 lookup.add_conversation(conversation)
             elif contact:
                 conversation.contact_id = contact.id
-            if "title" in item.model_fields_set:
+            if "title" in item.model_fields_set and item.title:
                 conversation.title = item.title
             if item.last_message_at is not None:
                 occurred_at = _naive_utc(item.last_message_at)
@@ -433,7 +444,13 @@ class WhatsAppEventService:
                 self.session.flush()
                 lookup.add_contact(contact)
             elif update_contact_name and payload.push_name:
-                contact.display_name = payload.push_name
+                # Live pushName may reflect a rename. Historical pushName is older
+                # and may only fill a missing/placeholder value, never overwrite a
+                # newer synced contact name.
+                if not historical or _is_placeholder_name(
+                    contact.display_name, payload.remote_jid
+                ):
+                    contact.display_name = payload.push_name
 
         conversation = lookup.conversation(payload.remote_jid)
         if conversation is None:
@@ -491,6 +508,15 @@ class WhatsAppEventService:
             )
             if payload.push_name:
                 conversation.title = payload.push_name
+        elif (
+            historical
+            and payload.push_name
+            and _is_placeholder_name(conversation.title, payload.remote_jid)
+        ):
+            # A chats.upsert snapshot may have advanced last_message_at before the
+            # bounded history batch arrives. Recover a human title without moving
+            # the conversation timestamp backwards.
+            conversation.title = payload.push_name
         return message
 
     def _apply_account_status(

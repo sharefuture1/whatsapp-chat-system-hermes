@@ -133,13 +133,17 @@ class StandaloneAISettingsManager:
                 row = session.get(AIRuntimeSetting, "global")
                 if row is None:
                     return
-                self._model = row.default_model or None
-                self._base_url = row.base_url or None
-                self._ciphertext = row.api_key_ciphertext or None
-                self._timeout = row.timeout_seconds or None
-                self._retries = row.max_retries
+                self.apply_record(row)
         except Exception:
             return
+
+    def apply_record(self, row: Any) -> None:
+        """Apply a committed DB row to the shared in-process AI configuration."""
+        self._model = row.default_model or None
+        self._base_url = row.base_url or None
+        self._ciphertext = row.api_key_ciphertext or None
+        self._timeout = row.timeout_seconds or None
+        self._retries = row.max_retries
 
     @property
     def effective_api_key(self) -> str:

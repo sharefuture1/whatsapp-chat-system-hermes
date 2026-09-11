@@ -1,3 +1,23 @@
+## 2026-09-11：AI 配置热更新、真实翻译状态与构建产物发布
+
+**决策**：后台 Worker 与缓存 Rewriter 共享运行时 AI 配置；设置事务成功后立即应用数据库记录，模型解析也读取当前全局设置。自动回复语言从客户入站文本选择，不使用页面语言或操作员中文；发送前重查人工接管/停止策略。
+
+**决策**：翻译是否成功以可用译文和条目状态判断，不能仅因窗口函数返回就将整个批次标 completed。页面读取 scoped batch status，等待与网络 fresh 行为明确；相同活动窗口请求复用。当前只承诺简体中文目标，其他目标必须拒绝而非错标。
+
+**决策**：生产 Python 使用构建后的 wheel 安装到既有虚拟环境，迁移文件由受控 systemd WorkingDirectory 定位；旧生产源码保留为回滚基线。前端仍由 Nginx 服务编译产物，构建发布不清空已有 hash assets。此路径不改变数据库、密钥或 WhatsApp session，也不等于部署了 Bridge JS。GitHub 使用正式 CLI 的 credential helper 和已配置环境，不读出 token 到终端。
+
+**关联规格**：FR-AI-003/004/005/008/010/013/014、PERF-003/004/006、MIG-001；计划 `docs/plans/2026-09-11-ai-language-translation-reliability.md`。
+
+## 2026-09-11：联系人同步采用稀疏字段保护、非阻塞头像补拉与公平历史窗口
+
+**决策**：WhatsApp `contacts/chats` 同步事件只发送源数据实际存在的字段；缺失字段不得序列化为 `null` 后覆盖数据库已有值。历史消息 `pushName` 仅允许补空名称或占位名称，人工备注和已同步真实姓名始终优先。
+
+**决策**：头像不依赖 Baileys contact event 的 `imgUrl`。Bridge 对 DM JID 使用独立 background enrichment lane 调用 `profilePictureUrl`，并设置有限并发、队列上限与成功/失败 TTL；任何头像网络 IO 都不得进入消息事件串行主链路。历史消息选择采用“每会话有界 + 全局最近优先”，禁止按原始输入顺序达到全局上限后直接截断。
+
+**原因**：WhatsApp contact/chat update 天然是稀疏事件；把缺失解释成 null 会破坏已同步元数据。头像查询属于高延迟外部 IO，必须旁路处理。历史同步若按输入顺序截断会让前几个高活跃会话占满额度，导致大量联系人完全没有恢复姓名/上下文。
+
+**关联规格**：`FR-CON-011`、`FR-CON-013`、`NFR-PERF-001`、`NFR-REL-001`；计划：`docs/plans/2026-09-11-contact-sync-performance.md`。
+
 ## 2026-09-11：spool replay 必须继承内部事件 HMAC，生产 systemd 采用只读主机沙箱
 
 **决策**：Bridge 启动扫描既有 spool 并创建 replay `EventSink` 时，必须与正常账号 sink 一样传入 `WHATSAPP_BRIDGE_HMAC_SECRET`。replay sink 与随后账号会话共享同一 owner，因此任何 replay 初始化路径都不得降级为仅 token 模式。

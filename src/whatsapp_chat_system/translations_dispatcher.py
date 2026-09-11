@@ -134,6 +134,11 @@ class TranslationDispatcher:
             self._mark_failed(plan.batch_id, exc)
             return False
 
+        if any(outcome.status != "completed" for outcome in outcomes):
+            self.failed_batches += 1
+            self.last_error = "translation_items_failed"
+        else:
+            self.last_error = None
         self.processed_batches += 1
         return True
 
@@ -213,7 +218,7 @@ class TranslationDispatcher:
             text = (message.content or "").strip()
             if not text:
                 continue
-            candidates.append((message, text, self._source_text_hash(text)))
+            candidates.append((message, text, self._source_text_hash(message.content or "")))
 
         done = self._completed_pairs(
             session, batch.target_lang, [message.id for message, _, _ in candidates]
@@ -369,14 +374,14 @@ class TranslationDispatcher:
         has_usable_translation = bool(
             fallback_text and fallback_text != item.text.strip()
         )
-        if fallback.error and not has_usable_translation:
+        if not has_usable_translation:
             return _MessageOutcome(
                 message_id=item.message_id,
                 source_lang=item.source_lang,
                 translated_text=None,
                 status="failed",
                 error_code="translate_failed",
-                error_message=str(fallback.error),
+                error_message="Translation returned no usable result",
             )
         return _MessageOutcome(
             message_id=item.message_id,
@@ -425,13 +430,18 @@ class TranslationDispatcher:
             parsed = json.loads(result.result.content)
             items = parsed.get("items") or []
             output: dict[str, dict[str, Any]] = {}
+            expected = {item.message_id: item.text.strip() for item in pending_items}
             for row in items:
+                if not isinstance(row, dict):
+                    continue
                 message_id = str(row.get("message_id") or "").strip()
-                if not message_id:
+                translated = row.get("zh")
+                if (message_id not in expected or not isinstance(translated, str)
+                        or not translated.strip() or translated.strip() == expected[message_id]):
                     continue
                 output[message_id] = {
                     "source_lang": str(row.get("source_lang") or ""),
-                    "translated_text": str(row.get("zh") or "").strip() or None,
+                    "translated_text": translated.strip(),
                 }
             return output
         except Exception as exc:
@@ -492,9 +502,10 @@ class TranslationDispatcher:
                     batch_id=plan.batch_id,
                 )
 
-            batch.status = "completed"
-            batch.error_code = None
-            batch.error_message = None
+            failures = sum(outcome.status != "completed" for outcome in outcomes)
+            batch.status = "failed" if failures else "completed"
+            batch.error_code = "translation_items_failed" if failures else None
+            batch.error_message = f"{failures} messages need retry" if failures else None
             batch.completed_at = datetime.now(timezone.utc)
             session.commit()
 
