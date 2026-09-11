@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto';
 
 const DEFAULT_URL = 'http://127.0.0.1:8792/internal/events/whatsapp';
+const MAX_MESSAGE_NOT_FOUND_ATTEMPTS = 12;
 
 const defaultScheduler = Object.freeze({
   setTimeout: (callback, delay) => setTimeout(callback, delay),
@@ -132,6 +133,20 @@ export class EventSink {
       }
       if (body?.error?.retryable === false) {
         await this.spool.deadLetter(claim, { error: 'HTTP 409 non_retryable' });
+        return false;
+      }
+      // A receipt can legitimately race ahead of its parent message, but a
+      // permanently missing parent must not block every later sequence forever.
+      // Only the API's explicit message_not_found contract gets this budget;
+      // ambiguous/retryable conflicts continue to use the normal retry path.
+      const nextAttempt = Number(claim.attempt ?? 0) + 1;
+      if (
+        body?.error?.code === 'message_not_found'
+        && nextAttempt >= MAX_MESSAGE_NOT_FOUND_ATTEMPTS
+      ) {
+        await this.spool.deadLetter(claim, {
+          error: 'HTTP 409 message_not_found retry_exhausted',
+        });
         return false;
       }
       await this.#retain(claim, 'HTTP 409 retryable');
