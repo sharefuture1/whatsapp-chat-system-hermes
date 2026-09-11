@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Callable
+import logging
+from collections.abc import Callable
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -22,6 +23,8 @@ from whatsapp_chat_system.security.internal_auth import (
     ReplayGuard,
     verify_internal_request,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _request_id(request: Request) -> str:
@@ -60,6 +63,7 @@ def error_response(
 def internal_auth_exception_handler(request: Request, exc: InternalAuthError):
     """把鉴权失败翻译成与其它内部接口一致的结构化错误体。"""
 
+    logger.warning("Internal event authentication rejected: %s", exc.code)
     return error_response(
         request, exc.code, str(exc), retryable=False, status_code=exc.status_code
     )

@@ -5,6 +5,10 @@
 ### P1 — 部署能力验证（2026-09-10 落地，待环境验证）
 
 代码已实现并完成本机能验证的部分（见 `docs/CHANGELOG_AGENT.md` 2026-09-10）。
+
+- [x] **gcptw 生产运行加固（2026-09-11）**：API/Bridge systemd 只读主机沙箱已上线，exposure `8.7 EXPOSED → 6.8 MEDIUM`；自托管 hash assets immutable / HTML no-cache 已验证。
+- [x] **Bridge spool replay HMAC 修复（2026-09-11）**：重启 replay sink 继承 HMAC secret；生产内部事件从 401 恢复 200，pending spool `15 → 0`。
+
 以下两项**必须**在相应环境上真实执行后才能标 Verified：
 
 - [ ] **PostgreSQL 真机验证**：本机无 PG 且不使用 Docker，仅验证了 DDL 生成与 URL 归一化

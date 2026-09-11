@@ -1,3 +1,12 @@
+## 2026-09-11：六小时优化轮次——spool HMAC 重放修复、systemd 沙箱与静态缓存
+
+- 修复 Bridge 启动 replay 既有 spool 时未把 `WHATSAPP_BRIDGE_HMAC_SECRET` 传给 `EventSink` 的缺陷；此前服务重启后 replay sink 会持续向已启用 HMAC 的 API 发送无签名请求并得到 401。新增真实 `startBridge` replay 回归，校验 timestamp / nonce / HMAC 签名与实际 body 一致。
+- 生产验证：修复部署后内部事件从连续 401 恢复为 200，历史 pending spool 从 15 条降为 0；API/Bridge 均 active，公网 live/ready 与 `/api/health` 正常。
+- API/Bridge systemd 追加 `ProtectSystem=strict`、`ProtectHome=true`、`PrivateDevices=true`、`RestrictSUIDSGID=true`、kernel/control-group protection 与 `LockPersonality=true`；只给各自 `/var/lib/whatsapp-chat-system/*` runtime 写权限。`systemd-analyze security` 暴露评分由 8.7 EXPOSED 降至 6.8 MEDIUM。
+- 自托管前端 hash assets 改为 `Cache-Control: public, max-age=31536000, immutable`，`index.html` 明确 `no-cache`；公网响应头已验证。
+- 内部鉴权拒绝新增仅记录安全错误代码的 warning，不记录 token/signature，便于后续定位签名/时间戳/重放问题。
+- 门禁：部署契约 `5 passed`，内部鉴权 focused Python `25 passed`，Bridge `85 passed` + lint，Web `124 passed` + build，`git diff --check` 通过。
+
 ## 2026-09-11：生产前端切回服务器同域托管 + admin 认证初始化
 
 - `whats.wending.ai` 由 Nginx 直接服务 `/opt/whatsapp-chat-system/web/dist`，React SPA 根路径与深链均返回 200；Browser 构建使用相对 `/api`，前端不再依赖 Vercel Production。

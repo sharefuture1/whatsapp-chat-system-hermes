@@ -19,6 +19,7 @@ async function startSpoolReplay(config) {
         spool: new FileSpool({ root: config.spoolRoot, accountId: entry.name }),
         token: config.eventToken,
         url: config.eventUrl,
+        hmacSecret: config.hmacSecret,
       });
       await sink.start();
       sinks.set(entry.name, sink);

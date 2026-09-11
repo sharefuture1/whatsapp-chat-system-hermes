@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
@@ -43,11 +44,24 @@ test('API-EVENT: real startBridge scans safe spool accounts and replays without 
   })}\n`);
 
   const received = [];
+  const signedRequests = [];
+  const hmacSecret = 'test-hmac-secret';
   const receiver = http.createServer((request, response) => {
     let body = '';
     request.on('data', (chunk) => { body += chunk; });
     request.on('end', () => {
       received.push(JSON.parse(body));
+      const timestamp = request.headers['x-internal-timestamp'];
+      const expectedSignature = createHmac('sha256', hmacSecret)
+        .update(`${timestamp}.`, 'utf8')
+        .update(Buffer.from(body, 'utf8'))
+        .digest('hex');
+      signedRequests.push({
+        timestamp,
+        signature: request.headers['x-internal-signature'],
+        nonce: request.headers['x-internal-nonce'],
+        expectedSignature,
+      });
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ accepted: true, duplicate: false, event_id: 'restart-event' }));
     });
@@ -56,12 +70,17 @@ test('API-EVENT: real startBridge scans safe spool accounts and replays without 
   const receiverPort = receiver.address().port;
   const started = await startBridge({
     WHATSAPP_BRIDGE_INTERNAL_TOKEN: 'test-token',
+    WHATSAPP_BRIDGE_HMAC_SECRET: hmacSecret,
     BRIDGE_RUNTIME_ROOT: runtime,
     BRIDGE_PORT: '0',
     WHATSAPP_EVENT_URL: `http://127.0.0.1:${receiverPort}/internal/events/whatsapp`,
   });
   try {
     assert.deepEqual(received, [event]);
+    assert.equal(signedRequests.length, 1);
+    assert.ok(signedRequests[0].timestamp);
+    assert.ok(signedRequests[0].nonce);
+    assert.equal(signedRequests[0].signature, signedRequests[0].expectedSignature);
     assert.equal(started.manager.sessions.size, 0);
     assert.deepEqual(await readdir(pending), []);
   } finally {

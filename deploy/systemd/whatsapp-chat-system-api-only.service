@@ -11,6 +11,15 @@ Group=whatsapp-chat-system
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+ReadWritePaths=/var/lib/whatsapp-chat-system/api
 WorkingDirectory=/opt/whatsapp-chat-system
 EnvironmentFile=-/etc/whatsapp-chat-system/api.env
 # Required from api.env:

@@ -1,3 +1,13 @@
+## 2026-09-11：spool replay 必须继承内部事件 HMAC，生产 systemd 采用只读主机沙箱
+
+**决策**：Bridge 启动扫描既有 spool 并创建 replay `EventSink` 时，必须与正常账号 sink 一样传入 `WHATSAPP_BRIDGE_HMAC_SECRET`。replay sink 与随后账号会话共享同一 owner，因此任何 replay 初始化路径都不得降级为仅 token 模式。
+
+**决策**：API/Bridge systemd 生产单元在低权限账户基础上继续启用 `ProtectSystem=strict`、`ProtectHome=true`、`PrivateDevices=true`、`RestrictSUIDSGID=true`、内核/control-group 保护与 `LockPersonality=true`；只对各自 `/var/lib/whatsapp-chat-system/*` runtime 开放写权限。前端 hash assets 使用 immutable 一年缓存，HTML 强制 revalidate。
+
+**原因**：服务重启是可靠性边界，spool replay 若丢失 HMAC 会让所有待重放事件卡在 401，并且该错误 sink 会被账号继续复用；systemd 文件系统沙箱和 immutable 静态缓存分别降低主机攻击面与重复静态下载成本。
+
+**关联规格**：`API-EVENT`、`SEC-002`、`NFR-OPS-001`、`VCL-006`；计划：`docs/plans/2026-09-11-six-hour-ops-hardening.md`。
+
 ## 2026-09-11：当前生产前端使用服务器同域托管，Vercel 作为可选备用
 
 **决策**：`https://whats.wending.ai` 当前同时承载 React SPA 与 Standalone API。Nginx 从 `/opt/whatsapp-chat-system/web/dist` 服务静态前端，Browser 构建使用相对 `/api`；`/api/*` 继续代理 loopback FastAPI，`/internal/*` 不暴露。Vercel 保留为未来 CDN/备用发布路径，但不作为当前生产前端依赖。
