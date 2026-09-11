@@ -1,3 +1,14 @@
+## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
+
+- 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
+- 浏览器延迟缓存绑定 scope/generation；退出、切用户、删除会话会取消旧写入。请求层拒绝旧会话结果/旧 401，写入前后失效 GET，并区分 deadline 和主动取消。
+- 强制改密标记不再在登录时清空；服务端限制业务接口，页面不启动账号/会话加载；成功改密撤销全部该用户会话，重新登录。未被标记的现有用户不受影响。
+- 译文复用改为账号隔离；入站/批次/Dispatcher 共用保留原始空白的精确 hash；旧版本 completed 不会阻断新版本；全命中缓存先提交，失败记录原位更新避免唯一键冲突。
+- 本地证据：10 个新增后端用例从 RED 到 GREEN；Web 全量 138 项通过及 Browser 构建通过。完整锁定环境的 Python/Bridge/Browser/Tauri 门禁由 PR CI 验收，不能把本地依赖缺失或受限回环网络当作业务验收通过。
+- CI 拆分 Python 格式检查与 pytest；添加真正浏览器的强制改密流程测试。现有 4 文件格式问题须由锁定 Ruff 修复，不能移除门禁。
+- gcptw `open_workspace` 本会话返回 FORBIDDEN（developer MCP unsupported）：未修改生产服务、数据库、密钥、WhatsApp session 或自动回复策略；未创建/验证每 6 小时自动开发任务。代码完成和生产 Verified 分开记录。
+- 后续优先级：翻译单入口与开关/租约重试；消息解包与事件身份；游标分页/历史覆盖；统一回复策略与 Outbox 不确定结果；业务健康与版本验收。
+
 # TODO_AGENT.md — 待办任务
 
 ## 当前优先级排序

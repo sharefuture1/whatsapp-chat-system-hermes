@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import { api, setSessionToken, setUnauthorizedHandler, clearSessionToken } from './api'
+import { api, setSessionToken, setUnauthorizedHandler, setPasswordChangeRequiredHandler, clearSessionToken } from './api'
 import { clearAllChatCaches, setChatCacheScope } from './chatCache'
 import { useAccountsController } from './accounts/useAccountsController'
 import { SettingsProvider, useSettings } from './settings'
@@ -14,6 +14,7 @@ import ChatPane from './components/ChatPane'
 import ContactsPage from './components/ContactsPage'
 import DiscoverPage from './components/DiscoverPage'
 import LoginScreen from './components/LoginScreen'
+import PasswordChangeScreen from './components/PasswordChangeScreen'
 import MePage from './components/MePage'
 import PluginCenterPage from './components/PluginCenterPage'
 import SchedulerCenterPage from './components/SchedulerCenterPage'
@@ -72,7 +73,9 @@ function AppInner() {
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loggedInUsername, setLoggedInUsername] = useState(() => localStorage.getItem(USERNAME_KEY) || '')
-  const [currentUser, setCurrentUser] = useState({ username: '', role: 'admin' })
+  const [currentUser, setCurrentUser] = useState({ username: '', role: 'viewer' })
+  const [sessionReady, setSessionReady] = useState(false)
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false)
   const [banner, setBanner] = useState('')
   const [health, setHealth] = useState(null)
   const [dashboard, setDashboard] = useState(null)
@@ -109,7 +112,7 @@ function AppInner() {
   const [schedulerCenterOpen, setSchedulerCenterOpen] = useState(false)
   const [broadcastCenterOpen, setBroadcastCenterOpen] = useState(false)
   const [userMgmOpen, setUserMgmOpen] = useState(false)
-  const accountsController = useAccountsController(Boolean(sessionToken))
+  const accountsController = useAccountsController(Boolean(sessionToken) && sessionReady && !passwordChangeRequired)
   const accountsRef = useRef([])
   const inboxAccountsSnapshotRef = useRef([])
   const refreshCoordinatorRef = useRef(createRefreshCoordinator())
@@ -124,9 +127,8 @@ function AppInner() {
   const [readTick, setReadTick] = useState(0)
 
   const logout = useCallback(async () => {
-    try {
-      if (sessionToken) await api.post('/logout', {})
-    } catch {}
+    // Capture the current token in the request, but never wait to clear local data.
+    const notification = sessionToken ? api.post('/logout', {}, { timeoutMs: 5_000 }).catch(() => {}) : Promise.resolve()
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USERNAME_KEY)
     clearAllChatCaches()
@@ -134,12 +136,29 @@ function AppInner() {
     clearSessionToken()
     setToken('')
     setLoggedInUsername('')
+    setCurrentUser({ username: '', role: 'viewer' })
+    setPasswordChangeRequired(false)
+    setSessionReady(false)
     setDashboard(null)
     setConversations([])
+    setContacts([])
+    setSelectedId('')
+    setSelectedName('')
+    setSettings({ channels: [], aliases: {}, web_settings: {} })
+    setApiSettings({})
+    await notification
   }, [sessionToken])
 
   useEffect(() => {
     setUnauthorizedHandler(logout)
+    setPasswordChangeRequiredHandler(() => {
+      setPasswordChangeRequired(true)
+      setSessionReady(true)
+    })
+    return () => {
+      setUnauthorizedHandler(null)
+      setPasswordChangeRequiredHandler(null)
+    }
   }, [logout])
 
   useEffect(() => {
@@ -148,7 +167,10 @@ function AppInner() {
     return () => clearTimeout(id)
   }, [banner])
 
-  const showError = e => setBanner(e?.message || t('error'))
+  const showError = e => {
+    if (['stale_session', 'stale_response', 'request_cancelled'].includes(e?.code)) return
+    setBanner(e?.message || t('error'))
+  }
 
   const handleLogin = async ({ username, password }) => {
     setLoginLoading(true)
@@ -159,6 +181,8 @@ function AppInner() {
       localStorage.setItem(USERNAME_KEY, data.username || username)
       clearAllChatCaches()
       setChatCacheScope(data.username || username)
+      setSessionReady(false)
+      setPasswordChangeRequired(Boolean(data.password_change_required))
       setSessionToken(data.session_token)
       setToken(data.session_token)
       setLoggedInUsername(data.username || username)
@@ -280,8 +304,15 @@ function AppInner() {
   }, [commitConversationsPage, conversationsHasMore, conversationsPage, fetchConversationsPage, loadingMore])
 
   const refreshSettings = useCallback(async () => {
-    const meData = await api.get('/v1/me')
+    const meData = await api.get('/v1/me', { cacheTtlMs: 0 })
     const role = meData.role || 'viewer'
+    setCurrentUser({ username: meData.username || '', role })
+    setChatCacheScope(meData.username || loggedInUsername || 'anonymous')
+    setPasswordChangeRequired(Boolean(meData.password_change_required))
+    if (meData.password_change_required) {
+      setSessionReady(true)
+      return false
+    }
     const isAdmin = role === 'admin'
     const [settingsData, aiData] = await Promise.all([
       isAdmin
@@ -299,8 +330,8 @@ function AppInner() {
     ])
     setSettings(settingsData)
     setApiSettings(aiData)
-    setCurrentUser({ username: meData.username || '', role })
-    setChatCacheScope(meData.username || loggedInUsername || 'anonymous')
+    setSessionReady(true)
+    return true
   }, [loggedInUsername])
 
   const [apiSettings, setApiSettings] = useState({})
@@ -312,14 +343,18 @@ function AppInner() {
   useEffect(() => {
     if (!sessionToken) return
     refreshSettings().catch(showError)
+  }, [sessionToken, refreshSettings])
+
+  useEffect(() => {
+    if (!sessionToken || !sessionReady || passwordChangeRequired) return
     refreshWorkspace()
     loadContacts()
-  }, [sessionToken, refreshSettings, refreshWorkspace, loadContacts])
+  }, [sessionToken, sessionReady, passwordChangeRequired, refreshWorkspace, loadContacts])
 
   // 进入通讯录 Tab 时刷新联系人（contacts 不再随常规轮询拉取）
   useEffect(() => {
-    if (sessionToken && activeTab === 'contacts') loadContacts()
-  }, [sessionToken, activeTab, loadContacts])
+    if (sessionToken && sessionReady && !passwordChangeRequired && activeTab === 'contacts') loadContacts()
+  }, [sessionToken, sessionReady, passwordChangeRequired, activeTab, loadContacts])
 
   // PERF-001：尊重服务端配置并钳制到 [3,300] 秒；缺失/非法一律默认 5 秒，禁止解释为关闭轮询
   const autoSeconds = Number(settings.web_settings?.ui?.auto_refresh_seconds)
@@ -327,7 +362,7 @@ function AppInner() {
     ? Math.min(300, Math.max(3, autoSeconds))
     : 5
   useEffect(() => {
-    if (!sessionToken || refreshInterval <= 0) return undefined
+    if (!sessionToken || !sessionReady || passwordChangeRequired || refreshInterval <= 0) return undefined
     let timer = null
     let stopped = false
     let running = false
@@ -360,7 +395,7 @@ function AppInner() {
       clearTimer()
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [sessionToken, refreshInterval, refreshWorkspace])
+  }, [sessionToken, sessionReady, passwordChangeRequired, refreshInterval, refreshWorkspace])
 
   const saveSettings = async (payload, done) => {
     setSaving(true)
@@ -634,6 +669,13 @@ function AppInner() {
   if (!sessionToken) {
     return <LoginScreen onLogin={handleLogin} onRegister={handleRegister} error={loginError} loading={loginLoading} />
   }
+
+  if (passwordChangeRequired) return <PasswordChangeScreen onLogout={logout} />
+  if (!sessionReady) return <main className="wx-auth-shell wx-force-password"><section className="wx-auth-card">
+    <p role="status">{banner || t('loading')}</p>
+    <button type="button" onClick={() => refreshSettings().catch(showError)}>{t('refresh')}</button>
+    <button type="button" onClick={logout}>{t('logout')}</button>
+  </section></main>
 
   return (
     <div className="wx-shell">

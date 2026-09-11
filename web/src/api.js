@@ -27,6 +27,9 @@ const DEFAULT_API_BASE = resolveApiBase()
 
 let sessionToken = ''
 let onUnauthorized = null
+let onPasswordChangeRequired = null
+let sessionGeneration = 0
+let cacheGeneration = 0
 
 export function getApiBase() {
   return DEFAULT_API_BASE
@@ -34,6 +37,8 @@ export function getApiBase() {
 
 export function setSessionToken(token) {
   sessionToken = token || ''
+  sessionGeneration += 1
+  cacheGeneration += 1
   requestCache.clear()
   inflightRequests.clear()
 }
@@ -44,6 +49,10 @@ export function clearSessionToken() {
 
 export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler
+}
+
+export function setPasswordChangeRequiredHandler(handler) {
+  onPasswordChangeRequired = handler
 }
 
 function errorMessage(detail, envelope, status) {
@@ -118,40 +127,84 @@ async function transportFetch(input, init) {
   return globalThis.fetch(input, init)
 }
 
-async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0, dedupe = true } = {}) {
+function invalidateRequestCache() {
+  cacheGeneration += 1
+  requestCache.clear()
+  inflightRequests.clear()
+}
+
+function lifecycleError(code, message, retryable = false) {
+  return new ApiError(0, message, { error: { code, message, retryable } })
+}
+
+async function request(path, {
+  method = 'GET', body, signal, cacheTtlMs = 0, dedupe = true,
+  timeoutMs = method === 'GET' ? 15_000 : 120_000,
+} = {}) {
   const key = cacheKey(path, method)
   if (method === 'GET' && cacheTtlMs > 0) {
     const cached = requestCache.get(key)
     if (cached && cached.expiresAt > Date.now()) return cached.data
   }
   if (method === 'GET' && dedupe && !signal && inflightRequests.has(key)) return inflightRequests.get(key)
+  if (method !== 'GET') invalidateRequestCache()
+  const token = sessionToken
+  const generation = sessionGeneration
+  const cacheVersion = cacheGeneration
   const operation = (async () => {
-    if (method !== 'GET') {
-      requestCache.clear()
-      inflightRequests.clear()
+    const controller = new AbortController()
+    let timedOut = false
+    const cancel = () => controller.abort()
+    if (signal?.aborted) cancel()
+    else signal?.addEventListener('abort', cancel, { once: true })
+    const budget = Number(timeoutMs)
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, Number.isFinite(budget) && budget > 0 ? Math.min(budget, 300_000) : 15_000)
+    try {
+      if (controller.signal.aborted) throw lifecycleError('request_cancelled', 'Request cancelled')
+      const headers = {}
+      if (body !== undefined) headers['Content-Type'] = 'application/json'
+      if (token) headers['x-session-token'] = token
+      const res = await transportFetch(`${DEFAULT_API_BASE}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+      let data = null
+      try {
+        data = await res.json()
+      } catch (error) {
+        if (controller.signal.aborted) throw error
+      }
+      // Validate before publishing either data or authentication side effects.
+      if (generation !== sessionGeneration) throw lifecycleError('stale_session', 'Session changed')
+      if (method === 'GET' && cacheVersion !== cacheGeneration) {
+        throw lifecycleError('stale_response', 'Response superseded by a write', true)
+      }
+      if (!res.ok) {
+        const fallback = disabledLegacyFallback(path, res.status, data)
+        if (fallback !== undefined) return fallback
+        if (res.status === 401) onUnauthorized?.()
+        if (res.status === 403 && (data?.detail?.code || data?.error?.code) === 'password_change_required') {
+          onPasswordChangeRequired?.()
+        }
+        throw new ApiError(res.status, data?.detail, data)
+      }
+      return data
+    } catch (error) {
+      if (generation !== sessionGeneration) throw lifecycleError('stale_session', 'Session changed')
+      if (timedOut) throw lifecycleError('request_timeout', 'Request timed out', method === 'GET')
+      if (controller.signal.aborted) throw lifecycleError('request_cancelled', 'Request cancelled')
+      throw error
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', cancel)
+      // GETs that raced the write must also be revalidated after it finishes.
+      if (method !== 'GET' && generation === sessionGeneration) invalidateRequestCache()
     }
-    const headers = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (sessionToken) headers['x-session-token'] = sessionToken
-  const res = await transportFetch(`${DEFAULT_API_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  })
-  let data = null
-  try {
-    data = await res.json()
-  } catch {
-    data = null
-  }
-  if (!res.ok) {
-    const fallback = disabledLegacyFallback(path, res.status, data)
-    if (fallback !== undefined) return fallback
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
-    throw new ApiError(res.status, data?.detail, data)
-  }
-  return data
   })()
   if (method === 'GET' && dedupe && !signal) {
     inflightRequests.set(key, operation)
@@ -159,7 +212,13 @@ async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0, ded
       () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
       () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
     )
-    if (cacheTtlMs > 0) operation.then(data => requestCache.set(key, { data, expiresAt: Date.now() + cacheTtlMs })).catch(() => {})
+  }
+  if (method === 'GET' && cacheTtlMs > 0) {
+    operation.then(data => {
+      if (generation === sessionGeneration && cacheVersion === cacheGeneration) {
+        requestCache.set(key, { data, expiresAt: Date.now() + cacheTtlMs })
+      }
+    }).catch(() => {})
   }
   return operation
 }

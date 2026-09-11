@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
@@ -14,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .db.models import Message, MessageTranslation, TranslationBatch
 from .rewriter import Rewriter
+from .translation_hash import source_text_hash
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,7 @@ class TranslationDispatcher:
             rows = session.scalars(
                 select(Message)
                 .where(
+                    Message.account_id == batch.account_id,
                     Message.conversation_id == batch.conversation_id,
                     func.coalesce(Message.occurred_at, Message.created_at)
                     <= func.coalesce(anchor.occurred_at, anchor.created_at),
@@ -232,7 +233,7 @@ class TranslationDispatcher:
             if (msg.id, shash) not in done
         ]
 
-        # 全局翻译记忆库（按原文哈希查询任一已完成译文）
+        # 账号内翻译记忆库（按原文哈希查询任一已完成译文）
         global_cache: dict[str, tuple[str, str, str | None]] = {}
         if unresolved_candidates:
             remaining_hashes = list({shash for _, _, shash in unresolved_candidates})
@@ -244,6 +245,7 @@ class TranslationDispatcher:
                         MessageTranslation.source_lang,
                         MessageTranslation.model,
                     ).where(
+                        MessageTranslation.account_id == batch.account_id,
                         MessageTranslation.source_text_hash.in_(chunk),
                         MessageTranslation.target_lang == batch.target_lang,
                         MessageTranslation.status == "completed",
@@ -258,7 +260,7 @@ class TranslationDispatcher:
             if (message.id, source_hash) in done:
                 continue
 
-            # 1. 全局哈希命中：复用全库历史译文，0 次外部 AI 调用
+            # 1. 全局哈希命中：复用当前账号历史译文，0 次外部 AI 调用
             if source_hash in global_cache:
                 cached_trans, cached_lang, _ = global_cache[source_hash]
                 self._write_translation(
@@ -728,7 +730,7 @@ class TranslationDispatcher:
 
     @staticmethod
     def _source_text_hash(text: str) -> str:
-        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+        return source_text_hash(text)
 
     def health(self) -> dict[str, Any]:
         return {

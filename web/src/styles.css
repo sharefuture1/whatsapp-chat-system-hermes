@@ -1413,3 +1413,9 @@ select:focus-visible, [tabindex]:focus-visible {
   .wx-back-btn { display: inline-flex; }
   .wx-tab-bar.is-chat-hidden { display: none; }
 }
+
+/* SEC-AUTH-015: mandatory change screen uses the existing auth form tokens. */
+.wx-force-password { grid-template-columns: minmax(0, 1fr); place-items: center; min-height: 100dvh; padding: max(24px, env(safe-area-inset-top)) 20px; box-sizing: border-box; }
+.wx-force-password .wx-auth-card { width: min(100%, 420px); box-sizing: border-box; }
+.wx-force-password h1 { margin-top: 0; }
+.wx-force-password p { line-height: 1.6; }

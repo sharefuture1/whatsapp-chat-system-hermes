@@ -409,6 +409,28 @@ def build_standalone_app(
         ):
             return JSONResponse({"code": "legacy_api_disabled"}, status_code=410)
         if (
+            request.method != "OPTIONS"
+            and path.startswith("/api/v1/")
+            and path
+            not in {
+                "/api/v1/me",
+                "/api/v1/users/change-password",
+            }
+        ):
+            session = _session_info(runtime, request.headers.get("x-session-token", ""))
+            username = session.get("username") if session else None
+            user = (runtime.web_settings.get("users") or {}).get(username) or {}
+            if user.get("password_change_required"):
+                return JSONResponse(
+                    {
+                        "detail": {
+                            "code": "password_change_required",
+                            "message": "Change your password before continuing",
+                        }
+                    },
+                    status_code=403,
+                )
+        if (
             request.method == "OPTIONS"
             or not path.startswith("/api")
             or path
@@ -507,6 +529,7 @@ def build_standalone_app(
                 if str(x).strip()
             ],
             "session_expires_at": session.get("expires_at"),
+            "password_change_required": bool(user.get("password_change_required")),
         }
 
     @app.post("/api/login")
@@ -586,14 +609,8 @@ def build_standalone_app(
                 save_runtime_settings(runtime)
 
             # If password_change_required, return flag so frontend forces a change
-            needs_password_change = False
-            if user_record.get("password_change_required"):
-                needs_password_change = True
-                # Clear the flag on successful login so they land in the app
-                user_record.pop("password_change_required", None)
-                users[username] = user_record
-                runtime.web_settings["users"] = users
-                save_runtime_settings(runtime)
+            needs_password_change = bool(user_record.get("password_change_required"))
+            # SEC-AUTH-015: only a successful password-change transaction clears it.
 
             # Logout all existing sessions for this user (single-session policy)
             sessions = dict(runtime.web_settings.get("sessions") or {})

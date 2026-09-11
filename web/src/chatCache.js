@@ -46,15 +46,27 @@ export function loadConversationCache(conversationId) {
 // 在浏览器空闲时批量落盘（requestIdleCallback，降级 setTimeout）。
 const pendingCacheWrites = new Map()
 let cacheFlushScheduled = false
+let cacheGeneration = 0
+
+function invalidatePendingWrites() {
+  cacheGeneration += 1
+  pendingCacheWrites.clear()
+  cacheFlushScheduled = false
+}
 
 function scheduleCacheFlush() {
   if (cacheFlushScheduled) return
   cacheFlushScheduled = true
+  const generation = cacheGeneration
+  const scope = cacheScope
   const flush = () => {
+    // An old idle callback must not drain or re-key a newer login's queue.
+    if (generation !== cacheGeneration || scope !== cacheScope) return
     cacheFlushScheduled = false
     const entries = Array.from(pendingCacheWrites.entries())
     pendingCacheWrites.clear()
-    for (const [conversationId, { messages, meta }] of entries) {
+    for (const [conversationId, { messages, meta, generation: queuedGeneration, scope: queuedScope }] of entries) {
+      if (queuedGeneration !== cacheGeneration || queuedScope !== cacheScope) continue
       writeConversationCacheNow(conversationId, messages, meta)
     }
   }
@@ -78,7 +90,9 @@ function writeConversationCacheNow(conversationId, messages, meta = {}) {
 
 export function saveConversationCache(conversationId, messages, meta = {}) {
   if (!conversationId || !Array.isArray(messages)) return
-  pendingCacheWrites.set(String(conversationId), { messages, meta })
+  pendingCacheWrites.set(String(conversationId), {
+    messages, meta, generation: cacheGeneration, scope: cacheScope,
+  })
   scheduleCacheFlush()
 }
 
@@ -109,6 +123,7 @@ export function saveTranslationCache(messageId, content, value) {
 
 export function clearConversationCache(conversationId) {
   if (!conversationId) return
+  pendingCacheWrites.delete(String(conversationId))
   try {
     if (isTauri()) memoryCache.delete(scopedKey(`conversation:${safeId(conversationId)}`))
     else localStorage.removeItem(scopedKey(`conversation:${safeId(conversationId)}`))
@@ -117,11 +132,15 @@ export function clearConversationCache(conversationId) {
 
 export function setChatCacheScope(username) {
   const next = safeId(username || 'anonymous') || 'anonymous'
-  if (next !== cacheScope) memoryCache.clear()
+  if (next !== cacheScope) {
+    invalidatePendingWrites()
+    memoryCache.clear()
+  }
   cacheScope = next
 }
 
 export function clearAllChatCaches() {
+  invalidatePendingWrites()
   memoryCache.clear()
   try {
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {

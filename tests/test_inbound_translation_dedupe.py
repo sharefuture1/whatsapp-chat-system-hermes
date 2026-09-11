@@ -28,9 +28,20 @@ def _setup_db():
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
     with factory() as session:
-        account = WhatsAppAccount(id="acc-1", name="Test Account", status="online", enabled=True, session_ref="account:acc-1")
+        account = WhatsAppAccount(
+            id="acc-1",
+            name="Test Account",
+            status="online",
+            enabled=True,
+            session_ref="account:acc-1",
+        )
         session.add(account)
-        contact = Contact(id="c-1", account_id="acc-1", remote_jid="12345@s.whatsapp.net", display_name="User")
+        contact = Contact(
+            id="c-1",
+            account_id="acc-1",
+            remote_jid="12345@s.whatsapp.net",
+            display_name="User",
+        )
         session.add(contact)
         conv = Conversation(
             id="conv-1",
@@ -83,7 +94,9 @@ def test_inbound_chinese_message_skips_ai():
         assert len(batches) == 0
 
         # And writes a completed MessageTranslation directly
-        trans = session.scalar(select(MessageTranslation).where(MessageTranslation.message_id == "msg-zh"))
+        trans = session.scalar(
+            select(MessageTranslation).where(MessageTranslation.message_id == "msg-zh")
+        )
         assert trans is not None
         assert trans.status == "completed"
         assert trans.source_lang == "Chinese"
@@ -119,7 +132,7 @@ def test_inbound_foreign_message_enqueues_batch_when_no_cache():
         assert batch.status == "pending"
 
 
-def test_inbound_foreign_message_reuses_global_hash_cache_with_zero_ai():
+def test_inbound_foreign_message_reuses_account_hash_cache_with_zero_ai():
     factory = _setup_db()
     raw_text = "สบายดี ขอเบิ่งสินค้าแหน่"
     text_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
@@ -159,7 +172,7 @@ def test_inbound_foreign_message_reuses_global_hash_cache_with_zero_ai():
         session.add(new_msg)
         session.commit()
 
-        # Enqueue should detect the global content hash and reuse it immediately!
+        # Enqueue should detect the account-scoped content hash and reuse it immediately!
         result = enqueue_for_inbound_translation(session, account, conv, new_msg)
         session.commit()
 
@@ -169,34 +182,38 @@ def test_inbound_foreign_message_reuses_global_hash_cache_with_zero_ai():
         assert len(batches) == 0
 
         # Translation created immediately with existing text!
-        new_trans = session.scalar(select(MessageTranslation).where(MessageTranslation.message_id == "msg-new"))
+        new_trans = session.scalar(
+            select(MessageTranslation).where(MessageTranslation.message_id == "msg-new")
+        )
         assert new_trans is not None
         assert new_trans.status == "completed"
         assert new_trans.translated_text == "你好，想看看商品"
         assert new_trans.source_lang == "Lao"
 
 
-def test_dispatcher_build_plan_reuses_global_hash_cache():
+def test_dispatcher_build_plan_reuses_account_hash_cache():
     factory = _setup_db()
     raw_text = "Good morning, how are you?"
     text_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
 
     with factory() as session:
         # Seed an existing translation
-        session.add(MessageTranslation(
-            id="trans-seed",
-            account_id="acc-1",
-            conversation_id="conv-seed",
-            message_id="msg-seed",
-            source_text_hash=text_hash,
-            source_lang="Latin",
-            target_lang="zh-CN",
-            translated_text="早上好，你好吗？",
-            status="completed",
-            provider="test-model",
-            model="test-model",
-            context_window_size=1,
-        ))
+        session.add(
+            MessageTranslation(
+                id="trans-seed",
+                account_id="acc-1",
+                conversation_id="conv-seed",
+                message_id="msg-seed",
+                source_text_hash=text_hash,
+                source_lang="Latin",
+                target_lang="zh-CN",
+                translated_text="早上好，你好吗？",
+                status="completed",
+                provider="test-model",
+                model="test-model",
+                context_window_size=1,
+            )
+        )
         msg = Message(
             id="msg-test-2",
             account_id="acc-1",
@@ -225,11 +242,15 @@ def test_dispatcher_build_plan_reuses_global_hash_cache():
         plan = dispatcher._build_plan(session, batch, [msg])
         session.commit()
 
-        # Plan items (pending AI calls) should be EMPTY because it was satisfied by the global hash cache!
+        # Plan items (pending AI calls) should be EMPTY because it was satisfied by the account-scoped hash cache!
         assert len(plan.items) == 0
 
         # And the new message should now have its MessageTranslation written as completed
-        trans = session.scalar(select(MessageTranslation).where(MessageTranslation.message_id == "msg-test-2"))
+        trans = session.scalar(
+            select(MessageTranslation).where(
+                MessageTranslation.message_id == "msg-test-2"
+            )
+        )
         assert trans is not None
         assert trans.status == "completed"
         assert trans.translated_text == "早上好，你好吗？"

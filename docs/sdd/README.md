@@ -57,6 +57,9 @@
 11. [`11-tauri-desktop-distribution.md`](./11-tauri-desktop-distribution.md)
    Tauri 2 桌面薄客户端、安全存储边界、GitHub Actions 安装包构建和发布门禁。
 
+12. [`12-session-translation-isolation.md`](./12-session-translation-isolation.md)
+    本轮缓存会话代际、强制改密、账号内译文事务与验收边界。
+
 补充实施计划：
 
 - [`../plans/2026-07-10-standalone-wendingai-multi-account.md`](../plans/2026-07-10-standalone-wendingai-multi-account.md)
