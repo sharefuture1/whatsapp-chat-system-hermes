@@ -1,0 +1,95 @@
+name: Verify reviewed P0 patch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.automation/round1.patch.gz.*'
+      - '.github/workflows/round1-publish.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reviewed-p0-patch-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-sync:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'codex/p0-isolation-round1-20260911' && github.event.pull_request.base.ref == 'codex/p0-hardening-tauri2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+      TARGET_BRANCH: codex/p0-isolation-round1-20260911
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Verify and apply the exact reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          cat .automation/round1.patch.gz.00 .automation/round1.patch.gz.01 .automation/round1.patch.gz.02 .automation/round1.patch.gz.03 | gzip -d > "$RUNNER_TEMP/reviewed.patch"
+          echo "b0593f7d788908c41f92dafb57534baba8169629e19952a295e92beebb7971c2  $RUNNER_TEMP/reviewed.patch" | sha256sum --check
+          git apply --check "$RUNNER_TEMP/reviewed.patch"
+          git apply "$RUNNER_TEMP/reviewed.patch"
+          git add docs src tests web
+      - name: Install lockfile dependencies
+        run: |
+          python -m pip install uv==0.9.25
+          uv sync --locked --group dev
+          npm ci
+          npm ci --prefix web
+          npm ci --prefix bridge
+      - name: Locked formatting and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+          uv run ruff format "${changed[@]}" src/whatsapp_chat_system/ai/auto_reply.py tests/test_inbound_translation_dedupe.py
+          uv run ruff check "${changed[@]}" src/whatsapp_chat_system/ai/auto_reply.py tests/test_inbound_translation_dedupe.py
+          uv run ruff format --check "${changed[@]}" src/whatsapp_chat_system/ai/auto_reply.py tests/test_inbound_translation_dedupe.py
+          git add docs src tests web
+          git diff --cached --check
+      - name: Full Python regression suite
+        run: uv run pytest -q
+      - name: Full Web and Bridge regression suites
+        run: npm run web:test && npm run bridge:test && npm run lint --prefix bridge
+      - name: Browser build and real rendering regression
+        run: |
+          npm run web:build
+          cd web && npx playwright install --with-deps chromium && cd ..
+          node web/e2e/forced-password.mjs
+      - name: Tauri frontend and shell validation
+        run: npm run web:build:tauri && npm run tauri:validate && npm run tauri -- --version
+      - name: Preserve reviewed formatted patch
+        if: always()
+        run: git diff HEAD --binary -- docs src tests web .github/workflows/ci.yml > "$RUNNER_TEMP/formatted-round1.patch"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: formatted-round1-${{ github.run_id }}
+          path: ${{ runner.temp }}/formatted-round1.patch
+          retention-days: 3
+          if-no-files-found: error
+      - name: Sync passing source to isolated PR branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$EXPECTED_HEAD"
+          git diff --cached --name-only | while read -r path; do
+            case "$path" in docs/*|src/*|tests/*|web/*) ;; *) echo "Unexpected staged path: $path"; exit 1;; esac
+          done
+          git config user.name sharefuture1
+          git config user.email 44525097+sharefuture1@users.noreply.github.com
+          git commit -m 'fix: isolate sessions and translation reuse; enforce password rotation [SEC-CACHE-001] [SEC-AUTH-015] [TX-TRANS-001]'
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
