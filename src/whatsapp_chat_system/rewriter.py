@@ -191,9 +191,17 @@ class Rewriter:
         if not text or source_lang == "Chinese":
             return RewriteResult(language="Chinese", message=text)
 
-        message_ops = (getattr(self.config, 'web_settings', {}) or {}).get('message_ops') or {}
-        translation_provider = str(message_ops.get('translation_provider') or 'wendingai').strip() or 'wendingai'
-        fallback_provider = str(message_ops.get('translation_fallback_provider') or 'laotalk').strip() or 'laotalk'
+        message_ops = (getattr(self.config, "web_settings", {}) or {}).get(
+            "message_ops"
+        ) or {}
+        translation_provider = (
+            str(message_ops.get("translation_provider") or "wendingai").strip()
+            or "wendingai"
+        )
+        fallback_provider = (
+            str(message_ops.get("translation_fallback_provider") or "laotalk").strip()
+            or "laotalk"
+        )
 
         # 1. Memory lookup
         cached = self.translation_memory.get(text, source_lang)
@@ -218,12 +226,22 @@ class Rewriter:
             )
             return RewriteResult(language="Chinese", message=zh)
 
-        if translation_provider == 'laotalk':
-            lt = laotalk_translate(text, source_lang, 'zh')
+        if translation_provider == "laotalk":
+            lt = laotalk_translate(text, source_lang, "zh")
             if lt.ok and lt.translated:
-                self.translation_memory.put(text, lt.translated, source_lang, corrected=False, now=time.time())
+                self.translation_memory.put(
+                    text, lt.translated, source_lang, corrected=False, now=time.time()
+                )
                 return RewriteResult(language="Chinese", message=lt.translated)
-            return RewriteResult(language="Chinese", message=text, used_fallback=True, error={'code': 'laotalk_translate_failed', 'message': lt.error or 'laotalk failed'})
+            return RewriteResult(
+                language="Chinese",
+                message=text,
+                used_fallback=True,
+                error={
+                    "code": "laotalk_translate_failed",
+                    "message": lt.error or "laotalk failed",
+                },
+            )
 
         # 3. AI translate
         try:
@@ -271,11 +289,22 @@ class Rewriter:
                 text_length=len(text),
                 source_lang=source_lang,
             )
-            if fallback_provider == 'laotalk':
-                lt = laotalk_translate(text, source_lang, 'zh')
+            if fallback_provider == "laotalk":
+                lt = laotalk_translate(text, source_lang, "zh")
                 if lt.ok and lt.translated:
-                    self.translation_memory.put(text, lt.translated, source_lang, corrected=False, now=time.time())
-                    return RewriteResult(language="Chinese", message=lt.translated, used_fallback=True, error=_provider_error_metadata(exc))
+                    self.translation_memory.put(
+                        text,
+                        lt.translated,
+                        source_lang,
+                        corrected=False,
+                        now=time.time(),
+                    )
+                    return RewriteResult(
+                        language="Chinese",
+                        message=lt.translated,
+                        used_fallback=True,
+                        error=_provider_error_metadata(exc),
+                    )
             return RewriteResult(
                 language="Chinese",
                 message=text,

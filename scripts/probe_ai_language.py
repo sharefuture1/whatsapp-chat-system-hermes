@@ -32,15 +32,21 @@ def main() -> int:
     ) as connection:
         row = connection.execute(
             "SELECT base_url, default_model, api_key_ciphertext "
-            "FROM ai_runtime_settings WHERE id = ?", ("global",)
+            "FROM ai_runtime_settings WHERE id = ?",
+            ("global",),
         ).fetchone()
     if not row:
         print(json.dumps({"ok": False, "code": "ai_not_configured"}))
         return 2
-    provider = WendingAIProvider(AISettings(
-        base_url=row[0], api_key=decrypt_api_key(row[2]), default_model=row[1],
-        timeout_seconds=35, max_retries=0,
-    ))
+    provider = WendingAIProvider(
+        AISettings(
+            base_url=row[0],
+            api_key=decrypt_api_key(row[2]),
+            default_model=row[1],
+            timeout_seconds=35,
+            max_retries=0,
+        )
+    )
     samples = [
         ("Thai", "สวัสดีครับ อยากสอบถามวิธีจองครับ"),
         ("Lao", "ສະບາຍດີ ຂ້ອຍຢາກສອບຖາມຂໍ້ມູນ"),
@@ -52,34 +58,96 @@ def main() -> int:
         for expected, text in samples:
             language = reply_language(text, None, [])
             try:
-                result = provider.chat(model=row[1], messages=[
-                    {"role": "system", "content": reply_language_instruction(language)},
-                    {"role": "user", "content": text},
-                ])
-                ok = bool(result.content.strip()) and matches_reply_language(result.content, expected)
+                result = provider.chat(
+                    model=row[1],
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": reply_language_instruction(language),
+                        },
+                        {"role": "user", "content": text},
+                    ],
+                )
+                ok = bool(result.content.strip()) and matches_reply_language(
+                    result.content, expected
+                )
                 failures += not ok
-                print(json.dumps({"test": "synthetic_reply", "language": language,
-                                  "ok": ok, "latency_ms": result.latency_ms,
-                                  "reply": result.content}, ensure_ascii=False))
+                print(
+                    json.dumps(
+                        {
+                            "test": "synthetic_reply",
+                            "language": language,
+                            "ok": ok,
+                            "latency_ms": result.latency_ms,
+                            "reply": result.content,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
             except AIProviderError as error:
                 failures += 1
-                print(json.dumps({"test": "synthetic_reply", "language": language,
-                                  "ok": False, "code": error.code}))
+                print(
+                    json.dumps(
+                        {
+                            "test": "synthetic_reply",
+                            "language": language,
+                            "ok": False,
+                            "code": error.code,
+                        }
+                    )
+                )
         try:
-            result = provider.chat(model=row[1], response_format={"type": "json_object"}, messages=[
-                {"role": "system", "content": "Translate each input faithfully into Simplified Chinese. Return JSON with keys th, lo, en. Do not answer the questions."},
-                {"role": "user", "content": json.dumps({"th": samples[0][1], "lo": samples[1][1], "en": samples[3][1]}, ensure_ascii=False)},
-            ])
+            result = provider.chat(
+                model=row[1],
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Translate each input faithfully into Simplified Chinese. Return JSON with keys th, lo, en. Do not answer the questions.",
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "th": samples[0][1],
+                                "lo": samples[1][1],
+                                "en": samples[3][1],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+            )
             translated = json.loads(result.content)
-            ok = all(isinstance(translated.get(key), str) and translated[key].strip()
-                     and matches_reply_language(translated[key], "Chinese") for key in ("th", "lo", "en"))
+            ok = all(
+                isinstance(translated.get(key), str)
+                and translated[key].strip()
+                and matches_reply_language(translated[key], "Chinese")
+                for key in ("th", "lo", "en")
+            )
             failures += not ok
-            print(json.dumps({"test": "synthetic_translation", "ok": ok,
-                              "latency_ms": result.latency_ms, "translated": translated}, ensure_ascii=False))
+            print(
+                json.dumps(
+                    {
+                        "test": "synthetic_translation",
+                        "ok": ok,
+                        "latency_ms": result.latency_ms,
+                        "translated": translated,
+                    },
+                    ensure_ascii=False,
+                )
+            )
         except (AIProviderError, ValueError, TypeError) as error:
             failures += 1
-            print(json.dumps({"test": "synthetic_translation", "ok": False,
-                              "code": getattr(error, "code", "invalid_result")}))
+            print(
+                json.dumps(
+                    {
+                        "test": "synthetic_translation",
+                        "ok": False,
+                        "code": getattr(error, "code", "invalid_result"),
+                    }
+                )
+            )
     finally:
         provider.close()
     return 1 if failures else 0

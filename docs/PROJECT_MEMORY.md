@@ -6,9 +6,9 @@
 
 - 线上 DB 已有可解密 AI Key 与 `gpt-5.6-luna`；两个账号及 95 个会话的自动回复模式均为 off，未改动。后台翻译失败源于保存设置后未刷新共享运行时配置。
 - 本轮实际重启稳定 API 后，已用真实 API 对一条此前失败的泰语消息重试：5.0 秒完成、8 字译文、无错误，无 WhatsApp 出站测试。API/Bridge 保持 active。
-- 工作区新增热配置、回复语言选择及错误语言拦截、退出开关二次校验、job 失败版本修复、翻译批次真实状态/活动批次复用、fresh GET 与可中断轮询。Python 369 passed / 7 skipped（含两个 wheel 迁移定位回归）；Web 130；Bridge 87；两种构建及核心静态检查通过。完整 Ruff 尚未全绿。
+- 工作区新增热配置、回复语言选择及错误语言拦截、退出开关二次校验、job 失败版本修复、翻译批次真实状态/活动批次复用、fresh GET 与可中断轮询。Python 369 passed / 7 skipped（含两个 wheel 迁移定位回归）；Web 130；Bridge 87；两种构建及核心静态检查通过。Ruff 已与 uv.lock 的 0.15.21 对齐，PR 范围 46 个 Python 文件的 lint 与格式检查均通过；12 个格式调整文件经 AST 对比确认无语义改变。
 - 发布状态更新：本轮 Python 后端已通过 wheel 安装到 `/opt/whatsapp-chat-system/.venv/lib/python3.12/site-packages/whatsapp_chat_system`，API 已重启并验证 ready。原 `/opt/whatsapp-chat-system/src` 保留为旧源码/回滚基线，不再是当前 Python import 真源；后续必须构建并安装 wheel，不能只同步 src。数据库、密钥、会话、Bridge 进程未重置。Nginx dist 已构建上线，主 JS `index-D8sPGRC4.js`、CSS `index-CjpyphHx.css` 公网 200，旧 hash assets 未清空。API/Bridge 均 active、Worker 无新错误。上一轮 Bridge JS 头像补拉/历史选择改动仍未发布，不能因 Python wheel 发布而将其标完成。
-- GitHub 认证路径已验证：发行版 GitHub CLI 安装后，root 登录环境自动使用已配置凭据，`gh api user` 返回 sharefuture1；标准 `gh auth git-credential` 的 Git dry-run 成功，无手动读取/输出 token。待最后提交核对远端 SHA。Vercel 两份配置已关闭 Git 自动部署，生产仍使用 gcptw。
+- GitHub 认证路径已验证：发行版 GitHub CLI 安装后，root 登录环境自动使用已配置凭据，`gh api user` 返回 sharefuture1；标准 `gh auth git-credential` 的 Git dry-run 成功，无手动读取/输出 token。功能提交已实际推送目标分支并经 ls-remote 核对远端；随后补齐 CI 要求的格式化修正。Vercel 两份配置已关闭 Git 自动部署，生产仍使用 gcptw。
 - 真实上游模型有波动：一次泰/老翻译和一次泰语回复成功，后续 35 秒受限探针出现超时；不能宣称四语言自动回复已生产稳定。后续需测试账号授权后验证真实收发，不要对现有所有客户批量开启自动回复。
 
 

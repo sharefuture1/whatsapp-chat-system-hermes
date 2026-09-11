@@ -4,12 +4,12 @@
 - FR-AI-013：自动回复从最新有意义入站文本选择语言，模糊输入使用联系人偏好/近期入站；明确文字系统的错误语言输出不入 Outbox。AI 返回后重查停止开关及新消息竞态；失败持久化使用 start 后的实际 job version，lease 覆盖超时/重试预算；复用 Provider 连接。
 - FR-AI-014：空/照抄译文不再标成功；含失败条目的批次返回 failed；原文哈希保持精确空白；相同活动窗口复用批次，无待译项不创建空任务；新增 account-scoped 批次状态 API。当前目标支持简体中文，其他目标显式拒绝，不伪造支持。
 - 页面通过可中断、逐步放缓轮询读取真实批次状态，fresh GET 绕过旧缓存和 in-flight 合并，优先翻译最近消息。删除损坏的硬编码泰/老词义及强制 60 字摘要限制，保留原文语义与数字。
-- 全量回归：Python 367 passed / 7 skipped（PostgreSQL）；Web 130 passed；Bridge 87 passed + lint；Browser/Tauri 构建及 Tauri 配置校验通过。核心静态检查 E4/E7/E9/F 与 diff check 通过；完整 Ruff 风格/额外规则尚有既存与改动文件问题，未宣称全量 Ruff 通过。
+- 全量回归：Python 367 passed / 7 skipped（PostgreSQL）；Web 130 passed；Bridge 87 passed + lint；Browser/Tauri 构建及 Tauri 配置校验通过。核心静态检查与 diff check 通过；GitHub CI 最初被 12 个文件格式阻断，现已将本机 Ruff 与 uv.lock 的 0.15.21 对齐，PR 范围 46 个 Python 文件的 lint/format 均通过；AST 核验格式修改没有语义变化。
 - 生产实际操作仅重启现有稳定 API，加载已经保存的 DB AI 配置；API/Bridge 均 active。随后用既有合法会话将一条已失败泰语消息重新提交翻译，5.0 秒内完成，生成 8 字译文，无错误、无 WhatsApp 出站发送。
 - 实际 Provider 探针：早先泰/老 -> 中文 JSON 成功（5.268 秒）；后续四语回复探针只有泰语在 35 秒测试预算内成功，其余及另一批翻译超时。不得把 mock 回归或单条恢复当作四语生产稳定性验收。
 - 账号与 95 个会话自动回复仍关闭，未批量启用。联系人开关与账号/会话策略联动 UI 仍需单独完善，当前不能据开关外观认定已自动发送。
 - 发布通过标准构建产物路径完成：新增 wheel 运行时迁移定位（两个 RED/GREEN 用例）；wheel 安装到生产虚拟环境、API 正常重启。Python 实际加载 site-packages，不再直接加载旧生产源码。前端由 Vite 构建到 Nginx dist，未清空旧 hash assets；公网新 JS `index-D8sPGRC4.js` 为 200 / 364932 bytes，CSS 为 200 / 85377 bytes；首页、深链、API 和 live/ready 均 200，内部事件仍 404。未执行数据库迁移、未重置会话或 Bridge。全量回归加 wheel 用例合计 369 passed / 7 skipped。
-- 认证改用发行版 GitHub CLI 与已配置登录环境，账户核验 sharefuture1、标准 credential helper dry-run 成功，不输出 token。Vercel 根/web 配置关闭自动 Git 部署。前次 Bridge JS 改动未由本轮 wheel 发布；旧联系人 shell 脚本不能作为完整的新版本部署入口。
+- 认证改用发行版 GitHub CLI 与已配置登录环境，账户核验 sharefuture1；功能提交已实际推送并校验远端分支，不输出 token。Vercel 根/web 配置关闭自动 Git 部署。前次 Bridge JS 改动未由本轮 wheel 发布；旧联系人 shell 脚本不能作为完整的新版本部署入口。
 
 ## 2026-09-11：联系人姓名/头像/历史同步算法修复（待生产 root 切换）
 

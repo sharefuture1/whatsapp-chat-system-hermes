@@ -74,7 +74,9 @@ def test_services_run_as_unprivileged_account_with_basic_systemd_hardening():
 
 def test_nginx_self_hosted_assets_use_immutable_cache_and_html_revalidates():
     text = NGINX_SITE.read_text(encoding="utf-8")
-    assert 'add_header Cache-Control "public, max-age=31536000, immutable" always;' in text
+    assert (
+        'add_header Cache-Control "public, max-age=31536000, immutable" always;' in text
+    )
     assert 'add_header Cache-Control "no-cache" always;' in text
 
 

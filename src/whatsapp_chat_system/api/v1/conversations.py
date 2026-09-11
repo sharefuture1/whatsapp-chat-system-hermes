@@ -901,20 +901,26 @@ def create_conversations_router(
         if anchor is None:
             raise HTTPException(status_code=404, detail="Anchor message not found")
         active_batch = session.scalar(
-            select(TranslationBatch).where(
+            select(TranslationBatch)
+            .where(
                 TranslationBatch.account_id == conversation.account_id,
                 TranslationBatch.conversation_id == conversation.id,
                 TranslationBatch.anchor_message_id == anchor.id,
                 TranslationBatch.target_lang == payload.target_lang,
                 TranslationBatch.window_size == payload.window_size,
                 TranslationBatch.status.in_(("pending", "claimed", "running")),
-            ).order_by(TranslationBatch.created_at.desc()).limit(1)
+            )
+            .order_by(TranslationBatch.created_at.desc())
+            .limit(1)
         )
         if active_batch is not None:
             return {
-                "batch_id": active_batch.id, "status": active_batch.status,
-                "queued_message_ids": [], "cached_message_ids": [],
-                "target_lang": payload.target_lang, "window_size": payload.window_size,
+                "batch_id": active_batch.id,
+                "status": active_batch.status,
+                "queued_message_ids": [],
+                "cached_message_ids": [],
+                "target_lang": payload.target_lang,
+                "window_size": payload.window_size,
             }
         rows = session.scalars(
             select(Message)
@@ -955,9 +961,12 @@ def create_conversations_router(
                 queued_message_ids.append(message.id)
         if not queued_message_ids:
             return {
-                "batch_id": None, "status": "completed",
-                "queued_message_ids": [], "cached_message_ids": cached_message_ids,
-                "target_lang": payload.target_lang, "window_size": payload.window_size,
+                "batch_id": None,
+                "status": "completed",
+                "queued_message_ids": [],
+                "cached_message_ids": cached_message_ids,
+                "target_lang": payload.target_lang,
+                "window_size": payload.window_size,
             }
         batch = TranslationBatch(
             account_id=conversation.account_id,
@@ -980,25 +989,35 @@ def create_conversations_router(
 
     @router.get("/conversations/{conversation_id}/translations/{batch_id}")
     def translation_batch_status(
-        request: Request, conversation_id: str, batch_id: str,
+        request: Request,
+        conversation_id: str,
+        batch_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         require_object_account_access(
-            request.app.state.runtime, request, conversation.account_id,
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
             not_found_detail="Conversation not found",
         )
-        batch = session.scalar(select(TranslationBatch).where(
-            TranslationBatch.id == batch_id,
-            TranslationBatch.conversation_id == conversation.id,
-            TranslationBatch.account_id == conversation.account_id,
-        ))
+        batch = session.scalar(
+            select(TranslationBatch).where(
+                TranslationBatch.id == batch_id,
+                TranslationBatch.conversation_id == conversation.id,
+                TranslationBatch.account_id == conversation.account_id,
+            )
+        )
         if batch is None:
             raise HTTPException(status_code=404, detail="Translation batch not found")
-        return {"batch_id": batch.id, "status": batch.status,
-                "error_code": batch.error_code, "target_lang": batch.target_lang}
+        return {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "error_code": batch.error_code,
+            "target_lang": batch.target_lang,
+        }
 
     @router.post(
         "/conversations/{conversation_id}/translate",

@@ -218,7 +218,9 @@ class TranslationDispatcher:
             text = (message.content or "").strip()
             if not text:
                 continue
-            candidates.append((message, text, self._source_text_hash(message.content or "")))
+            candidates.append(
+                (message, text, self._source_text_hash(message.content or ""))
+            )
 
         done = self._completed_pairs(
             session, batch.target_lang, [message.id for message, _, _ in candidates]
@@ -436,8 +438,12 @@ class TranslationDispatcher:
                     continue
                 message_id = str(row.get("message_id") or "").strip()
                 translated = row.get("zh")
-                if (message_id not in expected or not isinstance(translated, str)
-                        or not translated.strip() or translated.strip() == expected[message_id]):
+                if (
+                    message_id not in expected
+                    or not isinstance(translated, str)
+                    or not translated.strip()
+                    or translated.strip() == expected[message_id]
+                ):
                     continue
                 output[message_id] = {
                     "source_lang": str(row.get("source_lang") or ""),
@@ -505,7 +511,9 @@ class TranslationDispatcher:
             failures = sum(outcome.status != "completed" for outcome in outcomes)
             batch.status = "failed" if failures else "completed"
             batch.error_code = "translation_items_failed" if failures else None
-            batch.error_message = f"{failures} messages need retry" if failures else None
+            batch.error_message = (
+                f"{failures} messages need retry" if failures else None
+            )
             batch.completed_at = datetime.now(timezone.utc)
             session.commit()
 

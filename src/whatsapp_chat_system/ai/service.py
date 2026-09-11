@@ -41,18 +41,18 @@ class AIService:
         contact_model: str | None = None,
         account_model: str | None = None,
     ) -> ModelResolution:
-        contact = (contact_model or '').strip()
+        contact = (contact_model or "").strip()
         if contact:
-            return ModelResolution(contact, 'contact_override')
-        account = (account_model or '').strip()
+            return ModelResolution(contact, "contact_override")
+        account = (account_model or "").strip()
         if account:
-            return ModelResolution(account, 'account_profile')
+            return ModelResolution(account, "account_profile")
         model = (
             self.runtime_manager.effective_model
             if self.runtime_manager is not None
             else self.settings.default_model
         )
-        return ModelResolution(model, 'global_default')
+        return ModelResolution(model, "global_default")
 
     def chat(
         self,
@@ -63,7 +63,9 @@ class AIService:
         response_format: dict[str, Any] | None = None,
         temperature: float | None = None,
     ) -> AIServiceResult:
-        resolution = self.resolve_model(contact_model=contact_model, account_model=account_model)
+        resolution = self.resolve_model(
+            contact_model=contact_model, account_model=account_model
+        )
         started = monotonic()
         try:
             result = self.provider.chat(
@@ -77,7 +79,7 @@ class AIService:
                 request_id=exc.request_id,
                 resolution=resolution,
                 latency_ms=max(0, int((monotonic() - started) * 1000)),
-                status='failed',
+                status="failed",
                 usage={},
                 error_code=exc.code,
                 retryable=exc.retryable,
@@ -87,7 +89,7 @@ class AIService:
             request_id=result.request_id,
             resolution=resolution,
             latency_ms=result.latency_ms,
-            status='success',
+            status="success",
             usage=result.usage,
             error_code=None,
             retryable=None,
@@ -108,8 +110,8 @@ class AIService:
         if self.audit_logger is None:
             return
         self.audit_logger(
-            'ai_request_audit',
-            provider='wendingai',
+            "ai_request_audit",
+            provider="wendingai",
             request_id=request_id,
             effective_model=resolution.model,
             model_source=resolution.source,

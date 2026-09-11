@@ -100,29 +100,43 @@ def post(client, body, token=TOKEN, request_id=None):
 
 def test_lid_contact_uses_push_name_instead_of_lid(events_api):
     client, factory = events_api
-    response = post(client, envelope(payload=message_payload(
-        remote_jid="12345@lid",
-        sender_jid="12345@lid",
-        push_name="小明",
-    )))
+    response = post(
+        client,
+        envelope(
+            payload=message_payload(
+                remote_jid="12345@lid",
+                sender_jid="12345@lid",
+                push_name="小明",
+            )
+        ),
+    )
     assert response.status_code in {200, 202}
     with factory() as db:
         contact = db.scalar(select(Contact).where(Contact.remote_jid == "12345@lid"))
-        conversation = db.scalar(select(Conversation).where(Conversation.remote_jid == "12345@lid"))
+        conversation = db.scalar(
+            select(Conversation).where(Conversation.remote_jid == "12345@lid")
+        )
         assert contact.display_name == "小明"
         assert conversation.title == "小明"
 
 
 def test_lid_contact_without_name_uses_human_fallback(events_api):
     client, factory = events_api
-    response = post(client, envelope(payload=message_payload(
-        remote_jid="67890@lid",
-        sender_jid="67890@lid",
-        push_name=None,
-    )))
+    response = post(
+        client,
+        envelope(
+            payload=message_payload(
+                remote_jid="67890@lid",
+                sender_jid="67890@lid",
+                push_name=None,
+            )
+        ),
+    )
     assert response.status_code in {200, 202}
     with factory() as db:
-        conversation = db.scalar(select(Conversation).where(Conversation.remote_jid == "67890@lid"))
+        conversation = db.scalar(
+            select(Conversation).where(Conversation.remote_jid == "67890@lid")
+        )
         assert conversation.title == "WhatsApp 联系人"
 
 
@@ -215,9 +229,9 @@ def test_message_upsert_is_atomic_scoped_and_duplicate_does_not_increment_unread
         assert message.conversation_id == conversation.id
         assert message.contact_id == contact.id
         assert message.direction == "inbound"
-        assert message.occurred_at == datetime(
-            2026, 7, 10, tzinfo=UTC
-        ).replace(tzinfo=None)
+        assert message.occurred_at == datetime(2026, 7, 10, tzinfo=UTC).replace(
+            tzinfo=None
+        )
         assert message.received_at is not None
         assert event.status == "processed"
 
@@ -517,51 +531,94 @@ def test_contact_chat_history_batches_preserve_manual_fields_and_group_boundary(
         )
 
 
-def test_sparse_contact_updates_preserve_existing_name_avatar_and_history_backfills_only_missing_name(events_api):
+def test_sparse_contact_updates_preserve_existing_name_avatar_and_history_backfills_only_missing_name(
+    events_api,
+):
     client, factory = events_api
     initial = {
         "schema_version": 1,
-        "items": [{
-            "remote_jid": "named@lid",
-            "display_name": "Synced Name",
-            "avatar_url": "https://cdn.example/named.jpg",
-        }],
+        "items": [
+            {
+                "remote_jid": "named@lid",
+                "display_name": "Synced Name",
+                "avatar_url": "https://cdn.example/named.jpg",
+            }
+        ],
     }
-    assert post(client, envelope("contact-initial", "contacts.upsert", payload=initial)).status_code == 200
+    assert (
+        post(
+            client, envelope("contact-initial", "contacts.upsert", payload=initial)
+        ).status_code
+        == 200
+    )
 
     sparse = {
         "schema_version": 1,
-        "items": [{
-            "remote_jid": "named@lid",
-            "display_name": None,
-            "avatar_url": None,
-        }],
+        "items": [
+            {
+                "remote_jid": "named@lid",
+                "display_name": None,
+                "avatar_url": None,
+            }
+        ],
     }
-    assert post(client, envelope("contact-sparse", "contacts.update", sequence=2, payload=sparse)).status_code == 200
+    assert (
+        post(
+            client,
+            envelope("contact-sparse", "contacts.update", sequence=2, payload=sparse),
+        ).status_code
+        == 200
+    )
 
     history_named = {
         "schema_version": 1,
-        "items": [message_payload(
-            wa_message_id="hist-named",
-            remote_jid="named@lid",
-            sender_jid="named@lid",
-            push_name="Old History Name",
-            timestamp="2026-07-09T00:00:00Z",
-        )],
+        "items": [
+            message_payload(
+                wa_message_id="hist-named",
+                remote_jid="named@lid",
+                sender_jid="named@lid",
+                push_name="Old History Name",
+                timestamp="2026-07-09T00:00:00Z",
+            )
+        ],
     }
-    assert post(client, envelope("hist-named", "history.messages.upsert", sequence=3, payload=history_named)).status_code == 200
+    assert (
+        post(
+            client,
+            envelope(
+                "hist-named",
+                "history.messages.upsert",
+                sequence=3,
+                payload=history_named,
+            ),
+        ).status_code
+        == 200
+    )
 
     history_missing = {
         "schema_version": 1,
-        "items": [message_payload(
-            wa_message_id="hist-missing",
-            remote_jid="missing@lid",
-            sender_jid="missing@lid",
-            push_name="Recovered From History",
-            timestamp="2026-07-09T00:01:00Z",
-        )],
+        "items": [
+            message_payload(
+                wa_message_id="hist-missing",
+                remote_jid="missing@lid",
+                sender_jid="missing@lid",
+                push_name="Recovered From History",
+                timestamp="2026-07-09T00:01:00Z",
+            )
+        ],
     }
-    assert post(client, envelope("hist-missing", "history.messages.upsert", sequence=4, payload=history_missing)).status_code == 200
+    assert (
+        post(
+            client,
+            envelope(
+                "hist-missing",
+                "history.messages.upsert",
+                sequence=4,
+                payload=history_missing,
+            ),
+        ).status_code
+        == 200
+    )
 
     with factory() as db:
         named = db.scalar(select(Contact).where(Contact.remote_jid == "named@lid"))

@@ -12,8 +12,19 @@ from sqlalchemy import select
 from .job_repository import AnalysisJobRepository, JobLease, claim_next_committed
 from .provider import AIProvider, AIProviderError
 from .service import AIService
-from ..db.models import AnalysisJob, Contact, ContactAIOverride, Conversation, Message, WhatsAppAccount
-from .reply_language import matches_reply_language, reply_language, reply_language_instruction
+from ..db.models import (
+    AnalysisJob,
+    Contact,
+    ContactAIOverride,
+    Conversation,
+    Message,
+    WhatsAppAccount,
+)
+from .reply_language import (
+    matches_reply_language,
+    reply_language,
+    reply_language_instruction,
+)
 from ..outbox import enqueue_outbox_message
 from ..settings import AISettings
 
@@ -84,8 +95,13 @@ class AutoReplyWorker:
         self._recover_if_due()
         settings = self._settings()
         # The lease must cover bounded provider retries, not expire mid-generation.
-        lease_seconds = min(3600, max(self.config.lease_seconds,
-            settings.timeout_seconds * (settings.max_retries + 1) + 30))
+        lease_seconds = min(
+            3600,
+            max(
+                self.config.lease_seconds,
+                settings.timeout_seconds * (settings.max_retries + 1) + 30,
+            ),
+        )
         lease = claim_next_committed(
             self.session_factory,
             worker_id=self.worker_id,
@@ -192,13 +208,20 @@ class AutoReplyWorker:
                 ).all()
             )
             recent.reverse()
-            contact = session.get(Contact, conversation.contact_id) if conversation.contact_id else None
+            contact = (
+                session.get(Contact, conversation.contact_id)
+                if conversation.contact_id
+                else None
+            )
             language = reply_language(
-                message.content or "", contact.language if contact else None,
+                message.content or "",
+                contact.language if contact else None,
                 [item.content or "" for item in recent if item.direction == "inbound"],
             )
             contact_model = override.model if override else None
-            messages = [{"role": "system", "content": reply_language_instruction(language)}]
+            messages = [
+                {"role": "system", "content": reply_language_instruction(language)}
+            ]
             messages.extend(
                 {
                     "role": "user" if item.direction == "inbound" else "assistant",
@@ -213,7 +236,9 @@ class AutoReplyWorker:
         # 阶段二：无 session 状态下调用 AI（最长可达 Provider 超时+重试时长）
         settings = self._settings()
         service = AIService(self._provider(settings), settings)
-        result = service.chat(messages=messages, contact_model=contact_model).result.content.strip()
+        result = service.chat(
+            messages=messages, contact_model=contact_model
+        ).result.content.strip()
         if not result:
             raise AIProviderError(
                 code="empty_ai_reply",
@@ -222,21 +247,36 @@ class AutoReplyWorker:
             )
 
         if not matches_reply_language(result, language):
-            raise AIProviderError(code="reply_language_mismatch", message="Reply language did not match customer input", retryable=True)
+            raise AIProviderError(
+                code="reply_language_mismatch",
+                message="Reply language did not match customer input",
+                retryable=True,
+            )
 
         # 阶段三：新短事务——重校验人工回复竞态后写回；complete 走 version CAS
         with self.session_factory() as session:
             repo = AnalysisJobRepository(session)
             conversation = session.get(Conversation, conversation_id)
             account = session.get(WhatsAppAccount, lease.account_id)
-            override = session.scalar(select(ContactAIOverride).where(
-                ContactAIOverride.account_id == lease.account_id,
-                ContactAIOverride.contact_id == conversation.contact_id,
-            )) if conversation and conversation.contact_id else None
-            if (conversation is None or account is None or not account.enabled
-                    or account.auto_reply_mode != "auto" or conversation.ai_mode != "auto"
-                    or conversation.deleted_at is not None
-                    or (override and override.auto_reply_enabled is False)):
+            override = (
+                session.scalar(
+                    select(ContactAIOverride).where(
+                        ContactAIOverride.account_id == lease.account_id,
+                        ContactAIOverride.contact_id == conversation.contact_id,
+                    )
+                )
+                if conversation and conversation.contact_id
+                else None
+            )
+            if (
+                conversation is None
+                or account is None
+                or not account.enabled
+                or account.auto_reply_mode != "auto"
+                or conversation.ai_mode != "auto"
+                or conversation.deleted_at is not None
+                or (override and override.auto_reply_enabled is False)
+            ):
                 repo.cancel(lease.account_id, lease.id, job_version)
                 session.commit()
                 return
@@ -266,7 +306,11 @@ class AutoReplyWorker:
             repo = AnalysisJobRepository(session)
             try:
                 current = session.get(AnalysisJob, lease.id)
-                if current is None or current.account_id != lease.account_id or current.lease_owner != self.worker_id:
+                if (
+                    current is None
+                    or current.account_id != lease.account_id
+                    or current.lease_owner != self.worker_id
+                ):
                     return
                 if not retryable:
                     repo.cancel(lease.account_id, lease.id, current.version)

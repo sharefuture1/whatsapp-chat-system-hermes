@@ -158,12 +158,17 @@ def _current_alembic_head() -> str:
     # Editable checkouts carry migrations beside src/. A wheel uses the
     # service's explicit WorkingDirectory, whose migration assets stay immutable.
     project_root = next(
-        (root for root in (source_root, Path.cwd())
-         if (root / "alembic.ini").is_file() and (root / "migrations").is_dir()),
+        (
+            root
+            for root in (source_root, Path.cwd())
+            if (root / "alembic.ini").is_file() and (root / "migrations").is_dir()
+        ),
         None,
     )
     if project_root is None:
-        raise RuntimeError("standalone migration assets are missing from the service working directory")
+        raise RuntimeError(
+            "standalone migration assets are missing from the service working directory"
+        )
     config = Config(str(project_root / "alembic.ini"))
     config.set_main_option("script_location", str(project_root / "migrations"))
     head = ScriptDirectory.from_config(config).get_current_head()
