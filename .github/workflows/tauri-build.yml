@@ -1,0 +1,103 @@
+name: Tauri installers
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src-tauri/**'
+      - 'web/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/validate-tauri.mjs'
+      - '.github/workflows/tauri-build.yml'
+  push:
+    branches:
+      - main
+      - codex/p0-hardening-tauri2
+    tags:
+      - 'v*'
+    paths:
+      - 'src-tauri/**'
+      - 'web/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/validate-tauri.mjs'
+      - '.github/workflows/tauri-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-installers:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64 (.deb + AppImage)
+            os: ubuntu-22.04
+            bundles: deb,appimage
+            artifact: hermes-messaging-linux-x64
+          - name: Windows x64 (NSIS)
+            os: windows-latest
+            bundles: nsis
+            artifact: hermes-messaging-windows-x64
+          - name: macOS (.dmg)
+            os: macos-latest
+            bundles: dmg
+            artifact: hermes-messaging-macos
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install JavaScript dependencies
+        run: npm ci && npm ci --prefix web
+
+      - name: Validate Tauri security policy
+        run: npm run tauri:validate
+
+      - name: Check locked Rust dependencies
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build native installer
+        env:
+          CI: 'true'
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.sha }}
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14

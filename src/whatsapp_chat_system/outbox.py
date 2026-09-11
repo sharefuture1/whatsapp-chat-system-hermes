@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.bridge.client import BridgeError
@@ -107,7 +107,6 @@ class OutboxDispatcher:
 
     def _claim_batch(self) -> list[str]:
         now = utc_now()
-        claimed_ids: list[str] = []
         with session_scope(self.session_factory) as session:
             expired = session.scalars(
                 select(OutboxMessage).where(
@@ -122,7 +121,7 @@ class OutboxDispatcher:
                 item.lease_expires_at = None
 
             statement = (
-                select(OutboxMessage)
+                select(OutboxMessage.id)
                 .where(
                     OutboxMessage.status == "pending",
                     OutboxMessage.available_at <= now,
@@ -133,15 +132,43 @@ class OutboxDispatcher:
                 )
                 .order_by(OutboxMessage.available_at.asc(), OutboxMessage.id.asc())
                 .limit(self.batch_size)
-                .with_for_update(skip_locked=True)
             )
-            for item in session.scalars(statement).all():
-                item.status = "claimed"
-                item.attempts += 1
-                item.lease_owner = self.worker_id
-                item.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
-                claimed_ids.append(item.id)
-        return claimed_ids
+            candidates = list(session.scalars(statement))
+            if not candidates:
+                return []
+
+            # 抢占用条件 UPDATE（CAS）实现，而不是 SELECT ... FOR UPDATE。
+            # 原因：SQLite 会静默忽略 FOR UPDATE，多进程下会出现同一个
+            # OutboxMessage 被两个 worker 同时 claim 并重复发送。
+            # 条件 UPDATE 在 SQLite 与 PostgreSQL 上都是原子的：
+            # 只有仍然处于 pending 的行会被更新，rowcount 即抢占结果。
+            claimed = session.execute(
+                update(OutboxMessage)
+                .where(
+                    OutboxMessage.id.in_(candidates),
+                    OutboxMessage.status == "pending",
+                )
+                .values(
+                    status="claimed",
+                    attempts=OutboxMessage.attempts + 1,
+                    lease_owner=self.worker_id,
+                    lease_expires_at=now + timedelta(seconds=self.lease_seconds),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if not claimed.rowcount:
+                return []
+            return list(
+                session.scalars(
+                    select(OutboxMessage.id)
+                    .where(
+                        OutboxMessage.id.in_(candidates),
+                        OutboxMessage.status == "claimed",
+                        OutboxMessage.lease_owner == self.worker_id,
+                    )
+                    .order_by(OutboxMessage.available_at.asc(), OutboxMessage.id.asc())
+                )
+            )
 
     def _deliver(self, outbox_id: str) -> None:
         with self.session_factory() as session:

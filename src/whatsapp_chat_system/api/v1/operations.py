@@ -8,13 +8,19 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from whatsapp_chat_system.authz import (
+    require_admin,
+    require_operator,
+    visible_account_ids_for,
+)
 from whatsapp_chat_system.db.models import Conversation, Message, OutboxMessage
 from whatsapp_chat_system.outbox import enqueue_outbox_message
+from whatsapp_chat_system.runtime import StandaloneRuntime
 
 
 class ScheduleRequest(BaseModel):
@@ -40,7 +46,15 @@ def _resolve_conversation(
     session: Session,
     target: str,
     account_id: str | None,
+    visible_account_ids: list[str] | None,
 ) -> Conversation:
+    if (
+        account_id
+        and visible_account_ids is not None
+        and account_id not in visible_account_ids
+    ):
+        raise HTTPException(status_code=403, detail="Account not allowed")
+
     cleaned = target.strip()
     direct = session.get(Conversation, cleaned)
     if direct is not None and direct.deleted_at is None:
@@ -48,6 +62,11 @@ def _resolve_conversation(
             raise HTTPException(
                 status_code=404, detail="Conversation not found in account"
             )
+        if (
+            visible_account_ids is not None
+            and direct.account_id not in visible_account_ids
+        ):
+            raise HTTPException(status_code=404, detail="Conversation not found")
         return direct
 
     statement = select(Conversation).where(
@@ -57,6 +76,8 @@ def _resolve_conversation(
     )
     if account_id:
         statement = statement.where(Conversation.account_id == account_id)
+    if visible_account_ids is not None:
+        statement = statement.where(Conversation.account_id.in_(visible_account_ids))
     rows = session.scalars(statement.order_by(Conversation.id.asc()).limit(2)).all()
     if not rows:
         raise HTTPException(
@@ -92,7 +113,23 @@ def _schedule_payload(
     }
 
 
-def create_operations_router(session_factory: Callable[[], Session]) -> APIRouter:
+def _require_broadcast_enabled(runtime: StandaloneRuntime, request: Request) -> None:
+    require_admin(runtime, request)
+    enabled = bool((runtime.web_settings.get("plugins") or {}).get("broadcast", False))
+    if not enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "broadcast_disabled",
+                "message": "Mass broadcast is disabled until explicitly enabled by deployment configuration",
+            },
+        )
+
+
+def create_operations_router(
+    runtime: StandaloneRuntime,
+    session_factory: Callable[[], Session],
+) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["operations"])
 
     def get_session() -> Generator[Session, None, None]:
@@ -104,17 +141,22 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.get("/schedule")
     def list_schedule(
+        request: Request,
         limit: int = Query(default=100, ge=1, le=500),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
-        rows = session.execute(
+        visible_ids = visible_account_ids_for(runtime, request)
+        statement = (
             select(OutboxMessage, Message, Conversation)
             .join(Message, Message.id == OutboxMessage.message_id)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(OutboxMessage.idempotency_key.like("schedule:%"))
             .order_by(OutboxMessage.available_at.asc(), OutboxMessage.id.asc())
             .limit(limit)
-        ).all()
+        )
+        if visible_ids is not None:
+            statement = statement.where(OutboxMessage.account_id.in_(visible_ids))
+        rows = session.execute(statement).all()
         items = [
             _schedule_payload(outbox, message, conversation)
             for outbox, message, conversation in rows
@@ -123,9 +165,12 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.post("/schedule", status_code=202)
     def create_schedule(
+        request: Request,
         payload: ScheduleRequest,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
+        require_operator(runtime, request)
+        visible_ids = visible_account_ids_for(runtime, request)
         now = datetime.now(timezone.utc)
         run_at = datetime.fromtimestamp(payload.run_at, tz=timezone.utc)
         if run_at <= now:
@@ -135,11 +180,16 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
                 status_code=422, detail="run_at is too far in the future"
             )
         conversation = _resolve_conversation(
-            session, payload.target, payload.account_id
+            session, payload.target, payload.account_id, visible_ids
         )
         key = payload.idempotency_key or f"schedule:{uuid4()}"
         if not key.startswith("schedule:"):
             key = f"schedule:{key}"
+        if len(key) > 255:
+            raise HTTPException(
+                status_code=422,
+                detail="idempotency_key exceeds 255 characters after schedule prefix",
+            )
         message, outbox, created = enqueue_outbox_message(
             session,
             conversation,
@@ -156,10 +206,16 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.delete("/schedule/{outbox_id}")
     def cancel_schedule(
+        request: Request,
         outbox_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
-        outbox = session.get(OutboxMessage, outbox_id)
+        require_operator(runtime, request)
+        visible_ids = visible_account_ids_for(runtime, request)
+        statement = select(OutboxMessage).where(OutboxMessage.id == outbox_id)
+        if visible_ids is not None:
+            statement = statement.where(OutboxMessage.account_id.in_(visible_ids))
+        outbox = session.scalar(statement)
         if outbox is None or not outbox.idempotency_key.startswith("schedule:"):
             raise HTTPException(status_code=404, detail="Scheduled message not found")
         if outbox.status == "completed":
@@ -180,9 +236,11 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.get("/broadcast")
     def list_broadcasts(
+        request: Request,
         limit: int = Query(default=50, ge=1, le=200),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
+        _require_broadcast_enabled(runtime, request)
         rows = session.execute(
             select(OutboxMessage, Message, Conversation)
             .join(Message, Message.id == OutboxMessage.message_id)
@@ -224,9 +282,12 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.post("/broadcast", status_code=202)
     def create_broadcast(
+        request: Request,
         payload: BroadcastRequest,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
+        _require_broadcast_enabled(runtime, request)
+        visible_ids = visible_account_ids_for(runtime, request)
         targets = list(
             dict.fromkeys(
                 target.strip() for target in payload.targets if target.strip()
@@ -240,7 +301,7 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
         for target in targets:
             try:
                 conversation = _resolve_conversation(
-                    session, target, payload.account_id
+                    session, target, payload.account_id, visible_ids
                 )
                 message, outbox, created = enqueue_outbox_message(
                     session,
@@ -278,15 +339,21 @@ def create_operations_router(session_factory: Callable[[], Session]) -> APIRoute
 
     @router.get("/outbox")
     def outbox_status(
+        request: Request,
         limit: int = Query(default=100, ge=1, le=500),
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
-        rows = session.execute(
+        require_operator(runtime, request)
+        visible_ids = visible_account_ids_for(runtime, request)
+        statement = (
             select(OutboxMessage, Message)
             .join(Message, Message.id == OutboxMessage.message_id)
             .order_by(OutboxMessage.created_at.desc())
             .limit(limit)
-        ).all()
+        )
+        if visible_ids is not None:
+            statement = statement.where(OutboxMessage.account_id.in_(visible_ids))
+        rows = session.execute(statement).all()
         return {
             "items": [
                 {

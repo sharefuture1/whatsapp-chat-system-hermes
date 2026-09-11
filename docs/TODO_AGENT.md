@@ -1,13 +1,73 @@
+## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
+
+- 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
+- 浏览器延迟缓存绑定 scope/generation；退出、切用户、删除会话会取消旧写入。请求层拒绝旧会话结果/旧 401，写入前后失效 GET，并区分 deadline 和主动取消。
+- 强制改密标记不再在登录时清空；服务端限制业务接口，页面不启动账号/会话加载；成功改密撤销全部该用户会话，重新登录。未被标记的现有用户不受影响。
+- 译文复用改为账号隔离；入站/批次/Dispatcher 共用保留原始空白的精确 hash；旧版本 completed 不会阻断新版本；全命中缓存先提交，失败记录原位更新避免唯一键冲突。
+- 本地证据：10 个新增后端用例从 RED 到 GREEN；Web 全量 138 项通过及 Browser 构建通过。完整锁定环境的 Python/Bridge/Browser/Tauri 门禁由 PR CI 验收，不能把本地依赖缺失或受限回环网络当作业务验收通过。
+- CI 拆分 Python 格式检查与 pytest；添加真正浏览器的强制改密流程测试。现有 4 文件格式问题须由锁定 Ruff 修复，不能移除门禁。
+- gcptw `open_workspace` 本会话返回 FORBIDDEN（developer MCP unsupported）：未修改生产服务、数据库、密钥、WhatsApp session 或自动回复策略；未创建/验证每 6 小时自动开发任务。代码完成和生产 Verified 分开记录。
+- 后续优先级：翻译单入口与开关/租约重试；消息解包与事件身份；游标分页/历史覆盖；统一回复策略与 Outbox 不确定结果；业务健康与版本验收。
+
 # TODO_AGENT.md — 待办任务
 
 ## 当前优先级排序
 
+### P0 — AI 语言与翻译可靠性（2026-09-11）
+
+- [x] 共享 AI 配置保存后热更新；缓存 Rewriter 跟随当前全局模型，联系人/账号覆盖优先。
+- [x] 翻译空/原文照抄结果与部分失败不再伪装成功；精确原文 hash、活动批次复用、状态 API、页面 fresh GET 与可中断轮询。
+- [x] 自动回复入站语言提示、明确错误文字系统拦截、生成后 opt-out/新消息重查、Job 当前版本失败 CAS 与完整超时预算 lease；Provider 复用。
+- [x] 入站自动翻译异步化（`events/whatsapp.py`），解除前端作为伪 Worker 驱动翻译的架构倒置；落地全局翻译记忆库（Translation Memory）跨会话文本哈希复用（0ms 零 AI 调用）；纯中文/纯符号拦截与前端非外文过滤。
+- [x] Python wheel 安装到生产虚拟环境，保留旧源码回滚；前端构建到 Nginx dist 并验证新 JS/CSS；无数据库迁移、无重置 WhatsApp session。API/Bridge 与公共端点验收正常。
+- [x] GitHub CLI 使用已配置登录环境验证 sharefuture1，标准 Git credential helper dry-run 成功；Vercel Git 自动构建关闭。
+- [ ] 真实测试联系人四语自动收发验收：当前账号/会话 off 未改变，不以临时 mock 测试代替真实发送；上游 35 秒探针有超时，继续观测。
+- [ ] 联系人自动回复 UI 与账号/会话策略联动：原端点仅保存 override，不能仅凭 UI enabled 判断 ready。
+- [ ] 完整 Ruff 风格/额外规则清理；本轮核心 E4/E7/E9/F、全量功能测试与构建已通过。
+- [ ] 前一轮 Bridge JS 头像补拉/历史选择发布（Python wheel 不包含 Bridge JS）；旧联系人复制脚本不能覆盖新 wheel 发布流程。
+
+### P1 — 部署能力验证（2026-09-10 落地，待环境验证）
+
+代码已实现并完成本机能验证的部分（见 `docs/CHANGELOG_AGENT.md` 2026-09-10）。
+
+- [x] **gcptw 生产运行加固（2026-09-11）**：API/Bridge systemd 只读主机沙箱已上线，exposure `8.7 EXPOSED → 6.8 MEDIUM`；自托管 hash assets immutable / HTML no-cache 已验证。
+- [x] **Bridge spool replay HMAC 修复（2026-09-11）**：重启 replay sink 继承 HMAC secret；生产内部事件从 401 恢复 200，pending spool `15 → 0`。
+
+以下两项**必须**在相应环境上真实执行后才能标 Verified：
+
+- [ ] **PostgreSQL 真机验证**：本机无 PG 且不使用 Docker，仅验证了 DDL 生成与 URL 归一化
+  - 前置：一个**可丢弃**的 PostgreSQL 测试库
+  - 命令：`TEST_DATABASE_URL='postgresql://user:pass@host:5432/whatsapp_test' pytest tests/test_postgres_backend.py -v`
+  - 注意：该套件会 `TRUNCATE` 目标库中本项目使用的表
+  - 覆盖：迁移建表、外键强制、事件幂等、Outbox CAS 抢占、行锁可用性、ILIKE 搜索
+- [ ] **Windows 实际运行验证**：`scripts/run_server.py` 已按跨平台实现（路径、权限、编码），但仅在 macOS 实测
+  - 验证点：`.env` 载入、`--check` 自检、`--migrate`、服务启动与 `/api/health`
+  - 参考：`docs/STANDALONE-DEPLOYMENT.md` §3.2
+
+### P0 — Tauri 2 桌面安装包自动构建
+
+- [>] **GitHub Actions 自动构建测试安装包（FR-DESKTOP-001）**
+  - [x] Tauri 2 薄壳、最小 HTTP capability 与 Browser/Tauri 双模式构建
+  - [x] 旧 Session、AI URL/key、设置读取权限安全修复
+  - [x] Tauri token 内存化、缓存按用户隔离与 logout 清理
+  - [x] `Cargo.lock` 与多平台图标
+  - [x] Linux `.deb/.AppImage`、Windows NSIS、macOS `.dmg` Actions 矩阵
+  - [x] 本机 Linux `.deb` 构建完成
+  - [ ] GitHub 三平台 workflow 全部绿色并产生 artifacts
+  - [ ] 对应系统安装、启动、登录、翻译和注销冒烟测试
+  - [ ] 正式发布签名/notarization（当前仅未签名内部测试包）
+  - SDD：`docs/sdd/11-tauri-desktop-distribution.md`
+  - 计划：`docs/plans/2026-07-16-tauri-desktop-installers.md`
+
+
 ### P0 — 运维安全（需人工在生产执行）
 
-- [x] **轮换生产登录密码**：2026-07-15 已完成轮换并 curl 验证 200 ✅（密码值不入 Git——SDD 总纲安全纪律；此前本行曾写入明文，已于 2026-07-18 移除，该密码应再次轮换）
-  - 注意：生产密码变更后，Vercel 前端 `wt.v.future1.us` 登录凭据需同步更新
+- [ ] **按凭据泄露流程再次轮换生产登录密码**：历史凭据曾进入版本库，须立即轮换并撤销现有会话；完成后只记录时间与负责人，不记录密码值
+  - 注意：前后端部署环境应通过密钥管理系统同步凭据；清理 Git 历史及外部副本，并在提交前运行秘密扫描
 
 > 权威优化规格：`docs/sdd/05-optimization-backlog.md`。本文件只显示当前执行状态；新增、删除或改变需求必须先修改 SDD。
+
+- [ ] 设置页继续观察真实设备滚动性能；如仍有卡顿，再针对具体组件做 profiling，避免盲目增加缓存。
 
 ### P0 — 性能快赢包（SDD-P0-10，规格：`docs/sdd/09-performance-and-realtime.md`）— **Implemented 2026-07-18**
 
@@ -18,15 +78,21 @@
 - [x] PERF-006 AutoReplyWorker 改为"短事务读 → 无 session 调 AI → 短事务重校验后写回"
 - [x] PERF-008 `mergeFreshMessages` 引用稳定；localStorage idle 批量写；缓存不短路网络请求
 - [x] UI：会话列表首载骨架屏
-- [ ] TranslationDispatcher 批处理事务隔离（同 PERF-006 模式，后续）
+- [x] **TranslationDispatcher 批处理事务隔离**（2026-09-10 落地，同 PERF-006 模式）
+  - [x] 三段式：短事务读快照 → 无 session 调 AI → 短事务写回
+  - [x] 窗口失败的条目按上限并发补齐（原为串行）
+  - [x] 过期 `running` 批次可被重新领取；`max_attempts` 上限
+  - [x] 回归断言：AI 被调用时打开的数据库会话数必须为 0
 
-### P1 — 实时通道与 Vercel 部署（新规格已批准）
+### P1 — 实时通道与 Vercel 备用部署（当前生产前端已服务器同域托管）
 
 - [ ] **SDD-P1-12 SSE 实时事件通道**（RT-001/002/003 + PERF-004 翻译入库 + PERF-007 索引对齐）
 - [ ] **SDD-P1-13 前端 Vercel 部署**（VCL-001~006，规格：`docs/sdd/10-frontend-vercel-deployment.md`）
-  - [ ] `api.js` 接入 `VITE_API_BASE_URL`（自托管行为不变）
-  - [ ] API CORS allowlist 加入 Vercel 生产域；nginx SSE `proxy_buffering off`
-  - [ ] Vercel 环境变量矩阵（Preview 禁止指向生产 API）
+  - [x] `api.js` 接入 `VITE_API_BASE_URL`（2026-09-10；旧名 `VITE_API_BASE` 保留为兼容别名并告警）
+  - [x] 移除 `vercel.json` 硬编码后端代理改写，改为纯构建期变量驱动
+  - [x] API CORS allowlist + nginx SSE `proxy_buffering off`：2026-09-11 已在 `whats.wending.ai` 生产源站验收，`wt.v.future1.us` 预检返回精确 allow-origin
+  - [x] Vercel 环境隔离代码门禁：Production 固定 `https://whats.wending.ai/api`；Preview 指向生产 API 时构建 fail-closed
+  - [>] Vercel Production 作为备用发布路径：当前生产已改为 `whats.wending.ai` 服务器同域 SPA；`wt.v.future1.us` 仍是旧 bundle，配额恢复后可更新作为灾备/CDN 入口
   - [ ] 版本哈希验证 + rollback 演练
 
 ### P0 — 24x7 AI 自动回复
@@ -282,6 +348,14 @@
 - [x] **中文文案覆盖 + 联系人显示名优先级（FR-CON-013 / UX-011）**
   - 中文 locale 已补齐遗留英文文案，并由静态测试阻止未翻译英文回归
   - 联系人显示固定为人工备注 → WhatsApp 同步名称 → 会话标题 → 远端 ID
+- [>] **联系人姓名/头像/历史同步修复（FR-CON-011/013）**
+  - [x] 稀疏 contact/chat update 不再用 null 清空已有 display_name/avatar_url/title
+  - [x] 历史 pushName 只补空名称/占位名称，不覆盖已有真实姓名或人工备注
+  - [x] Bridge `profilePictureUrl` 独立 2-lane enrichment 队列，成功 TTL 6h / 失败 TTL 1h，不阻塞消息事件
+  - [x] 历史全局 2000 上限改为每会话最多 200 + 全局最近优先，避免后续会话饿死
+  - [x] Web 会话列表/聊天头部/入站气泡/通讯录/联系人详情接入 avatar_url + initials fallback
+  - [x] 门禁：Python 356 passed / 7 skipped；Web 126 passed；Bridge 87 passed + lint
+  - [ ] root 执行 `/home/young11/deploy-whatsapp-contact-sync-fix.sh`，完成 `/opt` 切换并对比生产 106 contacts / 24 真人名 / 1 头像基线
 - [x] **中文最高优先级 + 认证 API 可见性**
   - 语言默认/未知/缺失 key 统一回退中文；升级语言缓存 key，旧英文缓存不再覆盖默认中文
   - 人设目录使用统一 session API 客户端，401/5xx 显示错误而不是伪装为空人设目录
@@ -292,7 +366,11 @@
 - [ ] **真实计数与可重复浏览器验收（SDD-P1-02 / P2-06）**
   - 未读迁移为后端真值；把临时 Chromium 审计转为仓库 Playwright 主链路测试
 
-### 当前验证结果（2026-07-10）
+### 当前验证结果（2026-07-10 快照，历史记录）
+
+> 以下数字是该日期的快照，请勿据此判断当前状态。
+> **当前门禁数字见 `docs/PROJECT_MEMORY.md` 的「验证状态」章节**
+> （2026-09-11：Python 354 passed / Web 124 passed / Bridge 85 passed；API/Bridge live/readiness 已生产验证）。
 
 - `npm run build`：✅ 通过，资源 `index-DRPbZjTf.js` / `index-n1Ei7oEG.css`
 - `pytest -q`：✅ 129 passed

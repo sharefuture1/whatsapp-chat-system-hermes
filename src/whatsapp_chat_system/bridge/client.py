@@ -90,6 +90,9 @@ class BridgeClient:
 
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
         remote_code = str(error.get("code") or "")
+        remote_retryable = error.get("retryable")
+        if not isinstance(remote_retryable, bool):
+            remote_retryable = None
         message = str(
             error.get("message") or payload.get("detail") or "Bridge request failed"
         )
@@ -111,7 +114,11 @@ class BridgeClient:
         raise BridgeError(
             remote_code or "bridge_error",
             message,
-            retryable=response.status_code >= 500,
+            retryable=(
+                remote_retryable
+                if remote_retryable is not None
+                else response.status_code >= 500
+            ),
         )
 
     @staticmethod

@@ -25,37 +25,43 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from .accounts.reconciler import AccountReconciler
+from .ai.auto_reply_reconciler import AutoReplyReconciler
+from .ai.auto_reply_worker import AutoReplyWorker
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
+    internal_auth_exception_handler,
     whatsapp_validation_exception_handler,
 )
 from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
+from .api.v1.operations import create_operations_router
 from .api.v1.personas import create_personas_router
 from .api.v1.plugins import create_plugins_router
-from .api.v1.operations import create_operations_router
 from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
-from .db import models as _models  # noqa: F401 -- registers every mapped table in Base.metadata
+from .db import (
+    models as _models,  # noqa: F401 -- registers every mapped table in Base.metadata
+)
 from .outbox import OutboxDispatcher
-from .ai.auto_reply_worker import AutoReplyWorker
-from .ai.auto_reply_reconciler import AutoReplyReconciler
-from .translations_dispatcher import TranslationDispatcher
 from .runtime import (
-    StandaloneRuntime,
     StandaloneAISettingsManager,
-    is_authenticated as _is_authenticated,
-    verify_password as _verify_password,
+    StandaloneRuntime,
     save_runtime_settings,
+)
+from .runtime import is_authenticated as _is_authenticated
+from .runtime import (
     session_info as _session_info,  # noqa: F401 -- re-exported for users router
 )
-from .security.internal_auth import InternalAuthError, verify_internal_token
+from .runtime import verify_password as _verify_password
+from .security.internal_auth import InternalAuthError
+from .security.internal_auth import ReplayGuard as InternalReplayGuard
+from .translations_dispatcher import TranslationDispatcher
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ALLOWED_ORIGINS = (
-    "https://whats.future1.us",
+    "https://whats.wending.ai",
     "http://127.0.0.1:38998",
     "http://localhost:38998",
 )
@@ -148,7 +154,21 @@ def _recent_login_attempts(
 
 
 def _current_alembic_head() -> str:
-    project_root = Path(__file__).resolve().parents[2]
+    source_root = Path(__file__).resolve().parents[2]
+    # Editable checkouts carry migrations beside src/. A wheel uses the
+    # service's explicit WorkingDirectory, whose migration assets stay immutable.
+    project_root = next(
+        (
+            root
+            for root in (source_root, Path.cwd())
+            if (root / "alembic.ini").is_file() and (root / "migrations").is_dir()
+        ),
+        None,
+    )
+    if project_root is None:
+        raise RuntimeError(
+            "standalone migration assets are missing from the service working directory"
+        )
     config = Config(str(project_root / "alembic.ini"))
     config.set_main_option("script_location", str(project_root / "migrations"))
     head = ScriptDirectory.from_config(config).get_current_head()
@@ -328,13 +348,25 @@ def build_standalone_app(
     app.state.runtime = runtime
     app.state.session_factory = factory
     app.state.ai_settings_manager = runtime_ai_settings
+    allowed_origins = _allowed_cors_origins()
+    # 前后端分开部署时最常见的排障点就是跨域来源没放行，这里显式打印出来
+    logger.info(
+        "Standalone API CORS allowlist resolved",
+        extra={
+            "allowed_origins": allowed_origins,
+            "source": "CHAT_SYSTEM_ALLOWED_ORIGINS"
+            if os.getenv("CHAT_SYSTEM_ALLOWED_ORIGINS", "").strip()
+            else "built-in defaults",
+        },
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_allowed_cors_origins(),
+        allow_origins=allowed_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
             "Content-Type",
+            "Authorization",
             "X-Session-Token",
             "X-Request-ID",
             "Idempotency-Key",
@@ -345,48 +377,59 @@ def build_standalone_app(
     app.include_router(create_accounts_router(factory, bridge))
     app.include_router(create_conversations_router(factory, bridge))
     app.include_router(
-        create_whatsapp_events_router(factory, runtime.internal_event_token)
+        create_whatsapp_events_router(
+            factory,
+            runtime.internal_event_token,
+            hmac_secret=runtime.internal_event_hmac_secret,
+            replay_guard=InternalReplayGuard(),
+        )
     )
     app.include_router(create_personas_router(runtime, factory))
     app.include_router(create_plugins_router(runtime))
     # Lazy import to avoid circular dependency at module load time
-    from .api.v1.users import create_users_router as _create_users_router
     from .api.v1.messages import create_messages_router as _create_messages_router
+    from .api.v1.users import create_users_router as _create_users_router
 
     app.include_router(create_settings_router(runtime, factory))
-    app.include_router(create_operations_router(factory))
+    app.include_router(create_operations_router(runtime, factory))
     app.include_router(_create_users_router(runtime))
     app.include_router(_create_messages_router())
 
     @app.middleware("http")
     async def auth_guard(request: Request, call_next):
         path = request.url.path
-        if path == "/internal/events/whatsapp":
-            try:
-                # Authenticate before FastAPI parses the event body, so an
-                # unauthenticated malformed payload cannot probe its schema.
-                verify_internal_token(
-                    runtime.internal_event_token,
-                    request.headers.get("X-Internal-Token"),
-                )
-            except InternalAuthError as exc:
-                return JSONResponse(
-                    {
-                        "error": {
-                            "code": exc.code,
-                            "message": str(exc),
-                            "retryable": False,
-                            "details": {},
-                        }
-                    },
-                    status_code=exc.status_code,
-                )
+        # `/internal/events/whatsapp` 的鉴权由 events 路由的依赖项负责：
+        # FastAPI 先解析依赖、后解析请求体，因此同样能保证
+        # 「未鉴权请求无法探测 payload schema」。放在依赖项里可以顺带拿到
+        # 被缓存的原始字节做 HMAC 校验，且只需校验一次（nonce 不可重复消费）。
         if path == "/api" or (
             path.startswith("/api/")
             and not path.startswith("/api/v1/")
             and path not in {"/api/health", "/api/login", "/api/logout"}
         ):
             return JSONResponse({"code": "legacy_api_disabled"}, status_code=410)
+        if (
+            request.method != "OPTIONS"
+            and path.startswith("/api/v1/")
+            and path
+            not in {
+                "/api/v1/me",
+                "/api/v1/users/change-password",
+            }
+        ):
+            session = _session_info(runtime, request.headers.get("x-session-token", ""))
+            username = session.get("username") if session else None
+            user = (runtime.web_settings.get("users") or {}).get(username) or {}
+            if user.get("password_change_required"):
+                return JSONResponse(
+                    {
+                        "detail": {
+                            "code": "password_change_required",
+                            "message": "Change your password before continuing",
+                        }
+                    },
+                    status_code=403,
+                )
         if (
             request.method == "OPTIONS"
             or not path.startswith("/api")
@@ -413,6 +456,12 @@ def build_standalone_app(
         response.headers["X-Request-ID"] = request.state.request_id
         return response
 
+    @app.exception_handler(InternalAuthError)
+    async def standalone_internal_auth_exception_handler(
+        request: Request, exc: InternalAuthError
+    ):
+        return internal_auth_exception_handler(request, exc)
+
     @app.exception_handler(RequestValidationError)
     async def standalone_validation_exception_handler(
         request: Request, exc: RequestValidationError
@@ -421,6 +470,19 @@ def build_standalone_app(
         if response is not None:
             return response
         return await request_validation_exception_handler(request, exc)
+
+    @app.get("/health/live")
+    def live_health() -> dict[str, Any]:
+        """Liveness only proves the API process can answer HTTP."""
+        return {"live": True, "runtime_mode": "standalone"}
+
+    @app.get("/health/ready")
+    def readiness_health() -> JSONResponse:
+        """Readiness reflects whether startup/schema validation completed."""
+        return JSONResponse(
+            {"ready": bool(app.state.ready), "runtime_mode": "standalone"},
+            status_code=200 if app.state.ready else 503,
+        )
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -453,22 +515,21 @@ def build_standalone_app(
 
     @app.get("/api/v1/me")
     def get_me(request: Request) -> dict[str, Any]:
+        from whatsapp_chat_system.authz import get_current_user_record
+
+        user = get_current_user_record(runtime, request)
         token = request.headers.get("x-session-token", "")
-        sessions = dict(runtime.web_settings.get("sessions") or {})
-        session = sessions.get(token)
-        if not session:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        now = time.time()
-        if float(session.get("expires_at", 0)) < now:
-            raise HTTPException(status_code=401, detail="Session expired")
-        username = session.get("username", "admin")
-        users: dict[str, Any] = runtime.web_settings.get("users") or {}
-        user = users.get(username, {})
+        session = (runtime.web_settings.get("sessions") or {}).get(token) or {}
         return {
-            "username": username,
-            "role": user.get("role", "admin"),  # admin | operator | viewer
-            "allowed_account_ids": [str(x).strip() for x in (user.get('allowed_account_ids') or []) if str(x).strip()],
+            "username": user["username"],
+            "role": user.get("role"),
+            "allowed_account_ids": [
+                str(x).strip()
+                for x in (user.get("allowed_account_ids") or [])
+                if str(x).strip()
+            ],
             "session_expires_at": session.get("expires_at"),
+            "password_change_required": bool(user.get("password_change_required")),
         }
 
     @app.post("/api/login")
@@ -514,13 +575,23 @@ def build_standalone_app(
                 ):
                     users["admin"] = dict(legacy_auth)
                     users["admin"].setdefault("created_at", time.time())
+                    users["admin"]["role"] = "admin"
+                    users["admin"].setdefault("allowed_account_ids", [])
                     runtime.web_settings["users"] = users
                     save_runtime_settings(runtime)
 
             user_record: dict[str, Any] | None = users.get(username)
             # Backward compat: also accept legacy auth (single shared password)
             if not user_record and username == "admin":
-                user_record = runtime.web_settings.get("auth")
+                legacy_record = runtime.web_settings.get("auth")
+                if legacy_record:
+                    user_record = dict(legacy_record)
+                    user_record["role"] = "admin"
+                    user_record.setdefault("allowed_account_ids", [])
+                    user_record.setdefault("created_at", time.time())
+                    users["admin"] = user_record
+                    runtime.web_settings["users"] = users
+                    save_runtime_settings(runtime)
             if not user_record or not _verify_password(user_record, payload.password):
                 recent.append(now)
                 attempt_map[client_ip] = recent
@@ -530,15 +601,16 @@ def build_standalone_app(
                     status_code=401, detail="Invalid username or password"
                 )
 
-            # If password_change_required, return flag so frontend forces a change
-            needs_password_change = False
-            if user_record.get("password_change_required"):
-                needs_password_change = True
-                # Clear the flag on successful login so they land in the app
-                user_record.pop("password_change_required", None)
+            if username == "admin" and user_record.get("role") != "admin":
+                user_record["role"] = "admin"
+                user_record.setdefault("allowed_account_ids", [])
                 users[username] = user_record
                 runtime.web_settings["users"] = users
                 save_runtime_settings(runtime)
+
+            # If password_change_required, return flag so frontend forces a change
+            needs_password_change = bool(user_record.get("password_change_required"))
+            # SEC-AUTH-015: only a successful password-change transaction clears it.
 
             # Logout all existing sessions for this user (single-session policy)
             sessions = dict(runtime.web_settings.get("sessions") or {})

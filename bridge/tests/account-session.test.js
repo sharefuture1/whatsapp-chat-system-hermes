@@ -547,6 +547,69 @@ test('FR-CON-011: history is bounded, filters unsupported messages, and limits e
   assert.equal(sink.events.filter(item => item.event_type === 'chats.upsert').flatMap(x => x.payload.items).length, 5000);
 });
 
+test('FR-CON-011: global history cap preserves coverage for later conversations', async () => {
+  const now = Date.parse('2026-07-11T00:00:00Z');
+  const sink = recordingSink();
+  const sock = socket();
+  const session = await makeSession(async () => sock, { now: () => now, eventSink: sink });
+  await session.connect();
+  sink.events.length = 0;
+
+  const messages = [];
+  for (let conversation = 0; conversation < 11; conversation += 1) {
+    for (let index = 0; index < 200; index += 1) {
+      messages.push({
+        key: { id: `C${conversation}-${index}`, remoteJid: `c${conversation}@lid`, fromMe: false },
+        messageTimestamp: Math.floor(now / 1000) - index - conversation,
+        message: { conversation: `c${conversation}-${index}` },
+        pushName: `Contact ${conversation}`,
+      });
+    }
+  }
+
+  sock.ev.emit('messaging-history.set', { contacts: [], chats: [], messages });
+  await session.whenIdle();
+  const history = sink.events.filter(item => item.event_type === 'history.messages.upsert')
+    .flatMap(item => item.payload.items);
+  assert.equal(history.length, 2000);
+  assert.equal(history.some(item => item.remote_jid === 'c10@lid'), true);
+  assert.equal(new Set(history.map(item => item.remote_jid)).size, 11);
+});
+
+test('FR-CON-013: avatar enrichment runs off the message event pipeline and is cached', async () => {
+  let resolveAvatar;
+  const avatarGate = new Promise(resolve => { resolveAvatar = resolve; });
+  let profileCalls = 0;
+  const sink = recordingSink();
+  const sock = socket({
+    async profilePictureUrl(jid) {
+      profileCalls += 1;
+      await avatarGate;
+      return `https://cdn.example/${encodeURIComponent(jid)}.jpg`;
+    },
+  });
+  const session = await makeSession(async () => sock, { eventSink: sink });
+  await session.connect();
+  sink.events.length = 0;
+
+  sock.ev.emit('contacts.upsert', [{ id: 'person@lid', name: 'Person' }]);
+  await session.whenIdle();
+  assert.equal(sink.events.some(item => item.event_type === 'contacts.upsert'), true);
+  assert.equal(sink.events.some(item => item.payload?.items?.[0]?.avatar_url), false);
+
+  resolveAvatar();
+  await session.whenEnrichmentIdle();
+  const avatarEvents = sink.events.filter(item => item.event_type === 'contacts.update' && item.payload?.items?.[0]?.avatar_url);
+  assert.equal(avatarEvents.length, 1);
+  assert.equal(avatarEvents[0].payload.items[0].remote_jid, 'person@lid');
+  assert.match(avatarEvents[0].payload.items[0].avatar_url, /^https:\/\/cdn\.example\//);
+
+  sock.ev.emit('contacts.update', [{ id: 'person@lid', notify: 'Person 2' }]);
+  await session.whenIdle();
+  await session.whenEnrichmentIdle();
+  assert.equal(profileCalls, 1, 'avatar lookup should use the TTL cache');
+});
+
 test('FR-CON-011: message normalization rejects unknown and system JID servers', async () => {
   const sink = recordingSink();
   const sock = socket();

@@ -4,7 +4,7 @@ import hashlib
 import re
 from collections.abc import Callable, Generator
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -12,19 +12,23 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from whatsapp_chat_system.authz import restrict_account_id, visible_account_ids_for
+
+from whatsapp_chat_system.authz import (
+    require_object_account_access,
+    restrict_account_id,
+    visible_account_ids_for,
+)
 from whatsapp_chat_system.db.models import (
-    Conversation,
     Contact,
     ContactAIOverride,
+    Conversation,
     Message,
     MessageTranslation,
-    OutboxMessage,
     TranslationBatch,
     WhatsAppAccount,
 )
 from whatsapp_chat_system.outbox import enqueue_outbox_message
-
+from whatsapp_chat_system.translation_hash import source_text_hash
 
 PLATFORM = "whatsapp"
 
@@ -40,7 +44,7 @@ def _display_name(*values: Any) -> str | None:
 
 
 def _source_text_hash(text: str) -> str:
-    return hashlib.sha256((text or '').encode('utf-8')).hexdigest()
+    return source_text_hash(text)
 
 
 def _fallback_contact_name(remote_jid: str) -> str:
@@ -71,7 +75,7 @@ class TranslateRequest(BaseModel):
 
 class TranslationBatchRequest(BaseModel):
     anchor_message_id: str = Field(..., max_length=36)
-    target_lang: str = Field(default='zh-CN', max_length=32)
+    target_lang: Literal["zh-CN"] = "zh-CN"
     window_size: int = Field(default=10, ge=1, le=20)
 
 
@@ -108,7 +112,10 @@ def create_conversations_router(
             session.close()
 
     def available_accounts(
-        session: Session, platform: str, account_id: str
+        session: Session,
+        platform: str,
+        account_id: str,
+        visible_account_ids: list[str] | None,
     ) -> list[dict[str, Any]]:
         if platform not in {"all", PLATFORM}:
             return []
@@ -117,6 +124,8 @@ def create_conversations_router(
         )
         if account_id != "all":
             statement = statement.where(WhatsAppAccount.id == account_id)
+        if visible_account_ids is not None:
+            statement = statement.where(WhatsAppAccount.id.in_(visible_account_ids))
         return [
             _account_payload(account) for account in session.scalars(statement).all()
         ]
@@ -145,7 +154,13 @@ def create_conversations_router(
         statement = (
             select(Conversation, Contact, WhatsAppAccount, ContactAIOverride)
             .join(WhatsAppAccount, WhatsAppAccount.id == Conversation.account_id)
-            .outerjoin(Contact, Contact.id == Conversation.contact_id)
+            .outerjoin(
+                Contact,
+                and_(
+                    Contact.id == Conversation.contact_id,
+                    Contact.account_id == Conversation.account_id,
+                ),
+            )
             .outerjoin(
                 ContactAIOverride,
                 and_(
@@ -160,7 +175,9 @@ def create_conversations_router(
         )
         if visible_ids is not None:
             statement = statement.where(Conversation.account_id.in_(visible_ids))
-            count_statement = count_statement.where(Conversation.account_id.in_(visible_ids))
+            count_statement = count_statement.where(
+                Conversation.account_id.in_(visible_ids)
+            )
         if account_id != "all":
             statement = statement.where(Conversation.account_id == account_id)
             count_statement = count_statement.where(
@@ -195,8 +212,10 @@ def create_conversations_router(
                     contact.remark if contact else None,
                     contact.display_name if contact else None,
                     conversation.title,
-                ) or _fallback_contact_name(conversation.remote_jid),
+                )
+                or _fallback_contact_name(conversation.remote_jid),
                 "contact_id": conversation.contact_id,
+                "avatar_url": contact.avatar_url if contact else None,
                 "contact_profile": {
                     "remark": contact.remark if contact else None,
                     "notes": contact.notes if contact else None,
@@ -205,9 +224,13 @@ def create_conversations_router(
                 },
                 "user_override": {
                     "ai_model": override.model if override else None,
-                    "custom_system_prompt": override.system_prompt if override else None,
+                    "custom_system_prompt": override.system_prompt
+                    if override
+                    else None,
                     "reply_style": override.reply_style if override else None,
-                    "auto_reply_enabled": override.auto_reply_enabled if override else None,
+                    "auto_reply_enabled": override.auto_reply_enabled
+                    if override
+                    else None,
                 },
                 "platform": PLATFORM,
                 "last_message": conversation.last_message_preview or "",
@@ -227,7 +250,9 @@ def create_conversations_router(
             "platform": platform,
             "account_id": account_id,
             "available_platforms": [PLATFORM],
-            "available_accounts": available_accounts(session, platform, account_id),
+            "available_accounts": available_accounts(
+                session, platform, account_id, visible_ids
+            ),
         }
 
     @router.get("/contacts")
@@ -306,7 +331,8 @@ def create_conversations_router(
                     contact.remark,
                     contact.display_name,
                     conversation.title if conversation else None,
-                ) or _fallback_contact_name(contact.remote_jid),
+                )
+                or _fallback_contact_name(contact.remote_jid),
                 "phone_number": contact.phone_number,
                 "avatar_url": contact.avatar_url,
                 "tags": contact.tags or [],
@@ -321,17 +347,27 @@ def create_conversations_router(
             "platform": platform,
             "account_id": account_id,
             "available_platforms": [PLATFORM],
-            "available_accounts": available_accounts(session, platform, account_id),
+            "available_accounts": available_accounts(
+                session, platform, account_id, visible_ids
+            ),
         }
 
     @router.post("/contacts/{contact_id}/conversation")
     def ensure_contact_conversation(
+        request: Request,
         contact_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         contact = session.get(Contact, contact_id)
         if contact is None:
             raise HTTPException(status_code=404, detail="Contact not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            contact.account_id,
+            write=True,
+            not_found_detail="Contact not found",
+        )
         conversation = session.scalar(
             select(Conversation).where(
                 Conversation.account_id == contact.account_id,
@@ -373,6 +409,7 @@ def create_conversations_router(
 
     @router.patch("/conversations/{conversation_id}/auto-reply")
     def update_auto_reply(
+        request: Request,
         conversation_id: str,
         payload: AutoReplyUpdate,
         session: Session = Depends(get_session),
@@ -380,27 +417,51 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
         account = session.get(WhatsAppAccount, conversation.account_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        contact = session.get(Contact, conversation.contact_id) if conversation.contact_id else None
+        contact = (
+            session.scalar(
+                select(Contact).where(
+                    Contact.id == conversation.contact_id,
+                    Contact.account_id == conversation.account_id,
+                )
+            )
+            if conversation.contact_id
+            else None
+        )
         if contact is None:
             raise HTTPException(status_code=409, detail="Conversation has no contact")
-        override = session.scalar(select(ContactAIOverride).where(
-            ContactAIOverride.account_id == account.id,
-            ContactAIOverride.contact_id == contact.id,
-        ))
+        override = session.scalar(
+            select(ContactAIOverride).where(
+                ContactAIOverride.account_id == account.id,
+                ContactAIOverride.contact_id == contact.id,
+            )
+        )
         if override is None:
             override = ContactAIOverride(account_id=account.id, contact_id=contact.id)
             session.add(override)
         override.auto_reply_enabled = payload.enabled
         session.commit()
-        return {"success": True, "conversation_id": conversation.id, "contact_id": contact.id,
-                "auto_reply_enabled": override.auto_reply_enabled,
-                "account_mode": account.auto_reply_mode,
-                "account_online": account.status == "online"}
+        return {
+            "success": True,
+            "conversation_id": conversation.id,
+            "contact_id": contact.id,
+            "auto_reply_enabled": override.auto_reply_enabled,
+            "account_mode": account.auto_reply_mode,
+            "account_online": account.status == "online",
+        }
+
     @router.patch("/conversations/{conversation_id}")
     def update_conversation_state(
+        request: Request,
         conversation_id: str,
         payload: ConversationStateUpdate,
         session: Session = Depends(get_session),
@@ -408,6 +469,13 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
         changes = payload.model_dump(exclude_unset=True)
         if not changes:
             raise HTTPException(status_code=422, detail="No state changes provided")
@@ -425,12 +493,20 @@ def create_conversations_router(
 
     @router.post("/conversations/{conversation_id}/read")
     def mark_conversation_read(
+        request: Request,
         conversation_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
         conversation.unread_count = 0
         session.commit()
         return {
@@ -441,12 +517,20 @@ def create_conversations_router(
 
     @router.delete("/conversations/{conversation_id}")
     def delete_conversation(
+        request: Request,
         conversation_id: str,
         session: Session = Depends(get_session),
     ) -> dict[str, Any]:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
         conversation.deleted_at = datetime.now(timezone.utc)
         session.commit()
         return {
@@ -458,6 +542,7 @@ def create_conversations_router(
 
     @router.get("/conversations/{conversation_id}/messages")
     def conversation_messages(
+        request: Request,
         conversation_id: str,
         limit: int = Query(default=80, ge=1, le=200),
         before_occurred_at: datetime | None = Query(default=None),
@@ -467,6 +552,12 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            not_found_detail="Conversation not found",
+        )
         if before_id and before_occurred_at is None:
             raise HTTPException(
                 status_code=422,
@@ -476,7 +567,10 @@ def create_conversations_router(
             before_occurred_at = before_occurred_at.replace(tzinfo=timezone.utc)
 
         sort_time = func.coalesce(Message.occurred_at, Message.created_at)
-        statement = select(Message).where(Message.conversation_id == conversation.id)
+        statement = select(Message).where(
+            Message.conversation_id == conversation.id,
+            Message.account_id == conversation.account_id,
+        )
         if before_occurred_at is not None:
             cursor_clause = sort_time < before_occurred_at
             if before_id:
@@ -499,11 +593,20 @@ def create_conversations_router(
                 "before_id": oldest.id,
             }
         rows.reverse()
-        translation_rows = session.scalars(select(MessageTranslation).where(
-            MessageTranslation.conversation_id == conversation.id,
-            MessageTranslation.message_id.in_([message.id for message in rows]),
-            MessageTranslation.target_lang == 'zh-CN',
-        ).order_by(MessageTranslation.updated_at.desc())).all() if rows else []
+        translation_rows = (
+            session.scalars(
+                select(MessageTranslation)
+                .where(
+                    MessageTranslation.account_id == conversation.account_id,
+                    MessageTranslation.conversation_id == conversation.id,
+                    MessageTranslation.message_id.in_([message.id for message in rows]),
+                    MessageTranslation.target_lang == "zh-CN",
+                )
+                .order_by(MessageTranslation.updated_at.desc())
+            ).all()
+            if rows
+            else []
+        )
         translations_by_message: dict[str, MessageTranslation] = {}
         for item in translation_rows:
             translations_by_message.setdefault(item.message_id, item)
@@ -524,10 +627,16 @@ def create_conversations_router(
                 "sent": message.status in {"sent", "delivered", "read"},
                 "error": message.error_message,
                 "retryable": message.status != "failed" or message.retry_count < 6,
-                "lang": translation.source_lang if (translation := translations_by_message.get(message.id)) else "Unknown",
-                "translated": translation.translated_text if translation and translation.status == 'completed' else None,
+                "lang": translation.source_lang
+                if (translation := translations_by_message.get(message.id))
+                else "Unknown",
+                "translated": translation.translated_text
+                if translation and translation.status == "completed"
+                else None,
                 "translation_status": translation.status if translation else None,
-                "translation_updated_at": _iso(translation.updated_at) if translation else None,
+                "translation_updated_at": _iso(translation.updated_at)
+                if translation
+                else None,
                 "timestamp": _timestamp(message.occurred_at or message.created_at),
                 "occurred_at": _iso(message.occurred_at),
                 "created_at": _iso(message.created_at),
@@ -537,7 +646,8 @@ def create_conversations_router(
         total = (
             session.scalar(
                 select(func.count(Message.id)).where(
-                    Message.conversation_id == conversation.id
+                    Message.conversation_id == conversation.id,
+                    Message.account_id == conversation.account_id,
                 )
             )
             or 0
@@ -554,6 +664,7 @@ def create_conversations_router(
 
     @router.post("/conversations/{conversation_id}/reply", status_code=202)
     def reply_to_conversation(
+        request: Request,
         conversation_id: str,
         payload: ConversationReplyRequest,
         session: Session = Depends(get_session),
@@ -561,12 +672,20 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
         if payload.preview_only:
             try:
                 from whatsapp_chat_system.rewriter import Rewriter
 
                 class _DummyAppPaths:
                     memory_dir: Any
+
                     def __init__(self, memory_dir: Any) -> None:
                         self.memory_dir = memory_dir
 
@@ -574,98 +693,138 @@ def create_conversations_router(
                     paths: _DummyAppPaths
                     ai_settings: Any
                     web_settings: dict[str, Any]
-                    def __init__(self, memory_dir: Any, ai_settings: Any, web_settings: dict[str, Any]) -> None:
+
+                    def __init__(
+                        self,
+                        memory_dir: Any,
+                        ai_settings: Any,
+                        web_settings: dict[str, Any],
+                    ) -> None:
                         self.paths = _DummyAppPaths(memory_dir)
                         self.ai_settings = ai_settings
                         self.web_settings = web_settings
 
-                runtime = getattr(session.bind, '_standalone_runtime', None)
+                runtime = getattr(session.bind, "_standalone_runtime", None)
                 if runtime is None:
                     from whatsapp_chat_system.runtime import StandaloneRuntime
+
                     runtime = StandaloneRuntime.from_env()
                 runtime_manager = None
                 try:
                     from whatsapp_chat_system.runtime import RuntimeAISettings
-                    runtime_manager = RuntimeAISettings(runtime.ai_settings, lambda: session)
+
+                    runtime_manager = RuntimeAISettings(
+                        runtime.ai_settings, lambda: session
+                    )
                 except Exception:
                     runtime_manager = None
 
-                contact = session.scalar(select(Contact).where(
-                    Contact.account_id == conversation.account_id,
-                    Contact.remote_jid == conversation.remote_jid,
-                ))
-                override = session.get(ContactAIOverride, (contact.account_id, contact.id)) if contact is not None else None
+                contact = session.scalar(
+                    select(Contact).where(
+                        Contact.account_id == conversation.account_id,
+                        Contact.remote_jid == conversation.remote_jid,
+                    )
+                )
+                override = (
+                    session.get(ContactAIOverride, (contact.account_id, contact.id))
+                    if contact is not None
+                    else None
+                )
                 reply_overrides = {}
                 if override is not None:
                     reply_overrides = {
-                        'ai_model': override.model,
-                        'custom_system_prompt': override.system_prompt,
-                        'reply_style': override.reply_style,
+                        "ai_model": override.model,
+                        "custom_system_prompt": override.system_prompt,
+                        "reply_style": override.reply_style,
                     }
                 web_settings = {
-                    'reply': {
-                        'smart_max_length': 40,
-                        'translate_max_length': 60,
-                        'default_reply_style': '',
-                        'user_overrides': {conversation.remote_jid: reply_overrides} if reply_overrides else {},
+                    "reply": {
+                        "smart_max_length": 40,
+                        "translate_max_length": 60,
+                        "default_reply_style": "",
+                        "user_overrides": {conversation.remote_jid: reply_overrides}
+                        if reply_overrides
+                        else {},
                     },
-                    'plugins': runtime.web_settings.get('plugins', {}),
-                    'contact_profiles': {
+                    "plugins": runtime.web_settings.get("plugins", {}),
+                    "contact_profiles": {
                         conversation.remote_jid: {
-                            'remark': contact.remark if contact is not None else None,
-                            'notes': contact.notes if contact is not None else None,
+                            "remark": contact.remark if contact is not None else None,
+                            "notes": contact.notes if contact is not None else None,
                         }
-                    } if contact is not None else {},
+                    }
+                    if contact is not None
+                    else {},
                 }
-                config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings, web_settings)
-                rewriter = Rewriter(config, lambda *args, **kwargs: None, runtime_manager=runtime_manager)
-                target = {'id': conversation.remote_jid, 'name': conversation.title or conversation.remote_jid}
-                memory_md = ''
-                mode = (payload.mode or 'smart').strip() or 'smart'
-                if mode == 'translate':
-                    preview_translation = rewriter.translate_to_zh_result(payload.message, 'Unknown')
+                config = _DummyConfig(
+                    runtime.paths.memory_dir, runtime.ai_settings, web_settings
+                )
+                rewriter = Rewriter(
+                    config,
+                    lambda *args, **kwargs: None,
+                    runtime_manager=runtime_manager,
+                )
+                target = {
+                    "id": conversation.remote_jid,
+                    "name": conversation.title or conversation.remote_jid,
+                }
+                memory_md = ""
+                mode = (payload.mode or "smart").strip() or "smart"
+                if mode == "translate":
+                    preview_translation = rewriter.translate_to_zh_result(
+                        payload.message, "Unknown"
+                    )
                     return {
-                        'success': True,
-                        'preview_only': True,
-                        'conversation_id': conversation.id,
-                        'message': payload.message,
-                        'mode': mode,
-                        'rewrite': {
-                            'language': preview_translation.language,
-                            'message': preview_translation.message,
-                            'used_fallback': preview_translation.used_fallback,
-                            'error': preview_translation.error,
-                            'persona': None,
+                        "success": True,
+                        "preview_only": True,
+                        "conversation_id": conversation.id,
+                        "message": payload.message,
+                        "mode": mode,
+                        "rewrite": {
+                            "language": preview_translation.language,
+                            "message": preview_translation.message,
+                            "used_fallback": preview_translation.used_fallback,
+                            "error": preview_translation.error,
+                            "persona": None,
                         },
                     }
-                elif mode == 'direct':
+                elif mode == "direct":
                     rewrite = None
                 else:
-                    rewrite = rewriter.rewrite(target, payload.message, memory_md, reply_overrides=reply_overrides)
+                    rewrite = rewriter.rewrite(
+                        target,
+                        payload.message,
+                        memory_md,
+                        reply_overrides=reply_overrides,
+                    )
                 if rewrite is not None:
                     return {
-                        'success': True,
-                        'preview_only': True,
-                        'conversation_id': conversation.id,
-                        'message': payload.message,
-                        'mode': mode,
-                        'rewrite': {
-                            'language': rewrite.language,
-                            'message': rewrite.message,
-                            'used_fallback': rewrite.used_fallback,
-                            'error': rewrite.error,
-                            'persona': rewrite.persona,
+                        "success": True,
+                        "preview_only": True,
+                        "conversation_id": conversation.id,
+                        "message": payload.message,
+                        "mode": mode,
+                        "rewrite": {
+                            "language": rewrite.language,
+                            "message": rewrite.message,
+                            "used_fallback": rewrite.used_fallback,
+                            "error": rewrite.error,
+                            "persona": rewrite.persona,
                         },
                     }
             except Exception:
                 pass
             return {
-                'success': True,
-                'preview_only': True,
-                'conversation_id': conversation.id,
-                'message': payload.message,
-                'mode': 'direct',
-                'rewrite': {'language': 'direct', 'message': payload.message, 'used_fallback': True},
+                "success": True,
+                "preview_only": True,
+                "conversation_id": conversation.id,
+                "message": payload.message,
+                "mode": "direct",
+                "rewrite": {
+                    "language": "direct",
+                    "message": payload.message,
+                    "used_fallback": True,
+                },
             }
         idempotency_key = payload.idempotency_key or f"reply:{uuid4()}"
         if not idempotency_key.startswith("reply:"):
@@ -718,6 +877,7 @@ def create_conversations_router(
         summary="Queue conversation translation batch",
     )
     def queue_translation_batch(
+        request: Request,
         conversation_id: str,
         payload: TranslationBatchRequest = Body(...),
         session: Session = Depends(get_session),
@@ -725,51 +885,182 @@ def create_conversations_router(
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.deleted_at is not None:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        anchor = session.get(Message, payload.anchor_message_id)
-        if anchor is None or anchor.conversation_id != conversation.id:
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            write=True,
+            not_found_detail="Conversation not found",
+        )
+        anchor = session.scalar(
+            select(Message).where(
+                Message.id == payload.anchor_message_id,
+                Message.account_id == conversation.account_id,
+                Message.conversation_id == conversation.id,
+            )
+        )
+        if anchor is None:
             raise HTTPException(status_code=404, detail="Anchor message not found")
-        rows = session.scalars(select(Message).where(
-            Message.conversation_id == conversation.id,
-            func.coalesce(Message.occurred_at, Message.created_at) <= func.coalesce(anchor.occurred_at, anchor.created_at),
-        ).order_by(func.coalesce(Message.occurred_at, Message.created_at).desc(), Message.id.desc()).limit(payload.window_size)).all()
+        active_batch = session.scalar(
+            select(TranslationBatch)
+            .where(
+                TranslationBatch.account_id == conversation.account_id,
+                TranslationBatch.conversation_id == conversation.id,
+                TranslationBatch.anchor_message_id == anchor.id,
+                TranslationBatch.target_lang == payload.target_lang,
+                TranslationBatch.window_size == payload.window_size,
+                TranslationBatch.status.in_(("pending", "claimed", "running")),
+            )
+            .order_by(TranslationBatch.created_at.desc())
+            .limit(1)
+        )
+        if active_batch is not None:
+            return {
+                "batch_id": active_batch.id,
+                "status": active_batch.status,
+                "queued_message_ids": [],
+                "cached_message_ids": [],
+                "target_lang": payload.target_lang,
+                "window_size": payload.window_size,
+            }
+        rows = session.scalars(
+            select(Message)
+            .where(
+                Message.account_id == conversation.account_id,
+                Message.conversation_id == conversation.id,
+                func.coalesce(Message.occurred_at, Message.created_at)
+                <= func.coalesce(anchor.occurred_at, anchor.created_at),
+            )
+            .order_by(
+                func.coalesce(Message.occurred_at, Message.created_at).desc(),
+                Message.id.desc(),
+            )
+            .limit(payload.window_size)
+        ).all()
         rows.reverse()
         queued_message_ids: list[str] = []
         cached_message_ids: list[str] = []
         for message in rows:
-            text = message.content or ''
+            text = message.content or ""
             if not text:
                 continue
             lang = _language_hint_for(text)
-            if lang == 'Chinese':
+            if lang == "Chinese":
                 cached_message_ids.append(message.id)
                 continue
-            existing = session.scalar(select(MessageTranslation).where(
-                MessageTranslation.message_id == message.id,
-                MessageTranslation.target_lang == payload.target_lang,
-                MessageTranslation.source_text_hash == _source_text_hash(text),
-                MessageTranslation.status == 'completed',
-            ))
-            if existing is not None:
+            existing = session.scalar(
+                select(MessageTranslation).where(
+                    MessageTranslation.account_id == conversation.account_id,
+                    MessageTranslation.message_id == message.id,
+                    MessageTranslation.target_lang == payload.target_lang,
+                    MessageTranslation.source_text_hash == _source_text_hash(text),
+                )
+            )
+            if existing is not None and existing.status == "completed":
                 cached_message_ids.append(message.id)
             else:
-                queued_message_ids.append(message.id)
+                # 账号内翻译记忆库查询：若本账号其他消息曾翻译过相同原文，直接复用
+                global_hit = session.scalar(
+                    select(MessageTranslation)
+                    .where(
+                        MessageTranslation.account_id == conversation.account_id,
+                        MessageTranslation.target_lang == payload.target_lang,
+                        MessageTranslation.source_text_hash == _source_text_hash(text),
+                        MessageTranslation.status == "completed",
+                        MessageTranslation.translated_text.is_not(None),
+                    )
+                    .order_by(
+                        MessageTranslation.updated_at.desc(),
+                        MessageTranslation.id.desc(),
+                    )
+                    .limit(1)
+                )
+                if global_hit is not None and global_hit.translated_text:
+                    new_trans = existing
+                    if new_trans is None:
+                        new_trans = MessageTranslation(
+                            account_id=conversation.account_id,
+                            conversation_id=conversation.id,
+                            message_id=message.id,
+                            target_lang=payload.target_lang,
+                            source_text_hash=_source_text_hash(text),
+                        )
+                        session.add(new_trans)
+                    new_trans.source_text = text
+                    new_trans.source_lang = global_hit.source_lang or lang
+                    new_trans.translated_text = global_hit.translated_text
+                    new_trans.status = "completed"
+                    new_trans.provider = global_hit.provider or "cache_memory"
+                    new_trans.model = global_hit.model or "cache_memory"
+                    new_trans.context_window_size = payload.window_size
+                    new_trans.error_code = None
+                    new_trans.error_message = None
+                    new_trans.retry_after = None
+                    new_trans.completed_at = datetime.now(timezone.utc)
+                    cached_message_ids.append(message.id)
+                else:
+                    queued_message_ids.append(message.id)
+        if not queued_message_ids:
+            # A cache-only response may have inserted/updated translations above.
+            # Commit before acknowledging completion; dependency teardown only closes.
+            session.commit()
+            return {
+                "batch_id": None,
+                "status": "completed",
+                "queued_message_ids": [],
+                "cached_message_ids": cached_message_ids,
+                "target_lang": payload.target_lang,
+                "window_size": payload.window_size,
+            }
         batch = TranslationBatch(
             account_id=conversation.account_id,
             conversation_id=conversation.id,
             anchor_message_id=anchor.id,
             target_lang=payload.target_lang,
             window_size=payload.window_size,
-            status='pending',
+            status="pending",
         )
         session.add(batch)
         session.commit()
         return {
-            'batch_id': batch.id,
-            'status': 'queued',
-            'queued_message_ids': queued_message_ids,
-            'cached_message_ids': cached_message_ids,
-            'target_lang': payload.target_lang,
-            'window_size': payload.window_size,
+            "batch_id": batch.id,
+            "status": "queued",
+            "queued_message_ids": queued_message_ids,
+            "cached_message_ids": cached_message_ids,
+            "target_lang": payload.target_lang,
+            "window_size": payload.window_size,
+        }
+
+    @router.get("/conversations/{conversation_id}/translations/{batch_id}")
+    def translation_batch_status(
+        request: Request,
+        conversation_id: str,
+        batch_id: str,
+        session: Session = Depends(get_session),
+    ) -> dict[str, Any]:
+        conversation = session.get(Conversation, conversation_id)
+        if conversation is None or conversation.deleted_at is not None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        require_object_account_access(
+            request.app.state.runtime,
+            request,
+            conversation.account_id,
+            not_found_detail="Conversation not found",
+        )
+        batch = session.scalar(
+            select(TranslationBatch).where(
+                TranslationBatch.id == batch_id,
+                TranslationBatch.conversation_id == conversation.id,
+                TranslationBatch.account_id == conversation.account_id,
+            )
+        )
+        if batch is None:
+            raise HTTPException(status_code=404, detail="Translation batch not found")
+        return {
+            "batch_id": batch.id,
+            "status": batch.status,
+            "error_code": batch.error_code,
+            "target_lang": batch.target_lang,
         }
 
     @router.post(
@@ -786,7 +1077,6 @@ def create_conversations_router(
         Translate a message to Chinese.
         Replaces the legacy POST /api/messages/{message_id}/translate endpoint.
         """
-        user_id = body.user_id or "default"
         text = body.content
 
         session = next(get_session())
@@ -794,6 +1084,19 @@ def create_conversations_router(
             conversation = session.get(Conversation, conversation_id)
             if conversation is None or conversation.deleted_at is not None:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+            require_object_account_access(
+                request.app.state.runtime,
+                request,
+                conversation.account_id,
+                write=True,
+                not_found_detail="Conversation not found",
+            )
+            # The cache namespace is derived from server-owned tenant data. The
+            # legacy user_id field remains accepted for wire compatibility but
+            # must never select a file path or another contact's cache.
+            cache_scope = hashlib.sha256(
+                f"{conversation.account_id}:{conversation.remote_jid}".encode("utf-8")
+            ).hexdigest()
 
             lang = _language_hint_for(text)
             if lang == "Chinese":
@@ -822,19 +1125,26 @@ def create_conversations_router(
                 ai_settings: Any
                 web_settings: dict[str, Any]
 
-                def __init__(self, memory_dir: Any, ai_settings: Any, web_settings: dict[str, Any]) -> None:
+                def __init__(
+                    self,
+                    memory_dir: Any,
+                    ai_settings: Any,
+                    web_settings: dict[str, Any],
+                ) -> None:
                     self.paths = _DummyAppPaths(memory_dir)
                     self.ai_settings = ai_settings
                     self.web_settings = web_settings
 
-            config = _DummyConfig(runtime.paths.memory_dir, runtime.ai_settings, runtime.web_settings)
+            config = _DummyConfig(
+                runtime.paths.memory_dir, runtime.ai_settings, runtime.web_settings
+            )
             worker = Rewriter(config, lambda *args, **kwargs: None)
             result = worker.translate_to_zh_result(text, lang)
 
             if result.message and result.message != text:
                 _put_translation(
                     runtime.paths.memory_dir,
-                    user_id,
+                    cache_scope,
                     str(conversation_id),
                     {
                         "source_lang": lang,

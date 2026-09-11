@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD = ROOT / "deploy" / "systemd"
 API_UNIT = SYSTEMD / "whatsapp-chat-system.service"
 BRIDGE_UNIT = SYSTEMD / "whatsapp-bridge-v2.service"
+NGINX_SITE = ROOT / "deploy" / "nginx" / "whats.wending.ai.conf"
 
 
 def unit_values(text: str, key: str) -> list[str]:
@@ -47,6 +47,37 @@ def test_bridge_v2_unit_is_loopback_and_uses_only_independent_runtime_root():
     assert "/usr/bin/node /opt/whatsapp-chat-system/bridge/src/index.js" in text
     assert ".hermes" not in text.lower()
     assert "--profile" not in text
+
+
+def test_services_run_as_unprivileged_account_with_basic_systemd_hardening():
+    for unit_path in (API_UNIT, BRIDGE_UNIT):
+        text = unit_path.read_text(encoding="utf-8")
+        assert "User=whatsapp-chat-system" in text
+        assert "Group=whatsapp-chat-system" in text
+        assert "UMask=0077" in text
+        assert "NoNewPrivileges=true" in text
+        assert "PrivateTmp=true" in text
+        assert "ProtectSystem=strict" in text
+        assert "ProtectHome=true" in text
+        assert "PrivateDevices=true" in text
+        assert "RestrictSUIDSGID=true" in text
+        assert "ProtectKernelTunables=true" in text
+        assert "ProtectKernelModules=true" in text
+        assert "ProtectControlGroups=true" in text
+        assert "LockPersonality=true" in text
+
+    api_text = API_UNIT.read_text(encoding="utf-8")
+    bridge_text = BRIDGE_UNIT.read_text(encoding="utf-8")
+    assert "ReadWritePaths=/var/lib/whatsapp-chat-system/api" in api_text
+    assert "ReadWritePaths=/var/lib/whatsapp-chat-system/bridge" in bridge_text
+
+
+def test_nginx_self_hosted_assets_use_immutable_cache_and_html_revalidates():
+    text = NGINX_SITE.read_text(encoding="utf-8")
+    assert (
+        'add_header Cache-Control "public, max-age=31536000, immutable" always;' in text
+    )
+    assert 'add_header Cache-Control "no-cache" always;' in text
 
 
 def test_service_assets_do_not_embed_credentials_or_legacy_runtime_paths():

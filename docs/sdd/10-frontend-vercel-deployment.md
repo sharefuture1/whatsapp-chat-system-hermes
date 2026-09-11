@@ -12,7 +12,7 @@
 ```text
 用户浏览器
   ├── https://<app-domain>            → Vercel（静态 SPA，web/dist）
-  └── https://<api-domain>/api/v1/*  → 自托管 FastAPI（whats.future1.us，systemd）
+  └── https://<api-domain>/api/v1/*  → 自托管 FastAPI（whats.wending.ai，systemd）
                                         ├── Bridge V2 (loopback :3100)
                                         └── PostgreSQL / SQLite(dev)
 ```
@@ -21,7 +21,7 @@
 
 - Vercel 只承载静态产物与 SPA 路由回退，**不承载任何后端逻辑、密钥或数据**；
 - FastAPI 继续按 `02-system-architecture.md` §6 的 systemd 合同运行，并保留 `CHAT_SYSTEM_WEB_DIST` 自托管前端能力作为回滚路径；
-- 域名规划推荐前后端同注册域（如 `app.future1.us` + `whats.future1.us`），为 SDD-P1-07 Cookie 认证升级预留 same-site 条件。
+- 正式 API 域固定为 `https://whats.wending.ai`；前端正式域建议同属 `wending.ai` 注册域，为后续 Cookie 认证升级预留 same-site 条件。
 
 ## 2. 需求
 
@@ -30,14 +30,15 @@
 - `vercel.json` 是 Vercel 侧构建/路由的唯一权威：`installCommand`/`buildCommand` 固定走 `npm --prefix web`，`outputDirectory: web/dist`。
 - SPA 回退：除静态资源与 `/api/*` 外的所有路径 rewrite 到 `/index.html`。
 - 构建产物必须与自托管部署使用同一份 `web/dist` 语义（同一 commit 构建结果等价），不允许 Vercel 专属源码分支。
-- 验收：Vercel Preview 构建通过；直接访问深链（如 `/settings`）返回 SPA 而非 404。
+- Browser 入口不得静态加载 Tauri 原生 HTTP transport；`@tauri-apps/plugin-http` 只能在 Tauri 运行时按需加载，避免把桌面 transport 作为 Web 首屏依赖。
+- 验收：Vercel Preview 构建通过；直接访问深链（如 `/settings`）返回 SPA 而非 404；Browser 主入口不静态 import Tauri HTTP plugin。
 
 ### VCL-002 API 基址与访问模式 [Approved]
 
 - 前端 API 基址由构建时环境变量 `VITE_API_BASE_URL` 控制；为空时回退相对路径 `/api`（兼容自托管同源部署与 Vercel rewrite 代理）。
-- **权威模式：直连跨域** —— Vercel 生产环境设置 `VITE_API_BASE_URL=https://<api-domain>/api`，浏览器直连 API 域，不经 Vercel 代理。
-- `vercel.json` 中 `/api/(.*) → https://whats.future1.us/api/$1` 的 rewrite 仅作为**过渡兼容**保留；SSE 上线（RT-001）后该模式不得用于生产，因为长连接经 Vercel 代理有缓冲与时长限制。
-- `web/src/api.js` 必须统一读取该基址；任何组件不得硬编码绝对 API URL。
+- **权威模式：直连跨域** —— Vercel Production 的有效 API base 必须为显式 `VITE_API_BASE_URL` 或受审计的公开正式默认值 `https://whats.wending.ai/api`，浏览器直连 API 域，不经 Vercel 代理。
+- `vercel.json` 不配置任何 `/api` 外部代理 rewrite；相对 `/api` 仅用于自托管同源/本地反代场景。SSE 上线（RT-001）后同样必须直连 API 域。
+- `web/src/api.js` 必须统一读取该基址；任何业务组件不得硬编码绝对 API URL。
 - 验收：`VITE_API_BASE_URL` 注入后所有请求（含 EventSource）指向 API 域；未设置时行为与当前自托管完全一致。
 
 ### VCL-003 CORS 与鉴权合同 [Approved]
@@ -55,10 +56,10 @@
 
 ### VCL-005 环境隔离 [Approved]
 
-- **Preview 部署禁止指向生产 API**：Preview 环境 `VITE_API_BASE_URL` 只能指向 staging API 或留空（无后端，仅 UI 冒烟）；`vercel.json` 的生产 rewrite 不得让 Preview 流量落到生产。
-- 环境变量矩阵（Production/Preview/Development）在 Vercel 项目设置中显式维护，本文件记录键名与语义，值不入 Git。
-- 前端构建产物中不得出现任何密钥；`VITE_*` 变量仅限公开配置（API 基址、构建标识）。
-- 验收：Preview 部署的网络面板无生产域请求；构建产物 grep 无密钥形态字符串。
+- **Preview 部署禁止指向生产 API**：Preview 环境 `VITE_API_BASE_URL` 只能指向 staging API 或留空（无后端，仅 UI 冒烟）；若显式配置为 `https://whats.wending.ai/api`，构建必须 fail-closed。
+- Production 可在未显式设置 `VITE_API_BASE_URL` 时使用仓库内受审计的**公开**正式默认值 `https://whats.wending.ai/api`，保证首次绑定 Vercel 即可构建；若显式设置该变量，值也必须等于此正式 API，否则构建 fail-closed。
+- Preview/Development 不继承 Production 默认 API。秘密、数据库连接串、token、API key 永远不得进入 `VITE_*` 或构建产物。
+- 验收：Preview 部署的网络面板无生产域请求；Preview 误配生产 API 时构建失败；构建产物 grep 无密钥形态字符串。
 
 ### VCL-006 缓存、版本与回滚 [Approved]
 

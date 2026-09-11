@@ -1,3 +1,178 @@
+## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
+
+- 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
+- 浏览器延迟缓存绑定 scope/generation；退出、切用户、删除会话会取消旧写入。请求层拒绝旧会话结果/旧 401，写入前后失效 GET，并区分 deadline 和主动取消。
+- 强制改密标记不再在登录时清空；服务端限制业务接口，页面不启动账号/会话加载；成功改密撤销全部该用户会话，重新登录。未被标记的现有用户不受影响。
+- 译文复用改为账号隔离；入站/批次/Dispatcher 共用保留原始空白的精确 hash；旧版本 completed 不会阻断新版本；全命中缓存先提交，失败记录原位更新避免唯一键冲突。
+- 本地证据：10 个新增后端用例从 RED 到 GREEN；Web 全量 138 项通过及 Browser 构建通过。完整锁定环境的 Python/Bridge/Browser/Tauri 门禁由 PR CI 验收，不能把本地依赖缺失或受限回环网络当作业务验收通过。
+- CI 拆分 Python 格式检查与 pytest；添加真正浏览器的强制改密流程测试。现有 4 文件格式问题须由锁定 Ruff 修复，不能移除门禁。
+- gcptw `open_workspace` 本会话返回 FORBIDDEN（developer MCP unsupported）：未修改生产服务、数据库、密钥、WhatsApp session 或自动回复策略；未创建/验证每 6 小时自动开发任务。代码完成和生产 Verified 分开记录。
+- 后续优先级：翻译单入口与开关/租约重试；消息解包与事件身份；游标分页/历史覆盖；统一回复策略与 Outbox 不确定结果；业务健康与版本验收。
+
+## 2026-09-11：入站自动翻译异步化、全局内容哈希去重（零 AI 调用）与前端非外文拦截（PERF-004 / SDD-P1-05）
+
+- **PERF-004 / SDD-P1-05（入站自动翻译后端化）**：新增 `src/whatsapp_chat_system/events/inbound_translation.py`，并在 `events/whatsapp.py` 的 `message.upsert` 中接线。入站外语消息由服务端自动入队 `TranslationBatch`，彻底消除前端充当伪 Worker 循环扫描未翻译消息并发起 AI 调用的问题。
+- **全局翻译记忆库（Translation Memory）**：在 `TranslationDispatcher._build_plan` 与 `api/v1/conversations.py` 的 `queue_translation_batch` 中增加全库 `(source_text_hash, target_lang)` 历史译文匹配。凡是系统内曾经成功翻译过的相同文本，立即复用既有译文并标为 `completed`，耗时 0ms，外部 AI Provider 调用次数归零。
+- **非外文/空/符号快速拦截**：入站及前端 `ChatPane.jsx` 增加外文字符快速判定。纯中文、纯数字、电话号码、金额、纯符号、Emoji 与独立 URL 直接放行或就地标为 `completed`，不再提交到翻译队列或大模型。
+- **自动回复策略透明化**：`auto_reply.py` 补充结构化策略决策日志（记录 `account_disabled`、`account_policy_disabled` 等原因），方便排查为何未触发自动回复。
+- **门禁全绿**：新增 `tests/test_inbound_translation_dedupe.py` 5 项测试全部通过；全量 Python `374 passed / 7 skipped`；Web `130 passed`；Bridge `87 passed`；`ruff check` 与 `git diff --check` 均 0 错误。
+
+## 2026-09-11：AI 配置热更新、回复语言与翻译状态可靠性（Python/Web 已发布）
+
+- FR-AI-008/010：设置 API 提交数据库后刷新共享 `StandaloneAISettingsManager`；缓存 Rewriter 的模型优先级改为联系人 > 账号 > 当前运行时全局模型。修复“界面已配置 Key，后台仍报 configuration_error”。
+- FR-AI-013：自动回复从最新有意义入站文本选择语言，模糊输入使用联系人偏好/近期入站；明确文字系统的错误语言输出不入 Outbox。AI 返回后重查停止开关及新消息竞态；失败持久化使用 start 后的实际 job version，lease 覆盖超时/重试预算；复用 Provider 连接。
+- FR-AI-014：空/照抄译文不再标成功；含失败条目的批次返回 failed；原文哈希保持精确空白；相同活动窗口复用批次，无待译项不创建空任务；新增 account-scoped 批次状态 API。当前目标支持简体中文，其他目标显式拒绝，不伪造支持。
+- 页面通过可中断、逐步放缓轮询读取真实批次状态，fresh GET 绕过旧缓存和 in-flight 合并，优先翻译最近消息。删除损坏的硬编码泰/老词义及强制 60 字摘要限制，保留原文语义与数字。
+- 全量回归：Python 367 passed / 7 skipped（PostgreSQL）；Web 130 passed；Bridge 87 passed + lint；Browser/Tauri 构建及 Tauri 配置校验通过。核心静态检查与 diff check 通过；GitHub CI 最初被 12 个文件格式阻断，现已将本机 Ruff 与 uv.lock 的 0.15.21 对齐，PR 范围 46 个 Python 文件的 lint/format 均通过；AST 核验格式修改没有语义变化。
+- 生产实际操作仅重启现有稳定 API，加载已经保存的 DB AI 配置；API/Bridge 均 active。随后用既有合法会话将一条已失败泰语消息重新提交翻译，5.0 秒内完成，生成 8 字译文，无错误、无 WhatsApp 出站发送。
+- 实际 Provider 探针：早先泰/老 -> 中文 JSON 成功（5.268 秒）；后续四语回复探针只有泰语在 35 秒测试预算内成功，其余及另一批翻译超时。不得把 mock 回归或单条恢复当作四语生产稳定性验收。
+- 账号与 95 个会话自动回复仍关闭，未批量启用。联系人开关与账号/会话策略联动 UI 仍需单独完善，当前不能据开关外观认定已自动发送。
+- 发布通过标准构建产物路径完成：新增 wheel 运行时迁移定位（两个 RED/GREEN 用例）；wheel 安装到生产虚拟环境、API 正常重启。Python 实际加载 site-packages，不再直接加载旧生产源码。前端由 Vite 构建到 Nginx dist，未清空旧 hash assets；公网新 JS `index-D8sPGRC4.js` 为 200 / 364932 bytes，CSS 为 200 / 85377 bytes；首页、深链、API 和 live/ready 均 200，内部事件仍 404。未执行数据库迁移、未重置会话或 Bridge。全量回归加 wheel 用例合计 369 passed / 7 skipped。
+- 认证改用发行版 GitHub CLI 与已配置登录环境，账户核验 sharefuture1；功能提交已实际推送并校验远端分支，不输出 token。Vercel 根/web 配置关闭自动 Git 部署。前次 Bridge JS 改动未由本轮 wheel 发布；旧联系人 shell 脚本不能作为完整的新版本部署入口。
+
+## 2026-09-11：联系人姓名/头像/历史同步算法修复（待生产 root 切换）
+
+- 修复 `contacts.update/chats.update` 稀疏事件把缺失字段序列化成 `null`，导致后端误清空 `display_name/avatar_url/title` 的问题；现在仅同步 WhatsApp 实际提供的字段。
+- 历史消息 `pushName` 改为只补空名称/占位名称，不覆盖已有真实姓名或人工备注；会话 API 增加 `avatar_url`。
+- Bridge 新增非阻塞头像 enrichment：`profilePictureUrl(jid)` 走独立 2-lane 队列，成功缓存 6h、失败缓存 1h、队列上限 200，不阻塞 message/contact 事件主链路。
+- 历史同步从“按输入顺序满 2000 即截断”改为“每会话最多 200 + 全局选择最近 2000”，避免前几个活跃会话饿死后续联系人。
+- Web 会话列表、聊天头部、入站气泡、通讯录和联系人详情均接入真实 `avatar_url`，加载失败回退 initials；图片启用 lazy loading。
+- 回归：Python `356 passed / 7 skipped`，Web `126 passed`，Bridge `87 passed` + lint，Web build/Tauri validator 通过；专项验证 11 个会话在全局 2000 历史上限下仍有覆盖，头像网络 IO 不阻塞消息事件。
+- 当前生产基线：106 contacts、24 个真人名、1 个头像、95 conversations、953 messages；账号状态为 1 个 online、1 个 qr_pending，spool pending/inflight 均为 0。
+- `/opt/whatsapp-chat-system` 仍是 root:root 只读运行副本；DevSpace shell 按策略不能执行系统文件修改。已生成 `/home/young11/deploy-whatsapp-contact-sync-fix.sh`，包含备份/回滚、运行文件同步、Web bundle 发布、Bridge→API 顺序重启、账号 reconciliation、55 秒同步等待、覆盖率/spool/线上 health 验收。需由主机 sudo 执行一次后才可标 Production Verified。
+
+## 2026-09-11：六小时优化轮次——spool HMAC 重放修复、systemd 沙箱与静态缓存
+
+- 修复 Bridge 启动 replay 既有 spool 时未把 `WHATSAPP_BRIDGE_HMAC_SECRET` 传给 `EventSink` 的缺陷；此前服务重启后 replay sink 会持续向已启用 HMAC 的 API 发送无签名请求并得到 401。新增真实 `startBridge` replay 回归，校验 timestamp / nonce / HMAC 签名与实际 body 一致。
+- 生产验证：修复部署后内部事件从连续 401 恢复为 200，历史 pending spool 从 15 条降为 0；API/Bridge 均 active，公网 live/ready 与 `/api/health` 正常。
+- API/Bridge systemd 追加 `ProtectSystem=strict`、`ProtectHome=true`、`PrivateDevices=true`、`RestrictSUIDSGID=true`、kernel/control-group protection 与 `LockPersonality=true`；只给各自 `/var/lib/whatsapp-chat-system/*` runtime 写权限。`systemd-analyze security` 暴露评分由 8.7 EXPOSED 降至 6.8 MEDIUM。
+- 自托管前端 hash assets 改为 `Cache-Control: public, max-age=31536000, immutable`，`index.html` 明确 `no-cache`；公网响应头已验证。
+- 内部鉴权拒绝新增仅记录安全错误代码的 warning，不记录 token/signature，便于后续定位签名/时间戳/重放问题。
+- 门禁：部署契约 `5 passed`，内部鉴权 focused Python `25 passed`，Bridge `85 passed` + lint，Web `124 passed` + build，`git diff --check` 通过。
+
+## 2026-09-11：生产前端切回服务器同域托管 + admin 认证初始化
+
+- `whats.wending.ai` 由 Nginx 直接服务 `/opt/whatsapp-chat-system/web/dist`，React SPA 根路径与深链均返回 200；Browser 构建使用相对 `/api`，前端不再依赖 Vercel Production。
+- Nginx 保留 `/api/*` 反代、SSE 关闭 buffering、`/internal/*` 公网 404；静态 `assets/*` 长缓存，`index.html` no-cache。
+- 生产认证从 legacy 单密码结构迁移为正式 `admin` 用户，旧 session 清空；PBKDF2-SHA256 认证记录保持 600k iterations，密码仅交付用户，不写入 Git。
+- 生产验证：`/` 200、`/settings` 200、`/api/health` 200、API/Bridge systemd 均 active。
+
+## 2026-09-11：API live/readiness + Web/Tauri transport 拆包
+
+- `NFR-OPS-002` 补齐 Standalone API `GET /health/live` 与 `GET /health/ready`：live 只表示进程可响应；ready 仅在 startup/schema readiness 完成时为 200，否则 503；保留 `/api/health` 作为聚合 Worker 诊断。
+- `deploy/nginx/whats.wending.ai.conf` 只额外公开两个精确 health 路径，`/internal/*` 仍保持公网 404；已在生产验证 `https://whats.wending.ai/health/live`、`/health/ready` 均为 HTTP 200。
+- `web/src/api.js` 不再顶层静态 import `@tauri-apps/plugin-http`，仅在 Tauri + 绝对远端 URL 场景动态加载并缓存 module Promise；Browser 始终走 `globalThis.fetch`。
+- Web Production 主 JS 从约 343.27 kB 降到 342.46 kB，并将 Tauri transport 拆为约 2.02 kB 的按需 chunk；Browser 首屏不加载该桌面 transport。
+- 门禁：Python `354 passed / 7 skipped`；Web `124 passed`；Bridge `85 passed` + lint；Tauri validator、Vercel Production build、Tauri build、`git diff --check` 全部通过。
+- Vercel Production 实际发布仍被项目当天 `>100 deployments` 配额拒绝；该阻塞属于平台配额，不是构建或测试失败。
+
+## 2026-09-11：`whats.wending.ai` 正式 API、Vercel 隔离与生产部署
+
+### Web / Vercel
+
+- 正式 API 从 `whats.future1.us` 迁移到 `https://whats.wending.ai/api`；新增 `web/deploymentEnv.js`。
+- Vercel Production 未配置 API base 时自动使用正式公开地址；显式配置为其他地址时 fail-closed。
+- Vercel Preview 不继承 Production API，误配 `whats.wending.ai` 时构建直接失败；`.env.production` 不再把 Preview 静默带到生产。
+- Tauri `.env.tauri`、CSP、HTTP capability 与静态 validator 全部切到新域；新增部署环境 6 项回归测试。
+
+### Backend / host hardening
+
+- FastAPI 默认 CORS 正式来源切到 `whats.wending.ai`；生产环境显式允许现有 Vercel 前端 `https://wt.v.future1.us`。
+- API 与 Bridge systemd unit 改为专用低权限账户 `whatsapp-chat-system`，增加 `UMask=0077`、`NoNewPrivileges=true`、`PrivateTmp=true`；8792/3100 都只监听 loopback。
+- 新增 `deploy/nginx/whats.wending.ai.conf`：API-only、`/internal/*` 404、SSE `proxy_buffering off`、独立 TLS 证书。
+
+### Production verification（gcptw）
+
+- SQLite 已执行 Alembic `0001 -> 0005`，`0005 (head)`；API `/api/health` 200，Bridge `/health/live` 与 `/health/ready` 200。
+- Let's Encrypt 已签发 `whats.wending.ai` 独立证书；Cloudflare 525 已消失，公网 `https://whats.wending.ai/api/health` 返回 HTTP/2 200。
+- 公网 `/` 与 `/internal/events/whatsapp` 均 404；来自 `https://wt.v.future1.us` 的 CORS preflight 返回精确 `access-control-allow-origin`。
+- Web 生产构建与 Tauri build 通过；Vercel Production bundle 确认嵌入 `https://whats.wending.ai/api`，Preview 误配生产 API 的构建被正确阻止。
+- 真实 WhatsApp 扫码/收发、24h 自动回复、Vercel Production 新 bundle 发布与 rollback 演练仍需单独验收，不在本条中标 Verified。
+
+## 2026-09-10：部署解耦、P0 修复、双数据库与跨平台运行
+
+### P0 正确性与安全（关联 `docs/sdd/09-performance-and-realtime.md` PERF-006、`04-api-and-events.md`）
+
+- **翻译 Worker 事务内网络 IO**：`translations_dispatcher.py` 原实现在 `with session_factory()`
+  事务内调用 AI（最长 Provider 超时 × 重试），期间连接与行锁不释放；失败后还对每条消息
+  **串行**再调一次 AI。重写为三段式（短事务读快照 → 无 session 调 AI → 短事务写回），
+  对齐 `ai/auto_reply_worker.py` 既有规范（PERF-006）。窗口失败的条目按 `max_fallback_concurrency`
+  并发补齐；新增过期 `running` 批次回收与 `max_attempts` 上限。
+  `TranslationMemory` 原先定义了 `_lock` 却未使用，补全锁边界（`_save_locked` 避免非重入死锁）。
+- **Webhook 批量事件 N+1**：`events/whatsapp.py` 原按 item 逐条 SELECT，`_upsert_message`
+  最多 3 次，单次 webhook 上限 100 条时约 300 次往返压在同一事务。新增 `_IngestLookup`
+  批量预载，实测 100 条由 300 次降为常数 3 次；同批次内重复 remote_jid / wa_message_id
+  语义与逐条 SELECT 一致。
+- **内部事件接口签名校验**：`security/internal_auth.py` 由「仅静态 token」升级为
+  token + 可选 HMAC-SHA256（`hex(hmac_sha256(secret, "{timestamp}.{raw_body}"))`）
+  + 时间戳窗口（±300s）+ nonce 重放防护。Bridge 侧 `bridge/src/events/event-sink.js`
+  同步实现，`bridge/src/config.js` 读取同一变量。鉴权改由 FastAPI 依赖实现，
+  已实测先于请求体校验执行；两侧签名口径以黄金向量固定（含中文与 emoji 的 UTF-8 字节）。
+  未配置密钥时保持旧行为并打印告警，不破坏既有部署。
+- **AI 密钥加密失效**：`ai/crypto.py` 的 `_load_or_generate_key` try/except 两个分支均返回
+  明文，加密形同虚设。改为真实校验 Fernet key 格式（非法密钥显式报错）、`_fernet_lock`
+  保护缓存、密钥文件权限收紧兼容 Windows、自动生成时显式告警；密钥路径解析对齐
+  `CHAT_SYSTEM_RUNTIME_DIR`（原先只认未被部署脚本使用的 `STATE_DIR`）。
+
+### 数据库（关联 `03-data-model.md`）
+
+- 新增 `psycopg[binary]>=3.1`，PostgreSQL 与 SQLite 同一条 `DATABASE_URL` 可切换。
+- 新增 `db/url.py`：`postgres://` / `postgresql://` / `+psycopg2` 统一归一为
+  `postgresql+psycopg://`；提供不含密码的连接描述用于日志。`migrations/env.py`
+  复用同一归一化，确保 alembic 与 API 连同一个库。
+- **Outbox 抢占修复**：`outbox.py` 原用 `SELECT ... FOR UPDATE SKIP LOCKED`，而 SQLite
+  会静默忽略该子句，多进程下同一行会被两个 worker 同时 claim 并重复发送。改为
+  带 `status` 守卫的条件 UPDATE（CAS），两种数据库均原子；`attempts` 递增语义不变。
+- 新增 opt-in PostgreSQL 集成套件 `tests/test_postgres_backend.py`（`TEST_DATABASE_URL`
+  门控，覆盖迁移 DDL、外键、事件幂等、CAS 抢占、行锁、ILIKE）。
+
+### 前后端独立部署（关联 `docs/sdd/10-frontend-vercel-deployment.md` VCL-002）
+
+- 移除根 `vercel.json` 与 `web/vercel.json` 中硬编码的 `https://whats.future1.us` API
+  代理改写，仅保留 SPA 回退；前端后端地址完全由构建期变量决定。
+- **VCL-002 对齐**：`web/src/api.js` 接入权威变量 `VITE_API_BASE_URL`，历史名
+  `VITE_API_BASE` 保留为兼容别名并打印弃用告警（`resolveApiBase` 导出以便测试）；
+  `.env.production` / `.env.tauri` / `web/.env.example` / `docs/TAURI2.md` 同步更新。
+- 后端纯 API 模式默认成立（`--web-dist` 可选）；CORS 启动日志打印最终生效白名单。
+
+### 跨平台运行
+
+- 新增 `scripts/run_server.py`：Linux / macOS / Windows 通用启动器，支持 `.env` 载入、
+  `--check` 配置自检、`--migrate` 启动前迁移、`--web-dist` 单进程模式。
+  自检将「缺失内部 token」「首次启动缺引导密码（≥12 位）」「web-dist 无 index.html」
+  转为可操作指引并返回退出码 2，而非抛底层堆栈。
+- 新增根 `.env.example`（完整环境变量参考）。
+- `deploy/systemd/` 原单元补充必需/建议变量说明；新增
+  `whatsapp-chat-system-api-only.service`（纯 API，前端独立部署）。
+
+### 文档与测试入口
+
+- 新增 `docs/STANDALONE-DEPLOYMENT.md`：三平台部署、分离/单进程形态、签名启用流程、
+  验收清单与常见问题；`docs/DEPLOYMENT.md` 增加指引。
+- 重写 `README.md`：产品名更正为 WhatsApp Chat System，结构对齐当前实现（`api/`、`ai/`、
+  `db/`、`events/`、`security/`、`bridge/`、`src-tauri/`），补充部署、测试与安全模型章节。
+- 补齐测试入口：`web/package.json` 新增 `test`（此前 25 个测试文件无任何入口），
+  根 `package.json` 新增 `web:test` / `bridge:test` / `test` 聚合脚本。
+
+### 门禁
+
+- Python `353 passed, 7 skipped`（较基线 +90，新增 `test_ai_crypto`、`test_database_url`、
+  `test_internal_event_auth`、`test_outbox_claim_cas`、`test_postgres_backend`、
+  `test_translations_dispatcher`、`test_whatsapp_ingest_query_budget`）。
+- Web `117 passed`（+9，新增 `apiBase.test.js`）；Bridge `85 passed`（+9，新增
+  `event-sink-signing.test.js`）；`vite build` 与 `vite build --mode tauri` 均 PASS。
+- 关键回归断言经反向验证：模拟旧写法可被 `test_ai_is_never_called_while_a_db_session_is_open`
+  与 `test_claim_is_expressed_as_guarded_update` 捕获。
+- 未在本机验证：真实 PostgreSQL 行为、Windows 实际运行（本机为 macOS，且不使用 Docker）。
+
+## 2026-07-19：PR #2 rebase 冲突收敛
+
+- 将 Tauri/RBAC 安全加固分支 rebase 到已合入 SDD-P0-10 性能快赢包的最新 `main`。
+- 冲突解决保留 PERF-001 的 3–300 秒刷新合同、PERF-008 的缓存仅作首屏骨架语义，以及 Tauri 的对象级账号鉴权和消息源内容一致性校验。
+- Tauri SDD 由重复编号 `09` 调整为 `11-tauri-desktop-distribution.md`，并更新 README、决策、计划和 TODO 引用。
+- Discover 继续遵循 SDD-P1-11：只展示运营概览，人设目录保留在聊天 picker；补齐中文 `addRuleForContact/addRule` 文案。
+- Bridge 409 契约收敛为：无明确错误体的 409 保留重试；仅 `retryable=false` 的终态冲突进入 dead-letter。
+
 ## 2026-07-18：SDD-P0-10 性能快赢包落地 + 上游三端测试修复
 
 ### 性能（规格：`docs/sdd/09-performance-and-realtime.md`）
@@ -25,6 +200,18 @@
 - 审查 `PERF-008` 时复现：`sameMessageList` 仅比较字段白名单，服务器更新 `platform_message_id`、`media_metadata` 等字段时可能错误复用旧数组，导致真实回执或媒体变化不进入 React 状态。
 - `sameMessageList` 改为比较完整 JSON-like 消息结构；语义完全相同时仍保持原数组引用，任意嵌套字段变化时返回新数组。
 - 新增回归测试覆盖平台消息 ID 与媒体元数据同时变化；验证 focused Web 27 passed、Web 全量 96 passed、Vite build 通过。
+
+## 2026-07-16：Tauri 2 安全加固与 GitHub 自动安装包工作流
+
+- 新增 `docs/sdd/11-tauri-desktop-distribution.md` 与实施计划，冻结桌面薄客户端、测试安装包和签名边界。
+- 修复旧格式 Session 缺少 username 时默认 admin 的提权问题；admin 仅在真实登录迁移时写入显式角色。
+- AI Base URL 变化必须同请求提交新 API key，阻止旧密钥被发送到新公网主机。
+- 完整 settings/AI settings 改为 admin-only；operator/viewer 使用不含 URL、key hint、channels/aliases 的最小 capabilities DTO。
+- Tauri 模式 session token 不再写入 localStorage，消息与翻译缓存仅保存在内存；浏览器缓存升级为按用户名隔离，logout 时清理。
+- Tauri HTTP capability 收紧到 `https://whats.future1.us/api/**`，浏览器和 Tauri 均使用已验证绝对 API base。
+- 生成并提交 `src-tauri/Cargo.lock`、桌面/移动图标和 bundle icon 配置；Linux `cargo check --locked` 及 `.deb` 本机构建已真实通过。
+- 新增 `.github/workflows/tauri-build.yml`：Linux `.deb/.AppImage`、Windows NSIS `.exe`、macOS `.dmg` 自动构建并上传 Actions artifacts。
+- 安装包当前未签名，仅供内部测试；Android/iOS 尚不在完成范围。
 
 ## 2026-07-15：LaoTalk 翻译保底 + 多用户首批 RBAC + 服务器/Vercel 前端对齐
 
@@ -739,3 +926,9 @@ curl / → 200 text/html ✅
 - **当前线上 CSS**：`index-CJfNWq4L.css`（42KB）
 - **后端日志**：`/tmp/whatsapp-live.log`
 - **后端测试**：`43 passed, 1 failed`（早期遗留 i18n key 缺失）
+# 2026-07-19：设置页布局与渲染性能收敛
+
+- 设置主页增加独立滚动容器、分组间距与桌面最大宽度，移动端适配安全区，避免内容拥挤和溢出。
+- 设置壳与分组启用布局/绘制隔离和 `content-visibility`，降低切换设置页时的无关布局开销。
+- 变更文件：`web/src/components/SettingsPage.jsx`、`web/src/styles.css`。
+- 验证：Vite build 通过；设置/性能/无障碍相关 Web 测试 11 项通过。

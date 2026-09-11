@@ -1,7 +1,35 @@
-const DEFAULT_API_BASE = import.meta.env?.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+import { isTauri } from '@tauri-apps/api/core'
+
+/**
+ * 解析后端 API 基址。
+ *
+ * 权威变量名是 `VITE_API_BASE_URL`（SDD VCL-002：前端直连自托管 API 的
+ * 构建期开关）。历史实现使用 `VITE_API_BASE`，为避免已有部署静默失效，
+ * 这里保留为兼容别名，但会给出弃用告警。
+ * 两者都未设置时回退相对路径 `/api`，对应自托管同源或反代部署。
+ */
+export function resolveApiBase(env = import.meta.env ?? {}) {
+  const canonical = typeof env.VITE_API_BASE_URL === 'string' ? env.VITE_API_BASE_URL.trim() : ''
+  if (canonical) return canonical.replace(/\/$/, '')
+
+  const legacy = typeof env.VITE_API_BASE === 'string' ? env.VITE_API_BASE.trim() : ''
+  if (legacy) {
+    console.warn(
+      '[api] VITE_API_BASE 已弃用，请改用 VITE_API_BASE_URL（SDD VCL-002）。' +
+        ' 当前仍按旧值工作以保证向后兼容。',
+    )
+    return legacy.replace(/\/$/, '')
+  }
+  return '/api'
+}
+
+const DEFAULT_API_BASE = resolveApiBase()
 
 let sessionToken = ''
 let onUnauthorized = null
+let onPasswordChangeRequired = null
+let sessionGeneration = 0
+let cacheGeneration = 0
 
 export function getApiBase() {
   return DEFAULT_API_BASE
@@ -9,16 +37,22 @@ export function getApiBase() {
 
 export function setSessionToken(token) {
   sessionToken = token || ''
+  sessionGeneration += 1
+  cacheGeneration += 1
   requestCache.clear()
   inflightRequests.clear()
 }
 
 export function clearSessionToken() {
-  sessionToken = ''
+  setSessionToken('')
 }
 
 export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler
+}
+
+export function setPasswordChangeRequiredHandler(handler) {
+  onPasswordChangeRequired = handler
 }
 
 function errorMessage(detail, envelope, status) {
@@ -68,45 +102,123 @@ const inflightRequests = new Map()
 
 function cacheKey(path, method) { return `${sessionToken}:${method}:${path}` }
 
-async function request(path, { method = 'GET', body, signal, cacheTtlMs = 0 } = {}) {
+let tauriFetchLoader = null
+
+async function loadTauriFetch() {
+  if (!tauriFetchLoader) {
+    tauriFetchLoader = import('@tauri-apps/plugin-http')
+      .then(module => module.fetch)
+      .catch(error => {
+        tauriFetchLoader = null
+        throw error
+      })
+  }
+  return tauriFetchLoader
+}
+
+async function transportFetch(input, init) {
+  // Browser requests never load the native HTTP plugin. Packaged Tauri apps
+  // lazy-load it only for absolute remote URLs, keeping the Web entry bundle
+  // independent from the desktop transport implementation.
+  if (isTauri() && /^https?:\/\//i.test(input)) {
+    const tauriFetch = await loadTauriFetch()
+    return tauriFetch(input, init)
+  }
+  return globalThis.fetch(input, init)
+}
+
+function invalidateRequestCache() {
+  cacheGeneration += 1
+  requestCache.clear()
+  inflightRequests.clear()
+}
+
+function lifecycleError(code, message, retryable = false) {
+  return new ApiError(0, message, { error: { code, message, retryable } })
+}
+
+async function request(path, {
+  method = 'GET', body, signal, cacheTtlMs = 0, dedupe = true,
+  timeoutMs = method === 'GET' ? 15_000 : 120_000,
+} = {}) {
   const key = cacheKey(path, method)
   if (method === 'GET' && cacheTtlMs > 0) {
     const cached = requestCache.get(key)
     if (cached && cached.expiresAt > Date.now()) return cached.data
   }
-  if (method === 'GET' && inflightRequests.has(key)) return inflightRequests.get(key)
+  if (method === 'GET' && dedupe && !signal && inflightRequests.has(key)) return inflightRequests.get(key)
+  if (method !== 'GET') invalidateRequestCache()
+  const token = sessionToken
+  const generation = sessionGeneration
+  const cacheVersion = cacheGeneration
   const operation = (async () => {
-    if (method !== 'GET') requestCache.clear()
-    const headers = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (sessionToken) headers['x-session-token'] = sessionToken
-  const res = await fetch(`${DEFAULT_API_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  })
-  let data = null
-  try {
-    data = await res.json()
-  } catch {
-    data = null
-  }
-  if (!res.ok) {
-    const fallback = disabledLegacyFallback(path, res.status, data)
-    if (fallback !== undefined) return fallback
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
-    throw new ApiError(res.status, data?.detail, data)
-  }
-  return data
+    const controller = new AbortController()
+    let timedOut = false
+    const cancel = () => controller.abort()
+    if (signal?.aborted) cancel()
+    else signal?.addEventListener('abort', cancel, { once: true })
+    const budget = Number(timeoutMs)
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, Number.isFinite(budget) && budget > 0 ? Math.min(budget, 300_000) : 15_000)
+    try {
+      if (controller.signal.aborted) throw lifecycleError('request_cancelled', 'Request cancelled')
+      const headers = {}
+      if (body !== undefined) headers['Content-Type'] = 'application/json'
+      if (token) headers['x-session-token'] = token
+      const res = await transportFetch(`${DEFAULT_API_BASE}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      })
+      let data = null
+      try {
+        data = await res.json()
+      } catch (error) {
+        if (controller.signal.aborted) throw error
+      }
+      // Validate before publishing either data or authentication side effects.
+      if (generation !== sessionGeneration) throw lifecycleError('stale_session', 'Session changed')
+      if (method === 'GET' && cacheVersion !== cacheGeneration) {
+        throw lifecycleError('stale_response', 'Response superseded by a write', true)
+      }
+      if (!res.ok) {
+        const fallback = disabledLegacyFallback(path, res.status, data)
+        if (fallback !== undefined) return fallback
+        if (res.status === 401) onUnauthorized?.()
+        if (res.status === 403 && (data?.detail?.code || data?.error?.code) === 'password_change_required') {
+          onPasswordChangeRequired?.()
+        }
+        throw new ApiError(res.status, data?.detail, data)
+      }
+      return data
+    } catch (error) {
+      if (generation !== sessionGeneration) throw lifecycleError('stale_session', 'Session changed')
+      if (timedOut) throw lifecycleError('request_timeout', 'Request timed out', method === 'GET')
+      if (controller.signal.aborted) throw lifecycleError('request_cancelled', 'Request cancelled')
+      throw error
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', cancel)
+      // GETs that raced the write must also be revalidated after it finishes.
+      if (method !== 'GET' && generation === sessionGeneration) invalidateRequestCache()
+    }
   })()
-  if (method === 'GET') {
+  if (method === 'GET' && dedupe && !signal) {
     inflightRequests.set(key, operation)
     operation.then(
       () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
       () => { if (inflightRequests.get(key) === operation) inflightRequests.delete(key) },
     )
-    if (cacheTtlMs > 0) operation.then(data => requestCache.set(key, { data, expiresAt: Date.now() + cacheTtlMs })).catch(() => {})
+  }
+  if (method === 'GET' && cacheTtlMs > 0) {
+    operation.then(data => {
+      if (generation === sessionGeneration && cacheVersion === cacheGeneration) {
+        requestCache.set(key, { data, expiresAt: Date.now() + cacheTtlMs })
+      }
+    }).catch(() => {})
   }
   return operation
 }

@@ -19,6 +19,7 @@ async function startSpoolReplay(config) {
         spool: new FileSpool({ root: config.spoolRoot, accountId: entry.name }),
         token: config.eventToken,
         url: config.eventUrl,
+        hmacSecret: config.hmacSecret,
       });
       await sink.start();
       sinks.set(entry.name, sink);
@@ -78,6 +79,7 @@ export async function startBridge(env = process.env) {
         spool: new FileSpool({ root: config.spoolRoot, accountId }),
         token: config.eventToken,
         url: config.eventUrl,
+        hmacSecret: config.hmacSecret,
       });
       replaySinks.set(accountId, sink);
       return sink;

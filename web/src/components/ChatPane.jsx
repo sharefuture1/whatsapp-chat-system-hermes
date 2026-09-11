@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
+import { waitForTranslationBatch } from '../translationPolling'
 import { fetchPersonaCatalog, assignPersona as assignPersonaApi } from '../personas'
 import {
   loadConversationCache,
@@ -78,6 +79,18 @@ function avatarColor(name) {
   return colors[h % colors.length]
 }
 
+function RemoteAvatar({ src, name, className = '' }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [src])
+  return (
+    <div className={`wx-avatar${className ? ` ${className}` : ''}`} style={{ background: avatarColor(name) }}>
+      {src && !failed
+        ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        : initials(name)}
+    </div>
+  )
+}
+
 function dayKey(ts) {
   return localDayKey(ts)
 }
@@ -117,8 +130,10 @@ export default function ChatPane({
   standalone = false,
   accountLabel = '',
   accountName = '',
+  accountStatus = 'offline',
   platform = '',
   userName,
+  avatarUrl = '',
   contactProfile,
   userOverride,
   defaultReplyStyle,
@@ -197,7 +212,7 @@ export default function ChatPane({
     messagesRef.current = messages
   }, [messages])
   const translationQueueVersion = messages.reduce((version, message) => {
-    if (message.hidden || message.pending || message.failed || String(message.message_id || '').startsWith('tmp-') || message.translated || !message.content || message.lang === 'Chinese') return version
+    if (message.hidden || message.pending || message.failed || String(message.message_id || '').startsWith('tmp-') || message.translated || !message.content || message.lang === 'Chinese' || !/[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(message.content)) return version
     return `${version}|${message.message_id}`
   }, '')
   if (translationQueueVersionRef.current !== translationQueueVersion) translationQueueVersionRef.current = translationQueueVersion
@@ -228,7 +243,7 @@ export default function ChatPane({
     setContactSaved(false)
   }, [userId, userOverride, contactProfile])
 
-  const fetchPage = async (targetUserId, p, appendOlder = false) => {
+  const fetchPage = async (targetUserId, p, appendOlder = false, { cachePolicy = 'cache-first' } = {}) => {
     if (!targetUserId) return null
     const request = requestTracker.current.begin(targetUserId)
     const cursor = standalone && appendOlder ? standaloneCursorRef.current : null
@@ -241,14 +256,14 @@ export default function ChatPane({
     if (!endpoint) throw new Error('Conversation is not available in Standalone mode')
     const cached = loadConversationCache(conversationId)
     const cachedMessages = cached?.messages || []
-    if (cachedMessages.length && !appendOlder) {
+    if (cachedMessages.length && !appendOlder && cachePolicy !== 'network-first') {
       setMessages(cachedMessages)
       messagesRef.current = cachedMessages
       setTotal(cached.total_messages || cachedMessages.length)
       setInitialLoading(false)
     }
     // PERF-008：本地缓存只作首屏骨架，永远并行发起服务端校验请求，不做"新鲜即跳过网络"短路
-    const res = await api.get(endpoint)
+    const res = await api.get(endpoint, { cacheTtlMs: 0, dedupe: false })
     if (!requestTracker.current.isCurrent(request, targetUserId)) return null
     const items = standalone ? (res.messages || []).slice() : (res.messages || []).slice().reverse()
     if (appendOlder) {
@@ -325,7 +340,7 @@ export default function ChatPane({
     const targetUserId = userId
     if (conversationId) {
       const wasAtBottom = lastBottomRef.current
-      fetchPage(targetUserId, 1, false).then(res => {
+      fetchPage(targetUserId, 1, false, { cachePolicy: 'network-first' }).then(res => {
         if (res && wasAtBottom) lastBottomRef.current = true
       }).catch(() => {})
       return
@@ -412,23 +427,25 @@ export default function ChatPane({
     translatingIdsRef.current.add(translationId)
     try {
       const windowSize = Number(uiSettings?.message_ops?.translation_context_window || 10)
-      await api.post(`/v1/conversations/${encodeURIComponent(conversationId)}/translations`, {
+      const batch = await api.post(`/v1/conversations/${encodeURIComponent(conversationId)}/translations`, {
         anchor_message_id: anchorMessage.message_id,
         target_lang: uiSettings?.message_ops?.translation_target_language || 'zh-CN',
         window_size: Number.isFinite(windowSize) ? Math.max(1, Math.min(20, windowSize)) : 10,
       }, { signal })
       if (generation !== translationGenerationRef.current || signal.aborted) return false
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        if (signal.aborted || generation !== translationGenerationRef.current) return false
-        await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 350 : 700))
-        const refreshed = await fetchPage(userId, page || 1, false)
-        if (!refreshed?.messages?.length) continue
-        const translatedNow = refreshed.messages.some(item => item.message_id === anchorMessage.message_id && item.translated)
-        if (translatedNow) {
-          setTranslationError('')
-          return true
-        }
+      const state = batch.batch_id ? await waitForTranslationBatch({
+        signal,
+        check: () => api.get(`/v1/conversations/${encodeURIComponent(conversationId)}/translations/${encodeURIComponent(batch.batch_id)}`, { signal, cacheTtlMs: 0, dedupe: false }),
+      }) : batch
+      if (signal.aborted || generation !== translationGenerationRef.current) return false
+      const refreshed = await fetchPage(userId, page || 1, false, { cachePolicy: 'network-first' })
+      if (signal.aborted || generation !== translationGenerationRef.current) return false
+      const translatedNow = refreshed?.messages?.some(item => item.message_id === anchorMessage.message_id && (item.translated || item.lang === 'Chinese'))
+      if (translatedNow) {
+        setTranslationError('')
+        return true
       }
+      if (['failed', 'dead', 'cancelled'].includes(state?.status)) setTranslationError(t('translationFailed'))
       commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(m => m.message_id === anchorMessage.message_id ? { ...m, translationRetryAfter: Date.now() + 30_000 } : m))
       return false
     } catch (error) {
@@ -460,7 +477,7 @@ export default function ChatPane({
     ;(async () => {
       let processed = 0
       while (!controller.signal.aborted && generation === translationGenerationRef.current && processed < 3) {
-        const cachedCandidate = messagesRef.current.find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && loadTranslationCache(m.message_id, m.content))
+        const cachedCandidate = [...messagesRef.current].reverse().find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && loadTranslationCache(m.message_id, m.content))
         if (cachedCandidate) {
           const cached = loadTranslationCache(cachedCandidate.message_id, cachedCandidate.content)
           if (cached) {
@@ -470,7 +487,7 @@ export default function ChatPane({
             continue
           }
         }
-        const msg = messagesRef.current.find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
+        const msg = [...messagesRef.current].reverse().find(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && /[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(m.content) && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')) && !translatingIdsRef.current.has(String(m.message_id || '')))
         if (!msg) break
         const id = String(msg.message_id || '')
         attempted.add(id)
@@ -482,7 +499,7 @@ export default function ChatPane({
       if (translationAbortRef.current === controller) translationAbortRef.current = null
       translationWorkerRunningRef.current = false
       if (!controller.signal.aborted && generation === translationGenerationRef.current) {
-        const hasMore = messagesRef.current.some(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')))
+        const hasMore = messagesRef.current.some(m => !m.hidden && !m.pending && !m.failed && !String(m.message_id || '').startsWith('tmp-') && !m.translated && m.content && m.lang !== 'Chinese' && /[A-Za-z\u0E80-\u0EFF\u0E00-\u0E7F]/.test(m.content) && isTranslationRetryEligible(m) && !attempted.has(String(m.message_id || '')))
         if (hasMore) setTranslationWorkerTick(prev => prev + 1)
         clearTimeout(translationRetryTimerRef.current)
         const retryDelay = nextTranslationRetryDelay(messagesRef.current)
@@ -724,15 +741,13 @@ export default function ChatPane({
 
   const allowLocalHide = !!uiSettings?.message_ops?.allow_local_hide_delete
   const headerTitle = contactProfile?.remark || userName
-  const accountStatus = activeAccount?.status || 'offline'
-
   return (
     <section className={`wx-chat is-active${active ? '' : ''}`}>
       <div className="wx-chat-header">
         <button className="wx-icon-btn wx-back-btn" onClick={onBack} aria-label={t('back')} title={t('back')}>
           <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
         </button>
-        <div className="wx-avatar" style={{ background: avatarColor(headerTitle) }}>{initials(headerTitle)}</div>
+        <RemoteAvatar src={avatarUrl} name={headerTitle} />
         <div className="wx-chat-header-meta" onClick={() => { openContactDrawer(); setContactDrawerTab('profile') }} role="button" tabIndex={0}>
           <div className="wx-chat-title">{headerTitle}</div>
           <div className="wx-chat-sub">
@@ -750,7 +765,7 @@ export default function ChatPane({
             <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>
           </button>
           {headerMenuOpen ? <div className="wx-chat-overflow-menu">
-            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false).catch(() => {}) }}>{t('refresh') || '刷新'}</button>
+            <button type="button" onClick={() => { setHeaderMenuOpen(false); fetchPage(userId, 1, false, { cachePolicy: 'network-first' }).catch(() => {}) }}>{t('refresh') || '刷新'}</button>
             <button type="button" onClick={() => { setHeaderMenuOpen(false); openContactDrawer() }}>{t('contactDetails') || '聊天详情'}</button>
             <button type="button" onClick={openPersonaPicker}>{t('personaPicker')}</button>
             <div className="wx-menu-divider"/>
@@ -823,7 +838,9 @@ export default function ChatPane({
               const showTranslation = autoTranslate && !effectiveHidden && !hideTranslation && item.lang && item.lang !== 'Chinese' && translatedText && translatedText !== contentText
               return (
                 <div className={`wx-bubble-row ${isOut ? 'out' : 'in'} ${activeMessageId === item.message_id ? 'is-active' : ''}`} key={`${item.message_id}-${realIdx}`} onClick={() => setActiveMessageId(item.message_id)}>
-                  <div className="wx-avatar bubble-avatar" style={{ background: avatarColor(isOut ? 'operatorAvatar' : userName) }}>{initials(isOut ? t('operator') : userName)}</div>
+                  {isOut
+                    ? <div className="wx-avatar bubble-avatar" style={{ background: avatarColor('operatorAvatar') }}>{initials(t('operator'))}</div>
+                    : <RemoteAvatar src={avatarUrl} name={userName} className="bubble-avatar" />}
                   <div>
                     <div className={`wx-bubble ${isOut ? 'out' : 'in'} ${effectiveHidden ? 'hidden' : ''}`}>
                       <div className="wx-bubble-content">
@@ -852,7 +869,7 @@ export default function ChatPane({
           <aside className="wx-contact-drawer" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="wx-contact-drawer-hero">
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div className="wx-avatar lg" style={{ background: avatarColor(contactDraft.remark || userName) }}>{initials(contactDraft.remark || userName)}</div>
+                <RemoteAvatar src={avatarUrl} name={contactDraft.remark || userName} className="lg" />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="wx-contact-remark">{t('contactDetails') || '聊天详情'}</div>
                   <h3>{contactDraft.remark || userName}</h3>

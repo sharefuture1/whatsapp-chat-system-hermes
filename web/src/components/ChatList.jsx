@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useSettings } from '../settings'
 import { fmtRelative } from '../format'
 
@@ -22,6 +22,18 @@ function avatarColor(name) {
   let h = 0
   for (const ch of name || '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return colors[h % colors.length]
+}
+
+function ContactAvatar({ src, name }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [src])
+  return (
+    <div className="wx-avatar" style={{ background: avatarColor(name) }}>
+      {src && !failed
+        ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        : initials(name)}
+    </div>
+  )
 }
 
 const ACTION_WIDTH = 144
@@ -158,7 +170,7 @@ function ChatList({ conversations, selectedId, selectedProfileMap, onSelect, que
     return (
       <SwipeRow key={item.conversation_key} rowId={item.conversation_key} pinned={isPinned} t={t} isOpen={openSwipeId === item.conversation_key} onRequestOpen={setOpenSwipeId} onRequestClose={id => setOpenSwipeId(current => current === id ? null : current)} onPin={() => onTogglePin(item)} onDelete={() => onDeleteChat(item)}>
         <button type="button" className={`wx-list-item${selectedId === item.conversation_key ? ' active' : ''}`} onClick={() => onSelect(item.conversation_key)}>
-          <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(displayName)}</div>
+          <ContactAvatar src={item.avatar_url} name={displayName} />
           <div className="wx-list-text">
             <div className="wx-list-row1"><div className="wx-list-name"><span>{displayName}</span></div><div className="wx-list-time">{fmtRelative(item.last_timestamp)}</div></div>
             <div className="wx-list-row2"><div className="wx-list-preview"><span className="wx-account-mini">{item.account_label || platformLabel(item.platform)}</span>{showName ? `${showName} · ${item.last_message || '…'}` : (item.last_message || '…')}</div><div className="wx-list-row2-right">{isPinned ? <span className="wx-pin-star" aria-label={t('pin')}>★</span> : null}{item.priority === 'high' ? <span className="wx-pill-mini danger">!</span> : null}{item.muted ? <span className="wx-mute-dot" aria-label={t('muted')} /> : null}{count > 0 ? <span className="wx-unread-dot" aria-label={t('unread')} /> : null}</div></div>

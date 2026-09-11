@@ -1,3 +1,120 @@
+## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
+
+- 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
+- 浏览器延迟缓存绑定 scope/generation；退出、切用户、删除会话会取消旧写入。请求层拒绝旧会话结果/旧 401，写入前后失效 GET，并区分 deadline 和主动取消。
+- 强制改密标记不再在登录时清空；服务端限制业务接口，页面不启动账号/会话加载；成功改密撤销全部该用户会话，重新登录。未被标记的现有用户不受影响。
+- 译文复用改为账号隔离；入站/批次/Dispatcher 共用保留原始空白的精确 hash；旧版本 completed 不会阻断新版本；全命中缓存先提交，失败记录原位更新避免唯一键冲突。
+- 本地证据：10 个新增后端用例从 RED 到 GREEN；Web 全量 138 项通过及 Browser 构建通过。完整锁定环境的 Python/Bridge/Browser/Tauri 门禁由 PR CI 验收，不能把本地依赖缺失或受限回环网络当作业务验收通过。
+- CI 拆分 Python 格式检查与 pytest；添加真正浏览器的强制改密流程测试。现有 4 文件格式问题须由锁定 Ruff 修复，不能移除门禁。
+- gcptw `open_workspace` 本会话返回 FORBIDDEN（developer MCP unsupported）：未修改生产服务、数据库、密钥、WhatsApp session 或自动回复策略；未创建/验证每 6 小时自动开发任务。代码完成和生产 Verified 分开记录。
+- 后续优先级：翻译单入口与开关/租约重试；消息解包与事件身份；游标分页/历史覆盖；统一回复策略与 Outbox 不确定结果；业务健康与版本验收。
+
+## 2026-09-11：入站自动翻译异步化、全局内容哈希去重与非外文拦截
+
+**决策**：翻译驱动主体由“前端页面扫描未翻译消息”彻底转变为“服务端入站异步入队”。`events/whatsapp.py` 接收到入站消息时，自动进行纯中文与外文字符预检；非中文外语消息直接入队后台 `TranslationBatch` 由 `TranslationDispatcher` 静默处理，前端只负责渲染和被动消费，杜绝多前端客户端并发打崩 AI Provider。
+
+**决策**：翻译结果在 `MessageTranslation` 表中按 `(source_text_hash, target_lang)` 实现全局跨会话去重复用（Translation Memory）。只要系统内任意会话曾经翻译过该原文，后续所有相同文本直接就地落库历史译文，不创建批次、不调用大模型。
+
+**决策**：纯中文、纯数字、纯符号 Emoji、URL 拦截，不进入翻译队列；前端 `ChatPane.jsx` 增加外文字符快速过滤，跳过无需翻译的消息候选。
+
+**关联规格**：PERF-004、SDD-P1-05、PERF-008。
+
+## 2026-09-11：AI 配置热更新、回复语言与翻译状态可靠性（Python/Web 已发布）
+
+**决策**：后台 Worker 与缓存 Rewriter 共享运行时 AI 配置；设置事务成功后立即应用数据库记录，模型解析也读取当前全局设置。自动回复语言从客户入站文本选择，不使用页面语言或操作员中文；发送前重查人工接管/停止策略。
+
+**决策**：翻译是否成功以可用译文和条目状态判断，不能仅因窗口函数返回就将整个批次标 completed。页面读取 scoped batch status，等待与网络 fresh 行为明确；相同活动窗口请求复用。当前只承诺简体中文目标，其他目标必须拒绝而非错标。
+
+**决策**：生产 Python 使用构建后的 wheel 安装到既有虚拟环境，迁移文件由受控 systemd WorkingDirectory 定位；旧生产源码保留为回滚基线。前端仍由 Nginx 服务编译产物，构建发布不清空已有 hash assets。此路径不改变数据库、密钥或 WhatsApp session，也不等于部署了 Bridge JS。GitHub 使用正式 CLI 的 credential helper 和已配置环境，不读出 token 到终端。
+
+**关联规格**：FR-AI-003/004/005/008/010/013/014、PERF-003/004/006、MIG-001；计划 `docs/plans/2026-09-11-ai-language-translation-reliability.md`。
+
+## 2026-09-11：联系人同步采用稀疏字段保护、非阻塞头像补拉与公平历史窗口
+
+**决策**：WhatsApp `contacts/chats` 同步事件只发送源数据实际存在的字段；缺失字段不得序列化为 `null` 后覆盖数据库已有值。历史消息 `pushName` 仅允许补空名称或占位名称，人工备注和已同步真实姓名始终优先。
+
+**决策**：头像不依赖 Baileys contact event 的 `imgUrl`。Bridge 对 DM JID 使用独立 background enrichment lane 调用 `profilePictureUrl`，并设置有限并发、队列上限与成功/失败 TTL；任何头像网络 IO 都不得进入消息事件串行主链路。历史消息选择采用“每会话有界 + 全局最近优先”，禁止按原始输入顺序达到全局上限后直接截断。
+
+**原因**：WhatsApp contact/chat update 天然是稀疏事件；把缺失解释成 null 会破坏已同步元数据。头像查询属于高延迟外部 IO，必须旁路处理。历史同步若按输入顺序截断会让前几个高活跃会话占满额度，导致大量联系人完全没有恢复姓名/上下文。
+
+**关联规格**：`FR-CON-011`、`FR-CON-013`、`NFR-PERF-001`、`NFR-REL-001`；计划：`docs/plans/2026-09-11-contact-sync-performance.md`。
+
+## 2026-09-11：spool replay 必须继承内部事件 HMAC，生产 systemd 采用只读主机沙箱
+
+**决策**：Bridge 启动扫描既有 spool 并创建 replay `EventSink` 时，必须与正常账号 sink 一样传入 `WHATSAPP_BRIDGE_HMAC_SECRET`。replay sink 与随后账号会话共享同一 owner，因此任何 replay 初始化路径都不得降级为仅 token 模式。
+
+**决策**：API/Bridge systemd 生产单元在低权限账户基础上继续启用 `ProtectSystem=strict`、`ProtectHome=true`、`PrivateDevices=true`、`RestrictSUIDSGID=true`、内核/control-group 保护与 `LockPersonality=true`；只对各自 `/var/lib/whatsapp-chat-system/*` runtime 开放写权限。前端 hash assets 使用 immutable 一年缓存，HTML 强制 revalidate。
+
+**原因**：服务重启是可靠性边界，spool replay 若丢失 HMAC 会让所有待重放事件卡在 401，并且该错误 sink 会被账号继续复用；systemd 文件系统沙箱和 immutable 静态缓存分别降低主机攻击面与重复静态下载成本。
+
+**关联规格**：`API-EVENT`、`SEC-002`、`NFR-OPS-001`、`VCL-006`；计划：`docs/plans/2026-09-11-six-hour-ops-hardening.md`。
+
+## 2026-09-11：当前生产前端使用服务器同域托管，Vercel 作为可选备用
+
+**决策**：`https://whats.wending.ai` 当前同时承载 React SPA 与 Standalone API。Nginx 从 `/opt/whatsapp-chat-system/web/dist` 服务静态前端，Browser 构建使用相对 `/api`；`/api/*` 继续代理 loopback FastAPI，`/internal/*` 不暴露。Vercel 保留为未来 CDN/备用发布路径，但不作为当前生产前端依赖。
+
+**原因**：当前 Vercel 项目存在每日部署配额限制，而用户明确要求前后端都部署到服务器。同域部署同时消除 Browser CORS 依赖，减少一个生产故障域，并保持 Vercel 拓扑可随时恢复。
+
+**关联规格**：`VCL-001/002/006`、`NFR-OPS-001`、`QA-001`。
+
+## 2026-09-11：API readiness 与 Tauri transport 均保持窄边界
+
+**决策**：Standalone API 对外提供 `/health/live` 与 `/health/ready` 两个无鉴权窄探针；live 不依赖业务账号/Bridge，ready 只反映 API startup/schema readiness。详细 Worker 状态继续留在 `/api/health`，不把昂贵诊断逻辑塞进 liveness。
+
+**决策**：Browser 与 Tauri 共用 `api.js`，但 Browser 入口不得静态加载 `@tauri-apps/plugin-http`。仅当 `isTauri()` 且请求为绝对远端 URL 时动态加载 native HTTP plugin，并缓存加载 Promise；失败后清空缓存以允许后续重试。
+
+**原因**：liveness 必须稳定、低成本，readiness 必须能阻止未完成启动的实例接流量；同时 Web 不应把桌面原生 transport 作为首屏依赖。两者都遵循“只把运行环境真正需要的能力暴露/加载出来”的最小边界原则。
+
+**关联规格**：`NFR-OPS-002`、`VCL-001`、`VCL-004`、`SEC-DESKTOP-001`；计划：`docs/plans/2026-09-11-health-tauri-web-split.md`。
+
+## 2026-09-11：正式 API 域切换为 whats.wending.ai，并对 Vercel Preview fail-closed
+
+**决策**：Standalone 正式公网 API 固定为 `https://whats.wending.ai/api`。Vercel Production 未显式配置 `VITE_API_BASE_URL` 时使用这一受审计的公开默认值；若显式配置则必须仍为该正式地址。Vercel Preview 不继承正式地址，并在显式指向生产 API 时直接构建失败。Tauri CSP 与 HTTP capability 同步只允许 `whats.wending.ai`。旧 `whats.future1.us` 只保留在历史记录/回滚资产中，不再作为当前客户端默认地址。
+
+**决策**：公网 `whats.wending.ai` 是 API-only Nginx 入口：`/api/*` 代理到 loopback FastAPI `127.0.0.1:8792`；`/internal/*` 永不暴露并直接 404；SSE 路径关闭 Nginx buffering。FastAPI 与 Bridge 均使用专用低权限账户 `whatsapp-chat-system`，启用 `UMask=0077`、`NoNewPrivileges=true` 与 `PrivateTmp=true`，Bridge 仅监听 `127.0.0.1:3100`。
+
+**原因**：前端与桌面端必须共享同一正式 API 契约，同时 Preview 不能因为仓库默认配置误写生产数据；服务进程也不应因 systemd 默认行为以 root 运行。API-only 域把浏览器静态托管与后端安全边界彻底分开，并阻止内部事件端点被公网探测。
+
+**关联规格**：`VCL-002/003/004/005`、`MIG-001`、`SEC-DESKTOP-001`、`QA-001`；实施计划：`docs/plans/2026-09-11-whats-wending-ai-production-deploy.md`。
+
+## 2026-09-10：Outbox 抢占改用条件 UPDATE，不依赖行锁
+
+**决策**：`OutboxDispatcher` 的抢占从 `SELECT ... FOR UPDATE SKIP LOCKED` 改为带 `status = 'pending'` 守卫的条件 UPDATE（CAS），`rowcount` 即抢占结果。`ai/job_repository.py` 保持现有 dialect 分支（PostgreSQL 走行锁，SQLite 走候选 id + CAS）不变。
+
+**原因**：SQLite 会**静默忽略** `FOR UPDATE`，不报错也不加锁，导致多进程部署下同一个 `OutboxMessage` 可被两个 worker 同时 claim 并重复发送。条件 UPDATE 在 SQLite 与 PostgreSQL 上语义一致且原子，不需要按 dialect 分叉，也免受"静默忽略"这类不可见失效的影响。此决策同时覆盖了未来切换到 PostgreSQL 前后的行为一致性。
+
+**关联规格**：`docs/sdd/03-data-model.md`（消息状态机）、`docs/sdd/09-performance-and-realtime.md`。回归测试：`tests/test_outbox_claim_cas.py`。
+
+## 2026-09-10：数据库同时支持 SQLite 与 PostgreSQL，驱动选用 psycopg 3
+
+**决策**：保留 SQLite 作为零配置默认后端，同时正式支持 PostgreSQL。驱动选用 `psycopg[binary]`（psycopg 3），并在 `db/url.py` 把 `postgres://`、`postgresql://`、`postgresql+psycopg2://` 统一归一为 `postgresql+psycopg://`。
+
+**原因**：服务器与多副本部署需要 PostgreSQL 的并发能力与运维工具，但本地开发、演示和单机场景不应被迫安装数据库。选用 psycopg 3 的 binary 发行版是因为它自带 libpq，同一条 `DATABASE_URL` 在 Linux / Windows / macOS 上都能直接工作，无需系统级依赖——这与"后端可在主流操作系统原生运行"的要求一致。URL 归一化集中在一处并被 `migrations/env.py` 复用，避免 alembic 与 API 连到不同库。
+
+**关联规格**：`docs/sdd/03-data-model.md`；验证入口 `tests/test_postgres_backend.py`（opt-in）。
+
+## 2026-09-10：内部事件接口在静态 token 之上叠加 HMAC 签名
+
+**决策**：`/internal/events/whatsapp` 保留静态共享 token 作为基础层，并支持通过 `WHATSAPP_BRIDGE_HMAC_SECRET` 启用 HMAC-SHA256 请求签名、±300s 时间戳窗口与 nonce 重放防护。签名口径为 `hex(hmac_sha256(secret, "{timestamp}.{raw_body}"))`。鉴权通过 FastAPI 依赖实现，使其先于请求体校验执行。**不配置该变量时保持原行为**，只在启动日志给出告警。
+
+**原因**：仅靠静态 token 时，token 一旦泄露即可注入任意事件，且抓包得到的请求可无限期重放；而 `event_id` 幂等只能挡住"已成功处理过"的重放，挡不住构造新 event_id 的注入。选择"可配置、默认不启用"而非强制启用，是为了不把已部署的 Bridge 一次性打断——两侧必须同步配置同名变量。鉴权放在依赖而非中间件，是因为 FastAPI 先解析依赖、后解析请求体，这样未鉴权的畸形 payload 返回 401 而非 422，不会成为 schema 探测通道；同时避免了中间件与依赖两层校验重复消费同一个 nonce 而被误判为重放。
+
+**关联规格**：`docs/sdd/04-api-and-events.md`。回归测试：`tests/test_internal_event_auth.py`、`bridge/tests/event-sink-signing.test.js`。
+
+## 2026-07-16：Tauri 2 测试安装包必须由锁定依赖的多平台 CI 构建
+
+**决策**：Tauri 2 桌面端保持薄客户端；GitHub Actions 使用 `Cargo.lock + npm lockfile` 自动构建 Linux `.deb/.AppImage`、Windows NSIS `.exe` 和 macOS `.dmg`，并上传短期 artifact。未配置平台签名和 notarization 前，这些产物只定义为内部测试安装包。
+
+- Tauri HTTP capability 仅允许 `https://whats.future1.us/api/**`；
+- Tauri 模式 session token 不写入 localStorage，关闭应用后重新登录；
+- Tauri 模式消息和翻译缓存仅存内存，浏览器缓存按用户隔离且 logout 清除；
+- Android/iOS 需要原生工程、签名和专用 runner，不纳入本阶段“安装包自动构建完成”范围。
+
+**原因**：仅验证 Vite bundle 和 Tauri CLI 不能证明原生程序可编译；可重复 lockfile、真实 `cargo check --locked`、平台安装包构建和 artifact 上传必须成为合并门禁。同时不能把未签名、未真机验证的产物描述为正式发布版。
+
+**关联规格**：`docs/sdd/11-tauri-desktop-distribution.md`、`docs/plans/2026-07-16-tauri-desktop-installers.md`。
+
+
 ## 2026-07-15: 多用户第一批先按账号范围做 RBAC 与数据隔离
 
 **决策**：在 Standalone 多用户落地第一阶段，先把用户模型收敛为 `role + allowed_account_ids`，所有非 admin 用户只按账号范围隔离；不先引入更复杂的 row-level policy 或会话级 ACL。

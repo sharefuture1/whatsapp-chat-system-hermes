@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from whatsapp_chat_system.authz import require_object_account_access
 from whatsapp_chat_system.db.models import Message, MessageTranslation
 from whatsapp_chat_system.rewriter import Rewriter
 
@@ -31,7 +32,7 @@ def _language_hint_for(text: str) -> str:
 
 class TranslateRequest(BaseModel):
     user_id: str = Field(default="", max_length=255)
-    content: str = Field(default="", max_length=10000)
+    content: str | None = Field(default=None, max_length=10000)
 
 
 def _source_text_hash(text: str) -> str:
@@ -130,8 +131,6 @@ def create_messages_router() -> APIRouter:
         Translate a message by its ID.
         Current phase writes database translation truth even while the provider path is still synchronous.
         """
-        text = body.content
-        lang = _language_hint_for(text)
         runtime = getattr(request.app.state, "runtime", None)
         session_factory = getattr(request.app.state, "session_factory", None)
         if runtime is None or session_factory is None:
@@ -142,6 +141,23 @@ def create_messages_router() -> APIRouter:
             message = session.get(Message, message_id)
             if message is None:
                 raise HTTPException(status_code=404, detail="Message not found")
+            require_object_account_access(
+                runtime,
+                request,
+                message.account_id,
+                write=True,
+                not_found_detail="Message not found",
+            )
+            text = message.content or ""
+            if body.content is not None and body.content != text:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "source_content_mismatch",
+                        "message": "Request content does not match the stored message",
+                    },
+                )
+            lang = _language_hint_for(text)
             source_hash = _source_text_hash(message.content or "")
             existing = session.scalar(
                 select(MessageTranslation).where(

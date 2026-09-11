@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useSettings } from '../settings'
 import { SUPPORTED_LANGUAGES } from '../i18n'
@@ -168,8 +168,6 @@ export default function SettingsPanel({
       () => setPassword(''),
     )
 
-  if (!open) return null
-
   const tabs = [
     { id: 'reply', label: t('replyPolicy'), hint: t('ai') },
     { id: 'ai', label: t('globalAi'), hint: t('model') },
@@ -186,6 +184,8 @@ export default function SettingsPanel({
     if (!existing.includes(userId)) return [selectedConversation]
     return []
   }, [selectedConversation, userOverrides])
+
+  if (!open) return null
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={t('settings')} onClick={onClose}>
