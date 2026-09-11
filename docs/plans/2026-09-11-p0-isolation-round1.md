@@ -12,3 +12,11 @@ Base: codex/p0-hardening-tauri2. See ../sdd/12-session-translation-isolation.md.
 5. gcptw deployment requires a usable server connection and release verification.
    Current conversation open_workspace is denied (developer MCP unsupported).
    No server modification and no six-hour autonomous task have been performed.
+
+## Executed code verification
+
+Steps 1–3 passed in the locked GitHub runner: Python 384 passed / 7 skipped,
+Web 138 passed, Bridge 87 passed; Browser/Tauri frontend builds, Ruff and real
+Chromium mandatory-password flows at phone and desktop viewports passed.
+See [authoritative verification record](../reports/2026-09-11-round1-verification.md)
+for exact run, scope, dependency warnings and production limitations.

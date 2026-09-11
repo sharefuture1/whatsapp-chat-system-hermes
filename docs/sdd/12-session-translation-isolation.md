@@ -1,6 +1,7 @@
 # Session and translation isolation — Round 1
 
-Status: Approved for implementation; production verification is separate.
+Status: Implemented; code gates passed. Production verification remains pending.
+Evidence: [Round 1 verification](../reports/2026-09-11-round1-verification.md).
 
 ## SEC-CACHE-001 / PERF-008
 Deferred cache work is bound to the login scope and an immutable generation.

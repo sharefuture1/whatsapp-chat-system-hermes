@@ -25,6 +25,20 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install uv==0.9.25 && uv sync --locked --group dev
+      - name: Pytest
+        run: uv run pytest -q
+
+  python-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install locked tools
+        run: python -m pip install uv==0.9.25 && uv sync --locked --group dev
       - name: Ruff changed Python files
         shell: bash
         run: |
@@ -43,8 +57,6 @@ jobs:
           fi
           uv run ruff check "${files[@]}"
           uv run ruff format --check "${files[@]}"
-      - name: Pytest
-        run: uv run pytest -q
 
   web:
     runs-on: ubuntu-latest
@@ -61,6 +73,10 @@ jobs:
         run: node --test web/tests/*.test.js
       - name: Production build
         run: npm run build --prefix web
+      - name: Install browser for security regression
+        run: cd web && npx playwright install --with-deps chromium
+      - name: Mandatory password-change browser regression
+        run: node web/e2e/forced-password.mjs
 
   bridge:
     runs-on: ubuntu-latest
