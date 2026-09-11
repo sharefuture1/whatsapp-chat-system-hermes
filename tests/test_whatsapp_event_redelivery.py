@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from whatsapp_chat_system.db.base import Base
 from whatsapp_chat_system.db.models import WhatsAppAccount, WhatsAppEvent
-from whatsapp_chat_system.events.whatsapp import WhatsAppEventEnvelope, WhatsAppEventService
+from whatsapp_chat_system.events.whatsapp import (
+    WhatsAppEventEnvelope,
+    WhatsAppEventService,
+)
 
 
 def _message_envelope(*, sequence: int, occurred_at: datetime) -> WhatsAppEventEnvelope:
@@ -52,18 +55,24 @@ def test_same_stable_event_id_allows_redelivery_metadata_to_change() -> None:
         db.commit()
 
     with factory() as db:
-        assert WhatsAppEventService(db).process(
-            _message_envelope(sequence=1, occurred_at=first_at)
-        ) is False
+        assert (
+            WhatsAppEventService(db).process(
+                _message_envelope(sequence=1, occurred_at=first_at)
+            )
+            is False
+        )
         db.commit()
 
     with factory() as db:
-        assert WhatsAppEventService(db).process(
-            _message_envelope(
-                sequence=99,
-                occurred_at=first_at + timedelta(seconds=30),
+        assert (
+            WhatsAppEventService(db).process(
+                _message_envelope(
+                    sequence=99,
+                    occurred_at=first_at + timedelta(seconds=30),
+                )
             )
-        ) is True
+            is True
+        )
         db.commit()
         stored = db.scalars(select(WhatsAppEvent)).all()
         assert len(stored) == 1
