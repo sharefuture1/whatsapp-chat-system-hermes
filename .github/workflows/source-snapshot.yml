@@ -20,8 +20,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Archive tracked source for reproducible offline review
-        run: git archive --format=tar --output="${RUNNER_TEMP}/hermes-source.tar" HEAD
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Install locked dependencies for offline tests
+        run: npm ci --prefix web && npm ci --prefix bridge
+      - name: Archive tracked source and locked dependencies
+        run: |
+          git archive --format=tar --output="${RUNNER_TEMP}/hermes-source.tar" HEAD
+          tar --append --file="${RUNNER_TEMP}/hermes-source.tar" web/node_modules bridge/node_modules
       - uses: actions/upload-artifact@v4
         with:
           name: hermes-source-${{ github.sha }}
