@@ -1,6 +1,6 @@
 # Standalone 自动翻译单入口与 Worker 重试规格
 
-> 状态：**Approved / Mandatory**
+> 状态：**Implemented / Mandatory（代码门禁通过；生产验收待完成）**
 > 日期：2026-09-12
 > 需求：`FR-AI-015`、`FR-AI-016`、`PERF-004`、`PERF-006`
 
