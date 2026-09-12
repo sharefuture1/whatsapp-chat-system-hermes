@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
-import { waitForTranslationBatch } from '../translationPolling'
 import { fetchPersonaCatalog, assignPersona as assignPersonaApi } from '../personas'
 import {
   loadConversationCache,
@@ -420,55 +419,26 @@ export default function ChatPane({
     }
   }
 
-  const queueTranslationBatch = async (anchorMessage, generation, signal) => {
-    if (!standalone || !conversationId || !anchorMessage?.message_id) return false
-    const translationId = String(anchorMessage.message_id)
-    if (translatingIdsRef.current.has(translationId)) return false
-    translatingIdsRef.current.add(translationId)
-    try {
-      const windowSize = Number(uiSettings?.message_ops?.translation_context_window || 10)
-      const batch = await api.post(`/v1/conversations/${encodeURIComponent(conversationId)}/translations`, {
-        anchor_message_id: anchorMessage.message_id,
-        target_lang: uiSettings?.message_ops?.translation_target_language || 'zh-CN',
-        window_size: Number.isFinite(windowSize) ? Math.max(1, Math.min(20, windowSize)) : 10,
-      }, { signal })
-      if (generation !== translationGenerationRef.current || signal.aborted) return false
-      const state = batch.batch_id ? await waitForTranslationBatch({
-        signal,
-        check: () => api.get(`/v1/conversations/${encodeURIComponent(conversationId)}/translations/${encodeURIComponent(batch.batch_id)}`, { signal, cacheTtlMs: 0, dedupe: false }),
-      }) : batch
-      if (signal.aborted || generation !== translationGenerationRef.current) return false
-      const refreshed = await fetchPage(userId, page || 1, false, { cachePolicy: 'network-first' })
-      if (signal.aborted || generation !== translationGenerationRef.current) return false
-      const translatedNow = refreshed?.messages?.some(item => item.message_id === anchorMessage.message_id && (item.translated || item.lang === 'Chinese'))
-      if (translatedNow) {
-        setTranslationError('')
-        return true
-      }
-      if (['failed', 'dead', 'cancelled'].includes(state?.status)) setTranslationError(t('translationFailed'))
-      commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(m => m.message_id === anchorMessage.message_id ? { ...m, translationRetryAfter: Date.now() + 30_000 } : m))
-      return false
-    } catch (error) {
-      if (signal.aborted || generation !== translationGenerationRef.current) return false
-      const code = error?.data?.detail?.code || error?.data?.code || error?.code
-      setTranslationError(code === 'auto_translate_disabled' ? t('translationDisabled') : t('translationFailed'))
-      commitMessagesUpdate(messagesRef, setMessages, prev => prev.map(m => m.message_id === anchorMessage.message_id ? { ...m, translationRetryAfter: Date.now() + 30_000 } : m))
-      return false
-    } finally {
-      translatingIdsRef.current.delete(translationId)
-    }
-  }
 
   useEffect(() => {
-    if (!autoTranslate) {
+    if (!autoTranslate || standalone) {
       translationGenerationRef.current += 1
       translationAbortRef.current?.abort()
       translationAbortRef.current = null
     }
-  }, [autoTranslate])
+  }, [autoTranslate, standalone])
 
   useEffect(() => {
-    if (!autoTranslate || !userId || translationWorkerRunningRef.current) return
+    if (!standalone || !autoTranslate) {
+      if (standalone) setTranslationError('')
+      return
+    }
+    const terminalFailure = messages.some(message => message.translation_status === 'dead')
+    setTranslationError(terminalFailure ? t('translationFailed') : '')
+  }, [standalone, autoTranslate, messages, t])
+
+  useEffect(() => {
+    if (standalone || !autoTranslate || !userId || translationWorkerRunningRef.current) return
     const generation = translationGenerationRef.current
     const controller = new AbortController()
     const attempted = new Set()
@@ -492,7 +462,7 @@ export default function ChatPane({
         const id = String(msg.message_id || '')
         attempted.add(id)
         processed += 1
-        const handled = standalone ? await queueTranslationBatch(msg, generation, controller.signal) : await translateOne(msg, generation, controller.signal)
+        const handled = await translateOne(msg, generation, controller.signal)
         if (!handled) break
       }
     })().finally(() => {

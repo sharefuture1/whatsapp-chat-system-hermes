@@ -71,6 +71,8 @@
 
 - **FR-AI-013 [In Progress]**：自动回复以最新有意义的入站原文判定语言，不从操作员中文、页面语言或出站消息推断；模糊输入使用联系人语言偏好/近期入站。Thai/Lao 等有明确文字系统的目标若输出明显错误语言，禁止进入 Outbox。模型调用结束后必须重查账号/会话/联系人自动回复开关。
 - **FR-AI-014 [In Progress]**：翻译批次不得把空输出、原文照抄或逐条失败伪装为成功；活动的同窗口批次重复请求应复用。当前聊天译文目标为简体中文，未实现的目标语言必须明确拒绝。页面等待期间读取服务端新状态，不得命中旧 GET 缓存。
+- **FR-AI-015 [Approved]**：Standalone 自动翻译只有一个自动任务创建入口：已认证的 WhatsApp 入站事件落库后由服务端按有效策略创建翻译批次。浏览器不得因页面打开、刷新或存在未译消息而自动 POST 创建批次；手动/补历史翻译端点保留为显式操作。有效策略必须同时满足 `plugins.auto_translate`、`message_ops.auto_translate` 和 AI Provider 已配置，并统一解析目标语言与上下文窗口。
+- **FR-AI-016 [Approved]**：TranslationDispatcher 必须以条件更新原子领取批次；`attempt_count` 作为当前领取代次，旧代次 Worker 的迟到结果不得覆盖新领取。可重试失败进入带 `retry_after` 的有界重试，达到 `max_attempts` 后进入 `dead`；未来 `retry_after` 不得提前执行。
 - FR-AI-008/010 验收补充：更新 DB AI 设置后，同一个进程、已缓存 Rewriter 和自动回复 Worker 的下一次请求必须使用新 Key/模型，不依赖重启。
 
 ### 3.5 联系人与画像

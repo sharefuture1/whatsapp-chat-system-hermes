@@ -634,6 +634,12 @@ def create_conversations_router(
                 if translation and translation.status == "completed"
                 else None,
                 "translation_status": translation.status if translation else None,
+                "translation_error_code": translation.error_code
+                if translation
+                else None,
+                "translation_retry_after": _iso(translation.retry_after)
+                if translation
+                else None,
                 "translation_updated_at": _iso(translation.updated_at)
                 if translation
                 else None,
@@ -1061,6 +1067,8 @@ def create_conversations_router(
             "status": batch.status,
             "error_code": batch.error_code,
             "target_lang": batch.target_lang,
+            "attempt_count": batch.attempt_count,
+            "retry_after": _iso(batch.retry_after),
         }
 
     @router.post(

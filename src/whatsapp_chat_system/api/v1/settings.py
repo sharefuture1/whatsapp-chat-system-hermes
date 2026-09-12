@@ -36,6 +36,7 @@ from whatsapp_chat_system.db.models import (
 )
 from whatsapp_chat_system.runtime import StandaloneRuntime, save_runtime_settings
 from whatsapp_chat_system.settings import _normalize_base_url
+from whatsapp_chat_system.translation_policy import resolve_auto_translation_policy
 
 
 _SAFE_SETTING_SECTIONS = frozenset({"ui", "message_ops", "reply", "plugins"})
@@ -207,6 +208,10 @@ def _ai_payload(
 ) -> dict[str, Any]:
     ciphertext = row.api_key_ciphertext if row else None
     env_key = runtime.ai_settings.api_key.strip()
+    configured = bool(ciphertext and decrypt_api_key(ciphertext)) or bool(env_key)
+    auto_translate = resolve_auto_translation_policy(
+        runtime.web_settings, ai_configured=configured
+    )
     return {
         "provider": "wendingai",
         "base_url": row.base_url if row else runtime.ai_settings.base_url,
@@ -217,17 +222,9 @@ def _ai_payload(
         if row
         else runtime.ai_settings.timeout_seconds,
         "max_retries": row.max_retries if row else runtime.ai_settings.max_retries,
-        "api_key_configured": bool(ciphertext and decrypt_api_key(ciphertext))
-        or bool(env_key),
+        "api_key_configured": configured,
         "api_key_hint": row.api_key_hint if row else mask_api_key(env_key),
-        "auto_translate": {
-            "plugin_enabled": runtime.web_settings.get("plugins", {}).get(
-                "auto_translate", True
-            ),
-            "setting_enabled": runtime.web_settings.get("message_ops", {}).get(
-                "auto_translate", True
-            ),
-        },
+        "auto_translate": auto_translate.as_dict(),
     }
 
 
@@ -263,15 +260,15 @@ def create_settings_router(
             session.close()
 
     @router.get("/capabilities")
-    def get_capabilities(request: Request) -> dict[str, Any]:
+    def get_capabilities(
+        request: Request, session: Session = Depends(get_session)
+    ) -> dict[str, Any]:
         visible_account_ids_for(runtime, request)
         message_ops = deepcopy(runtime.web_settings.get("message_ops") or {})
         reply = deepcopy(runtime.web_settings.get("reply") or {})
         plugins = deepcopy(runtime.web_settings.get("plugins") or {})
-        auto_translate = {
-            "plugin_enabled": plugins.get("auto_translate", True),
-            "setting_enabled": message_ops.get("auto_translate", True),
-        }
+        ai_row = session.get(AIRuntimeSetting, "global")
+        auto_translate = _ai_payload(runtime, ai_row)["auto_translate"]
         return {
             "runtime_mode": "standalone",
             "message_ops": message_ops,
@@ -343,23 +340,6 @@ def create_settings_router(
     ) -> dict[str, Any]:
         require_admin(runtime, request)
         payload = _ai_payload(runtime, session.get(AIRuntimeSetting, "global"))
-        auto_translate = payload["auto_translate"]
-        configured = bool(payload["api_key_configured"])
-        auto_translate["ai_configured"] = configured
-        auto_translate["ready"] = bool(
-            auto_translate["plugin_enabled"]
-            and auto_translate["setting_enabled"]
-            and configured
-        )
-        auto_translate["blocked_reason"] = (
-            None
-            if auto_translate["ready"]
-            else "plugin_disabled"
-            if not auto_translate["plugin_enabled"]
-            else "setting_disabled"
-            if not auto_translate["setting_enabled"]
-            else "ai_not_configured"
-        )
         return payload
 
     @router.put("/ai/settings")

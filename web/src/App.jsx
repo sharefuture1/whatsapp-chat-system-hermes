@@ -325,11 +325,12 @@ function AppInner() {
               reply: data.reply || {},
               plugins: data.plugins || {},
             },
+            auto_translate: data.auto_translate || {},
           })),
       isAdmin ? api.get('/v1/ai/settings').catch(() => ({})) : Promise.resolve({}),
     ])
     setSettings(settingsData)
-    setApiSettings(aiData)
+    setApiSettings(isAdmin ? aiData : { auto_translate: settingsData.auto_translate || {} })
     setSessionReady(true)
     return true
   }, [loggedInUsername])

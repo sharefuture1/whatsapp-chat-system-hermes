@@ -16,6 +16,7 @@ from whatsapp_chat_system.events.whatsapp import (
     WhatsAppEventEnvelope,
     WhatsAppEventService,
 )
+from whatsapp_chat_system.translation_policy import AutoTranslationPolicy
 from whatsapp_chat_system.security.internal_auth import (
     DEFAULT_MAX_SKEW_SECONDS,
     InternalAuthError,
@@ -116,6 +117,7 @@ def create_whatsapp_events_router(
     hmac_secret: str | None = None,
     max_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,
     replay_guard: ReplayGuard | None = None,
+    translation_policy_resolver: Callable[[], AutoTranslationPolicy] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/internal/events", tags=["internal-events"])
     auth = _make_internal_auth_dependency(
@@ -133,7 +135,9 @@ def create_whatsapp_events_router(
     ):
         session = session_factory()
         try:
-            duplicate = WhatsAppEventService(session).process(envelope)
+            duplicate = WhatsAppEventService(
+                session, translation_policy_resolver=translation_policy_resolver
+            ).process(envelope)
             session.commit()
         except (EventProcessingError, ValidationError) as exc:
             session.rollback()
@@ -158,7 +162,10 @@ def create_whatsapp_events_router(
             # 并发首次写竞争：重新读取身份并按普通 duplicate/conflict 规则判断。
             retry_session = session_factory()
             try:
-                duplicate = WhatsAppEventService(retry_session).process(envelope)
+                duplicate = WhatsAppEventService(
+                    retry_session,
+                    translation_policy_resolver=translation_policy_resolver,
+                ).process(envelope)
                 retry_session.commit()
             except EventProcessingError as exc:
                 retry_session.rollback()
