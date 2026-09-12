@@ -1,3 +1,13 @@
+## 2026-09-12：第二轮翻译单入口与 Worker 原子重试（Implemented，未部署）
+
+- 规格：`docs/sdd/13-translation-ingress-and-retry.md`；需求：`FR-AI-015` / `FR-AI-016`。
+- Standalone 自动翻译只由服务端已鉴权 `message.upsert` 入站链路创建；浏览器不再因打开页面、刷新或扫描未译消息自动 POST 翻译批次。显式手动/历史补译端点保留，Legacy 逐条自动翻译保持兼容。
+- 新增统一 `translation_policy`：插件开关、消息自动翻译开关、AI Provider 配置、目标语言和上下文窗口由服务端同一解析器决定；设置 API 与普通用户 capabilities 返回同一有效状态。
+- `TranslationDispatcher` 使用带 `id/status/attempt_count` 守卫的 CAS 原子领取；`attempt_count` 作为领取代次，旧 Worker 迟到结果不会覆盖新一轮任务；可重试失败进入 `pending + retry_after`，到达最大次数后进入 `dead`。
+- 锁定 CI `34681537160`：Python **393 passed / 7 skipped**，Web **141 passed**，Bridge **89 passed**，Ruff/格式、Bridge syntax、Browser/Tauri 两种前端构建与 Tauri shell 校验全部通过。7 skipped 为需外部 PostgreSQL 测试库的 opt-in 专项。
+- 本轮没有数据库迁移，没有修改生产账号、AI 开关、WhatsApp session 或客户数据；gcptw 未部署，因此只能标记 Implemented，不能标 Production Verified。
+- 安装审计仍报告 Web 6 项（2 moderate / 4 high）、Bridge 1 项 high，尚未在本轮升级依赖。
+
 ## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
 
 - 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。

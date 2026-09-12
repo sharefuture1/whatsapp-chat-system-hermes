@@ -42,6 +42,7 @@ from .db import create_engine, create_session_factory, session_scope
 from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
 from .runtime import StandaloneRuntime
+from .translation_policy import resolve_auto_translation_policy
 from .security.internal_auth import InternalAuthError, ReplayGuard
 from .settings import AISettings
 from .memory_refresh import MemoryRefresher
@@ -952,6 +953,10 @@ def _build_standalone_app(
             runtime.internal_event_token,
             hmac_secret=runtime.internal_event_hmac_secret,
             replay_guard=ReplayGuard(),
+            translation_policy_resolver=lambda: resolve_auto_translation_policy(
+                runtime.web_settings,
+                ai_configured=bool(runtime_ai_mgr.effective_api_key.strip()),
+            ),
         )
     )
     app.include_router(create_personas_router(runtime, factory))

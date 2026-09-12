@@ -56,6 +56,7 @@ from .runtime import (
 from .runtime import verify_password as _verify_password
 from .security.internal_auth import InternalAuthError
 from .security.internal_auth import ReplayGuard as InternalReplayGuard
+from .translation_policy import resolve_auto_translation_policy
 from .translations_dispatcher import TranslationDispatcher
 
 logger = logging.getLogger(__name__)
@@ -382,6 +383,10 @@ def build_standalone_app(
             runtime.internal_event_token,
             hmac_secret=runtime.internal_event_hmac_secret,
             replay_guard=InternalReplayGuard(),
+            translation_policy_resolver=lambda: resolve_auto_translation_policy(
+                runtime.web_settings,
+                ai_configured=bool(runtime_ai_settings.effective_api_key.strip()),
+            ),
         )
     )
     app.include_router(create_personas_router(runtime, factory))

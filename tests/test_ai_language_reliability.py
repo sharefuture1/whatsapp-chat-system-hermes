@@ -81,7 +81,9 @@ def test_empty_or_unchanged_translation_is_not_completed(factory, bad_output):
     with factory() as session:
         row = session.scalar(select(MessageTranslation))
         assert row.status == "failed"
-        assert session.get(TranslationBatch, batch_id).status == "failed"
+        batch = session.get(TranslationBatch, batch_id)
+        assert batch.status == "pending"
+        assert batch.retry_after is not None
 
 
 def test_translation_requests_reuse_active_batch_and_reject_wrong_target(

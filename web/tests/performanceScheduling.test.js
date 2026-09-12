@@ -26,7 +26,7 @@ test('automatic translation uses one worker per active conversation', () => {
   const source = read('components/ChatPane.jsx')
   assert.match(source, /translationWorkerRunningRef/)
   assert.match(source, /translationGenerationRef/)
-  assert.match(source, /!autoTranslate \|\| !userId \|\| translationWorkerRunningRef\.current/)
+  assert.match(source, /standalone \|\| !autoTranslate \|\| !userId \|\| translationWorkerRunningRef\.current/)
   assert.match(source, /new AbortController\(\)/)
   assert.match(source, /await translateOne\(msg, generation, controller\.signal\)/)
   assert.doesNotMatch(source, /for \(const msg of pending\.slice\(0, 6\)\)/)

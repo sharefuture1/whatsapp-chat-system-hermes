@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from .db.models import Message, MessageTranslation, TranslationBatch
@@ -32,6 +32,11 @@ class TranslationDispatcherConfig:
     max_attempts: int = 3
     #: 超过该时长仍停留在 running 的批次视为进程崩溃遗留，可被重新领取。
     stale_running_seconds: float = 600.0
+    #: 可重试失败的指数退避基数/上限；测试可设 0 立即重试。
+    retry_base_seconds: float = 2.0
+    retry_max_seconds: float = 60.0
+    #: CAS 竞争时一次 run_once 最多重新挑选多少次。
+    claim_contention_retries: int = 8
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,7 @@ class _BatchPlan:
     batch_id: str
     target_lang: str
     window_size: int
+    claim_attempt: int
     items: tuple[_PendingItem, ...]
 
 
@@ -118,7 +124,7 @@ class TranslationDispatcher:
             logger.exception(
                 "Translation batch failed", extra={"batch_id": plan.batch_id}
             )
-            self._mark_failed(plan.batch_id, exc)
+            self._mark_failed(plan, exc)
             return False
 
         # 阶段三：新短事务——落库
@@ -131,7 +137,7 @@ class TranslationDispatcher:
                 "Translation batch persistence failed",
                 extra={"batch_id": plan.batch_id},
             )
-            self._mark_failed(plan.batch_id, exc)
+            self._mark_failed(plan, exc)
             return False
 
         if any(outcome.status != "completed" for outcome in outcomes):
@@ -145,54 +151,143 @@ class TranslationDispatcher:
     # ------------------------------------------------------------------ 阶段一
 
     def _claim_batch(self) -> _BatchPlan | None:
-        """领取一个批次，返回待翻译快照；无可用批次时返回 None。"""
+        """以条件 UPDATE 原子领取一个批次并返回本轮快照。
 
-        with self.session_factory() as session:
-            batch = self._next_batch(session)
-            if batch is None:
-                return None
+        `attempt_count` 同时作为轻量 claim generation。即使两个进程先后 SELECT
+        到同一候选，只有仍保持相同 status/attempt 的一个 UPDATE 能成功。
+        """
 
-            batch.status = "running"
-            batch.attempt_count = (batch.attempt_count or 0) + 1
-
-            anchor = session.get(Message, batch.anchor_message_id)
-            if anchor is None:
-                batch.status = "dead"
-                batch.error_code = "anchor_message_missing"
-                batch.completed_at = datetime.now(timezone.utc)
+        retries = max(1, int(self.config.claim_contention_retries))
+        for _ in range(retries):
+            with self.session_factory() as session:
+                batch = self._next_batch(session)
+                if batch is None:
+                    return None
+                batch_id = batch.id
+                if not self._claim_candidate(session, batch):
+                    session.rollback()
+                    continue
                 session.commit()
-                return None
+                session.expire_all()
+                batch = session.get(TranslationBatch, batch_id)
+                if batch is None:
+                    return None
+                claim_attempt = int(batch.attempt_count or 0)
 
-            rows = session.scalars(
-                select(Message)
-                .where(
-                    Message.account_id == batch.account_id,
-                    Message.conversation_id == batch.conversation_id,
-                    func.coalesce(Message.occurred_at, Message.created_at)
-                    <= func.coalesce(anchor.occurred_at, anchor.created_at),
-                )
-                .order_by(
-                    func.coalesce(Message.occurred_at, Message.created_at).desc(),
-                    Message.id.desc(),
-                )
-                .limit(batch.window_size)
-            ).all()
-            rows.reverse()
+                try:
+                    anchor = session.get(Message, batch.anchor_message_id)
+                    if anchor is None:
+                        batch.status = "dead"
+                        batch.error_code = "anchor_message_missing"
+                        batch.error_message = (
+                            "Translation anchor message no longer exists"
+                        )
+                        batch.retry_after = None
+                        batch.completed_at = datetime.now(timezone.utc)
+                        session.commit()
+                        return None
 
-            plan = self._build_plan(session, batch, rows)
-            session.commit()
-            return plan
+                    rows = session.scalars(
+                        select(Message)
+                        .where(
+                            Message.account_id == batch.account_id,
+                            Message.conversation_id == batch.conversation_id,
+                            func.coalesce(Message.occurred_at, Message.created_at)
+                            <= func.coalesce(anchor.occurred_at, anchor.created_at),
+                        )
+                        .order_by(
+                            func.coalesce(
+                                Message.occurred_at, Message.created_at
+                            ).desc(),
+                            Message.id.desc(),
+                        )
+                        .limit(batch.window_size)
+                    ).all()
+                    rows.reverse()
+
+                    plan = self._build_plan(session, batch, rows)
+                    # _build_plan may materialize direct/cache translations. Persist
+                    # them before the session is closed, then call AI outside it.
+                    session.commit()
+                    return plan
+                except Exception as exc:
+                    session.rollback()
+                    self._schedule_failure(
+                        batch_id,
+                        claim_attempt,
+                        code="translation_claim_plan_failed",
+                        message=str(exc) or type(exc).__name__,
+                    )
+                    raise
+        return None
+
+    def _claim_candidate(
+        self,
+        session: Session,
+        batch: TranslationBatch,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """CAS claim helper; exposed privately for deterministic concurrency tests."""
+
+        current = now or datetime.now(timezone.utc)
+        expected_status = str(batch.status)
+        expected_attempt = int(batch.attempt_count or 0)
+        guards = [
+            TranslationBatch.id == batch.id,
+            TranslationBatch.status == expected_status,
+            TranslationBatch.attempt_count == expected_attempt,
+            TranslationBatch.attempt_count < self.config.max_attempts,
+        ]
+        if expected_status in {"pending", "claimed"}:
+            guards.append(
+                or_(
+                    TranslationBatch.retry_after.is_(None),
+                    TranslationBatch.retry_after <= current,
+                )
+            )
+        elif expected_status == "running":
+            stale_before = current - timedelta(
+                seconds=self.config.stale_running_seconds
+            )
+            guards.append(TranslationBatch.updated_at < stale_before)
+        else:
+            return False
+
+        result = session.execute(
+            update(TranslationBatch)
+            .where(*guards)
+            .values(
+                status="running",
+                attempt_count=expected_attempt + 1,
+                retry_after=None,
+                error_code=None,
+                error_message=None,
+                completed_at=None,
+                updated_at=current,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return bool(result.rowcount == 1)
 
     def _next_batch(self, session: Session) -> TranslationBatch | None:
-        """挑选批次：优先 pending/claimed；running 超时的视为崩溃遗留可重领。"""
+        """挑选可立即尝试的批次；真正所有权由 `_claim_candidate` CAS 决定。"""
 
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=self.config.stale_running_seconds
+        now = datetime.now(timezone.utc)
+        stale_before = now - timedelta(seconds=self.config.stale_running_seconds)
+        retry_ready = or_(
+            TranslationBatch.retry_after.is_(None),
+            TranslationBatch.retry_after <= now,
         )
         selectable = or_(
-            TranslationBatch.status.in_(("pending", "claimed")),
-            (TranslationBatch.status == "running")
-            & (TranslationBatch.updated_at < stale_before),
+            and_(
+                TranslationBatch.status.in_(("pending", "claimed")),
+                retry_ready,
+            ),
+            and_(
+                TranslationBatch.status == "running",
+                TranslationBatch.updated_at < stale_before,
+            ),
         )
         return session.scalar(
             select(TranslationBatch)
@@ -200,7 +295,7 @@ class TranslationDispatcher:
                 selectable,
                 TranslationBatch.attempt_count < self.config.max_attempts,
             )
-            .order_by(TranslationBatch.created_at.asc())
+            .order_by(TranslationBatch.created_at.asc(), TranslationBatch.id.asc())
         )
 
     def _build_plan(
@@ -331,6 +426,7 @@ class TranslationDispatcher:
             batch_id=batch.id,
             target_lang=batch.target_lang,
             window_size=batch.window_size,
+            claim_attempt=int(batch.attempt_count or 0),
             items=tuple(items),
         )
 
@@ -529,7 +625,7 @@ class TranslationDispatcher:
     # ------------------------------------------------------------------ 阶段三
 
     def _finalize(self, plan: _BatchPlan, outcomes: Sequence[_MessageOutcome]) -> None:
-        """新短事务写入翻译结果并收尾批次。"""
+        """按 claim attempt 写入结果；迟到 Worker 不得覆盖新一轮领取。"""
 
         by_id = {item.message_id: item for item in plan.items}
         with self.session_factory() as session:
@@ -538,6 +634,20 @@ class TranslationDispatcher:
                 logger.warning(
                     "Translation batch disappeared before finalize",
                     extra={"batch_id": plan.batch_id},
+                )
+                return
+            if (
+                batch.status != "running"
+                or int(batch.attempt_count or 0) != plan.claim_attempt
+            ):
+                logger.info(
+                    "Ignoring stale translation worker result",
+                    extra={
+                        "batch_id": plan.batch_id,
+                        "claim_attempt": plan.claim_attempt,
+                        "current_attempt": batch.attempt_count,
+                        "current_status": batch.status,
+                    },
                 )
                 return
 
@@ -549,6 +659,7 @@ class TranslationDispatcher:
                     for item in plan.items
                 ],
             )
+            touched: dict[str, MessageTranslation] = {}
             for outcome in outcomes:
                 item = by_id.get(outcome.message_id)
                 if item is None:
@@ -576,14 +687,28 @@ class TranslationDispatcher:
                     window_size=plan.window_size,
                     batch_id=plan.batch_id,
                 )
+                touched[outcome.message_id] = row
 
             failures = sum(outcome.status != "completed" for outcome in outcomes)
-            batch.status = "failed" if failures else "completed"
-            batch.error_code = "translation_items_failed" if failures else None
-            batch.error_message = (
-                f"{failures} messages need retry" if failures else None
-            )
-            batch.completed_at = datetime.now(timezone.utc)
+            if failures:
+                self._apply_failure_state(
+                    batch,
+                    code="translation_items_failed",
+                    message=f"{failures} messages need retry",
+                )
+                for outcome in outcomes:
+                    if outcome.status != "completed":
+                        row = touched.get(outcome.message_id)
+                        if row is not None:
+                            row.retry_after = batch.retry_after
+                            if batch.status == "dead":
+                                row.status = "dead"
+            else:
+                batch.status = "completed"
+                batch.error_code = None
+                batch.error_message = None
+                batch.retry_after = None
+                batch.completed_at = datetime.now(timezone.utc)
             session.commit()
 
     @staticmethod
@@ -628,17 +753,61 @@ class TranslationDispatcher:
         row.provider = "wendingai"
         row.context_window_size = window_size
         row.batch_id = batch_id
+        row.retry_after = None
         row.completed_at = datetime.now(timezone.utc) if status == "completed" else None
 
-    def _mark_failed(self, batch_id: str, exc: Exception) -> None:
+    def _retry_delay_seconds(self, attempt_count: int) -> float:
+        base = max(0.0, float(self.config.retry_base_seconds))
+        maximum = max(base, float(self.config.retry_max_seconds))
+        if base == 0:
+            return 0.0
+        return min(maximum, base * (2 ** max(0, attempt_count - 1)))
+
+    def _apply_failure_state(
+        self,
+        batch: TranslationBatch,
+        *,
+        code: str,
+        message: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        batch.error_code = code
+        batch.error_message = message
+        if int(batch.attempt_count or 0) >= self.config.max_attempts:
+            batch.status = "dead"
+            batch.retry_after = None
+            batch.completed_at = now
+            return
+        batch.status = "pending"
+        batch.retry_after = now + timedelta(
+            seconds=self._retry_delay_seconds(int(batch.attempt_count or 0))
+        )
+        batch.completed_at = None
+
+    def _schedule_failure(
+        self,
+        batch_id: str,
+        claim_attempt: int,
+        *,
+        code: str,
+        message: str,
+    ) -> None:
         with self.session_factory() as session:
             row = session.get(TranslationBatch, batch_id)
             if row is None:
                 return
-            row.status = "failed"
-            row.error_code = "translation_batch_failed"
-            row.error_message = str(exc)
+            if row.status != "running" or int(row.attempt_count or 0) != claim_attempt:
+                return
+            self._apply_failure_state(row, code=code, message=message)
             session.commit()
+
+    def _mark_failed(self, plan: _BatchPlan, exc: Exception) -> None:
+        self._schedule_failure(
+            plan.batch_id,
+            plan.claim_attempt,
+            code="translation_batch_failed",
+            message=str(exc) or type(exc).__name__,
+        )
 
     # ------------------------------------------------------------------ 辅助
 

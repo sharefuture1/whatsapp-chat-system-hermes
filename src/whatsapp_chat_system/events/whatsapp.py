@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +19,10 @@ from whatsapp_chat_system.db.models import (
     WhatsAppEvent,
     utc_now,
 )
+
+from whatsapp_chat_system.translation_policy import AutoTranslationPolicy
+
+logger = logging.getLogger(__name__)
 
 EventType = Literal[
     "account.qr",
@@ -251,8 +257,34 @@ def _safe_payload(envelope: WhatsAppEventEnvelope) -> dict[str, Any]:
 
 
 class WhatsAppEventService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        translation_policy_resolver: Callable[[], AutoTranslationPolicy] | None = None,
+    ) -> None:
         self.session = session
+        self.translation_policy_resolver = translation_policy_resolver
+
+    def _translation_policy(self) -> AutoTranslationPolicy | None:
+        if self.translation_policy_resolver is None:
+            return None
+        try:
+            return self.translation_policy_resolver()
+        except Exception:
+            # Translation is auxiliary to durable message ingestion. A broken policy
+            # resolver must fail closed for AI work without rejecting the WhatsApp
+            # event itself.
+            logger.exception("Unable to resolve automatic translation policy")
+            return AutoTranslationPolicy(
+                enabled=False,
+                plugin_enabled=False,
+                setting_enabled=False,
+                ai_configured=False,
+                target_lang="zh-CN",
+                window_size=10,
+                blocked_reason="policy_error",
+            )
 
     def process(self, envelope: WhatsAppEventEnvelope) -> bool:
         payload_hash = canonical_hash(envelope)
@@ -320,9 +352,22 @@ class WhatsAppEventService:
                     enqueue_for_inbound_translation,
                 )
 
-                enqueue_for_inbound_translation(
-                    self.session, account, conversation, message
-                )
+                policy = self._translation_policy()
+                if policy is None or policy.enabled:
+                    enqueue_for_inbound_translation(
+                        self.session,
+                        account,
+                        conversation,
+                        message,
+                        target_lang=policy.target_lang if policy else "zh-CN",
+                        window_size=policy.window_size if policy else 10,
+                    )
+                elif message.direction == "inbound":
+                    logger.info(
+                        "Automatic translation skipped for inbound message %s: reason=%s",
+                        message.wa_message_id,
+                        policy.blocked_reason,
+                    )
         elif envelope.event_type in {"contacts.upsert", "contacts.update"}:
             self._upsert_contacts(
                 account, ContactBatchPayload.model_validate(envelope.payload)

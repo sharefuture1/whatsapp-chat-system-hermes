@@ -496,8 +496,8 @@ def test_batch_with_missing_anchor_is_marked_dead(factory):
     assert batch.error_code == "anchor_message_missing"
 
 
-def test_translation_failure_marks_batch_failed(factory):
-    """阶段二抛异常时必须把批次标记为 failed，而不是永远卡在 running。"""
+def test_translation_failure_schedules_bounded_retry(factory):
+    """阶段二抛异常时回到 pending + retry_after，而不是永久卡住。"""
 
     anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
     batch_id = _make_batch(
@@ -508,7 +508,9 @@ def test_translation_failure_marks_batch_failed(factory):
     )
     tracker = _SessionTracker(factory)
     worker = _FakeWorker(tracker, batch_payload={"items": []})
-    dispatcher = _make_dispatcher(factory, tracker, worker)
+    dispatcher = _make_dispatcher(
+        factory, tracker, worker, retry_base_seconds=30, retry_max_seconds=30
+    )
 
     def explode():
         raise RuntimeError("provider construction failed")
@@ -520,7 +522,8 @@ def test_translation_failure_marks_batch_failed(factory):
     assert dispatcher.last_error == "RuntimeError"
     with factory() as session:
         batch = session.get(TranslationBatch, batch_id)
-    assert batch.status == "failed"
+    assert batch.status == "pending"
+    assert batch.retry_after is not None
     assert batch.error_code == "translation_batch_failed"
 
 
@@ -654,3 +657,186 @@ def test_peak_open_sessions_stays_at_one(factory):
     )
 
     assert tracker.peak_open <= 1, f"会话并发打开数异常：{tracker.peak_open}"
+
+
+def test_atomic_claim_guard_allows_only_one_session_to_claim_same_version(factory):
+    anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
+    tracker = _SessionTracker(factory)
+    worker = _FakeWorker(tracker, batch_payload={"items": []})
+    dispatcher = _make_dispatcher(factory, tracker, worker)
+
+    with factory() as left, factory() as right:
+        left_batch = left.get(TranslationBatch, batch_id)
+        right_batch = right.get(TranslationBatch, batch_id)
+        assert dispatcher._claim_candidate(left, left_batch) is True
+        left.commit()
+        assert dispatcher._claim_candidate(right, right_batch) is False
+        right.rollback()
+
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        assert batch.status == "running"
+        assert batch.attempt_count == 1
+
+
+def test_stale_finalize_from_old_claim_attempt_is_rejected(factory):
+    anchor, messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
+    tracker = _SessionTracker(factory)
+    worker = _FakeWorker(tracker, batch_payload={"items": []})
+    dispatcher = _make_dispatcher(factory, tracker, worker)
+
+    plan = dispatcher._claim_batch()
+    assert plan is not None
+    assert plan.claim_attempt == 1
+
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        batch.status = "running"
+        batch.attempt_count = 2
+        session.commit()
+
+    from whatsapp_chat_system.translations_dispatcher import _MessageOutcome
+
+    dispatcher._finalize(
+        plan,
+        [
+            _MessageOutcome(
+                message_id=messages[0],
+                source_lang="Latin",
+                translated_text="你好",
+                status="completed",
+            )
+        ],
+    )
+
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        rows = session.scalars(select(MessageTranslation)).all()
+        assert batch.status == "running"
+        assert batch.attempt_count == 2
+        assert rows == []
+
+
+def test_failed_batch_retries_then_can_complete(factory):
+    anchor, messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
+    tracker = _SessionTracker(factory)
+
+    failing_worker = _FakeWorker(
+        tracker,
+        batch_error=RuntimeError("window down"),
+        fallback=lambda _text, _lang: _FakeRewrite(message=None, error="down"),
+    )
+    first = _make_dispatcher(
+        factory,
+        tracker,
+        failing_worker,
+        max_attempts=2,
+        retry_base_seconds=0,
+        retry_max_seconds=0,
+    )
+    assert first.run_once() is True
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        assert batch.status == "pending"
+        assert batch.attempt_count == 1
+        assert batch.retry_after is not None
+
+    success_worker = _FakeWorker(
+        tracker,
+        batch_payload={
+            "items": [{"message_id": messages[0], "source_lang": "Latin", "zh": "你好"}]
+        },
+    )
+    second = _make_dispatcher(
+        factory,
+        tracker,
+        success_worker,
+        max_attempts=2,
+        retry_base_seconds=0,
+        retry_max_seconds=0,
+    )
+    assert second.run_once() is True
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        row = session.scalar(
+            select(MessageTranslation).where(
+                MessageTranslation.message_id == messages[0]
+            )
+        )
+        assert batch.status == "completed"
+        assert batch.attempt_count == 2
+        assert batch.retry_after is None
+        assert row.status == "completed"
+        assert row.translated_text == "你好"
+
+
+def test_failed_batch_becomes_dead_at_max_attempts(factory):
+    anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+        attempt_count=1,
+    )
+    tracker = _SessionTracker(factory)
+    worker = _FakeWorker(
+        tracker,
+        batch_error=RuntimeError("window down"),
+        fallback=lambda _text, _lang: _FakeRewrite(message=None, error="down"),
+    )
+    dispatcher = _make_dispatcher(
+        factory,
+        tracker,
+        worker,
+        max_attempts=2,
+        retry_base_seconds=0,
+        retry_max_seconds=0,
+    )
+    assert dispatcher.run_once() is True
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        assert batch.status == "dead"
+        assert batch.attempt_count == 2
+        assert batch.retry_after is None
+        assert batch.completed_at is not None
+
+
+def test_future_retry_after_is_not_claimed(factory):
+    anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        batch.retry_after = future
+        session.commit()
+
+    tracker = _SessionTracker(factory)
+    worker = _FakeWorker(tracker, batch_payload={"items": []})
+    dispatcher = _make_dispatcher(factory, tracker, worker)
+    assert dispatcher.run_once() is False
+    with factory() as session:
+        assert session.get(TranslationBatch, batch_id).attempt_count == 0
