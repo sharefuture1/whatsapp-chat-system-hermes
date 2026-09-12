@@ -39,7 +39,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           gzip -dc .automation/round2.patch.gz > "$RUNNER_TEMP/round2.patch"
-          echo "c7f2112740015155dcb5de2d3b1512383612166547b15e101f885796f2a02818  $RUNNER_TEMP/round2.patch" | sha256sum --check
+          echo "cde202f5b2cde29d0988a3d496246e491123adbcce73fe21c2d78fe3afaf3e11  $RUNNER_TEMP/round2.patch" | sha256sum --check
           git apply --check "$RUNNER_TEMP/round2.patch"
           git apply "$RUNNER_TEMP/round2.patch"
       - name: Install locked dependencies
