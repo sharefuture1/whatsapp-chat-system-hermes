@@ -1,0 +1,32 @@
+name: Round2 source snapshot
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/round2-source.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Install locked JS dependencies
+        run: npm ci --prefix web && npm ci --prefix bridge
+      - name: Archive tracked source and JS dependencies
+        run: |
+          git archive --format=tar --output="${RUNNER_TEMP}/round2-source.tar" HEAD
+          tar --append --file="${RUNNER_TEMP}/round2-source.tar" web/node_modules bridge/node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round2-source-${{ github.sha }}
+          path: ${{ runner.temp }}/round2-source.tar
+          retention-days: 1
+          if-no-files-found: error
