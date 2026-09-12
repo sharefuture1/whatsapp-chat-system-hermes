@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - '.automation/round2.patch.gz'
+      - '.automation/round2.patch.gz.*'
       - '.github/workflows/round2-apply.yml'
 
 permissions:
@@ -38,7 +38,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          gzip -dc .automation/round2.patch.gz > "$RUNNER_TEMP/round2.patch"
+          cat .automation/round2.patch.gz.00 .automation/round2.patch.gz.01 .automation/round2.patch.gz.02 .automation/round2.patch.gz.03 .automation/round2.patch.gz.04 .automation/round2.patch.gz.05 > "$RUNNER_TEMP/round2.patch.gz"
+          gzip -t "$RUNNER_TEMP/round2.patch.gz"
+          gzip -dc "$RUNNER_TEMP/round2.patch.gz" > "$RUNNER_TEMP/round2.patch"
           echo "cde202f5b2cde29d0988a3d496246e491123adbcce73fe21c2d78fe3afaf3e11  $RUNNER_TEMP/round2.patch" | sha256sum --check
           git apply --check "$RUNNER_TEMP/round2.patch"
           git apply "$RUNNER_TEMP/round2.patch"
