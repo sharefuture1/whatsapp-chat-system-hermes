@@ -140,6 +140,14 @@ def test_auto_translate_plugin_off_stops_background_and_manual_translation(
         assert manual.status_code == 409
         assert manual.json()["detail"]["code"] == "plugin_disabled"
 
+        translate_preview = client.post(
+            f"/api/v1/conversations/{conversation_id}/reply",
+            json={"message": "hello", "mode": "translate", "preview_only": True},
+            headers=headers,
+        )
+        assert translate_preview.status_code == 409
+        assert translate_preview.json()["detail"]["code"] == "plugin_disabled"
+
         enabled = client.post(
             "/api/v1/plugins/toggle",
             json={"plugin_id": "auto_translate", "enabled": True},
