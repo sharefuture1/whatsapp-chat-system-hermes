@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from whatsapp_chat_system.api.v1.plugins import plugin_enabled, require_plugin_enabled
 from whatsapp_chat_system.personas import list_personas
 from whatsapp_chat_system.runtime import StandaloneRuntime
 
@@ -93,7 +94,7 @@ def create_personas_router(
         if not _is_authenticated(runtime, request):
             return _unauthorized(request)
         settings = _web_settings(runtime)
-        enabled_flag = bool(settings.get("plugins", {}).get("persona_styles", True))
+        enabled_flag = plugin_enabled(runtime, "persona_styles")
         items = [item for item in list_personas() if _is_valid_persona(item["id"])]
         contact_profiles = settings.get("contact_profiles") or {}
         contact_assignments = {
@@ -104,7 +105,7 @@ def create_personas_router(
             and profile.get("persona_id") != "default"
         }
         return {
-            "items": [{**item, "available": True} for item in items],
+            "items": [{**item, "available": enabled_flag} for item in items],
             "contact_assignments": contact_assignments,
             "plugin_enabled": enabled_flag,
         }
@@ -159,6 +160,8 @@ def create_personas_router(
                 },
                 status_code=404,
             )
+        if persona_id != "default":
+            require_plugin_enabled(runtime, "persona_styles")
         settings = _web_settings(runtime)
         contact_profiles = dict(settings.get("contact_profiles") or {})
         profile = dict(contact_profiles.get(contact_id) or {})
