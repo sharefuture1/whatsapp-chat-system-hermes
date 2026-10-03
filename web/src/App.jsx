@@ -48,7 +48,8 @@ function writeTime(userId, ts) {
 }
 
 function deriveAutoTranslateState(settings, apiSettings) {
-  const pluginEnabled = settings.plugins ? settings.plugins.auto_translate !== false : true
+  const pluginSettings = settings.web_settings?.plugins || settings.plugins || {}
+  const pluginEnabled = pluginSettings.auto_translate !== false
   const settingEnabled = !!settings.web_settings?.message_ops?.auto_translate
   const aiConfigured = !!apiSettings?.api_key_configured
   const serverState = apiSettings?.auto_translate
