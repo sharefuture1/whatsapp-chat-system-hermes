@@ -825,6 +825,9 @@ export default function ChatPane({
             const windowed = grouped.length > WINDOW ? grouped.slice(-WINDOW) : grouped
             return windowed.map((item, idx) => {
               const realIdx = grouped.length > WINDOW ? grouped.length - WINDOW + idx : idx
+              if (item.type === 'day') {
+                return <div className="wx-day-separator" key={`day-${item.key}-${realIdx}`}><span>{item.label}</span></div>
+              }
               const isOut = item.role === 'assistant'
               const pending = item.pending
               const failed = item.failed
