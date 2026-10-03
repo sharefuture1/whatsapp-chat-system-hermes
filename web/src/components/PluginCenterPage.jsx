@@ -128,6 +128,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
   const enabledCount = plugins.filter(p => p.enabled).length
 
   const renderToolLink = plugin => {
+    if (plugin.available === false || !plugin.enabled) return null
     if (plugin.id === 'schedule' && onOpenScheduler) {
       return (
         <button type="button" className="wx-inline-btn" onClick={onOpenScheduler}>
