@@ -426,7 +426,7 @@ function AppInner() {
       if (conversation?.source !== 'standalone' || !conversation?.conversation_id) {
         throw new Error(t('conversationUnavailable') || 'Conversation is not available in Standalone mode')
       }
-      const data = await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, idempotency_key: idempotencyKey, preview_only: previewOnly })
+      const data = await api.post(`/v1/conversations/${encodeURIComponent(conversation.conversation_id)}/reply`, { message, mode, idempotency_key: idempotencyKey, preview_only: previewOnly })
       if (data?.success !== true) {
         const error = new Error(data?.detail || t('sendFailed') || 'Message delivery failed')
         error.code = data?.code || 'delivery_failed'
@@ -840,6 +840,7 @@ function AppInner() {
             onBack={() => setPluginCenterOpen(false)}
             onOpenScheduler={() => setSchedulerCenterOpen(true)}
             onOpenBroadcast={() => setBroadcastCenterOpen(true)}
+            onPluginsChanged={() => refreshSettings().catch(showError)}
           />
         )}
 
