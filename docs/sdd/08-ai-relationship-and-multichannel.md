@@ -177,6 +177,26 @@ Intent/Context Detector
 
 插件状态必须由 Worker 能力决定。Worker 未运行或队列不可用时返回 `available=false`，不能只显示可点击开关。
 
+### 4.1 FR-PLG-009：运行时开关必须真实生效
+
+状态：**In Progress**。
+
+本阶段把已有可用插件的开关从“配置展示”升级为服务端运行时合同：
+
+- `auto_translate`：关闭后，实时 `message.upsert` 不得自动创建 `TranslationBatch`；会话手动翻译批次/翻译 API 必须返回明确的 `plugin_disabled`，不能继续消耗 AI 请求。
+- `quick_reply`：关闭后，`smart/translate` 等非直发预览必须在服务端拒绝；`direct` 直发能力保持可用。
+- `persona_styles`：关闭后，人设目录仍可读取元数据但所有项 `available=false`；禁止新的非默认人设分配，允许清除为 `default`，从而可安全卸载现有人设。
+- 前端插件中心在 mutation 成功后立即更新本地状态，并重新读取主应用有效 settings/capabilities；聊天输入区同时禁用对应模式。服务端仍必须重复校验，禁止仅依赖 UI。
+- 没有真实 hook/Worker 的 `memory/analytics/schedule/broadcast/voice_tts` 等能力不得因为历史配置为 true 而显示为 enabled；只有实际可运行的能力才允许开启。
+- 插件开关不得通过轮询多个目录接口才能最终生效；一次 mutation 的返回值是当前插件状态的权威确认，附加 capabilities 刷新仅用于同步其他页面。
+
+验收：
+1. 自动翻译插件关闭时，入站外文不会产生翻译批次，手动翻译返回结构化 disabled 错误；重新开启后新入站外文恢复入队。
+2. quick reply 关闭时智能预览被服务端拒绝，direct 预览仍可用。
+3. persona 插件关闭时目录与分配端点同时受控，默认清除操作可用。
+4. Web 插件开关无需整页刷新即可影响聊天页能力。
+5. unavailable 插件不能被启用；全量 Web/Python/Bridge/Tauri/静态门禁通过后才可标 Implemented，生产真实开关验收后才可标 Verified。
+
 ## 5. 前端信息架构
 
 ### 5.1 聊天页
