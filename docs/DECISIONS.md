@@ -1,3 +1,13 @@
+## 2026-10-03：插件开关由服务端运行时能力统一裁决
+
+**决策**：插件的 `available` 与 `enabled` 分离。只有存在真实 API/hook/Worker 的能力才可 `available=true`；历史配置不能让未实现能力显示为 enabled。插件关闭必须由服务端 gate 阻止实际执行，前端禁用只作为 UX 层，不构成安全或计费边界。
+
+**决策**：`auto_translate` 同时控制入站自动翻译 enqueue 与手动翻译 API；`quick_reply` 控制非直发 AI 预览；`persona_styles` 控制目录可用性和非默认分配。关闭 Persona 时仍允许清除为 default，避免出现无法卸载的历史状态。
+
+**决策**：Plugin Center 以 mutation 返回值立即更新当前插件状态，再通知 App 刷新 effective settings/capabilities；不再用“切一次开关后再刷新插件目录 + Persona 目录”作为状态同步机制。
+
+**关联规格**：FR-PLG-001/002/007/008/009、PERF-008。当前仅为代码开发状态，完整门禁和生产验证通过前不得标记 Verified。
+
 ## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
 
 - 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
