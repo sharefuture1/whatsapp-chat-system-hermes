@@ -1,3 +1,11 @@
+## 2026-10-03：插件运行时控制与聊天正确性（开发中，未部署）
+
+- 当前开发目标：插件开关必须真实影响后端 hook/API 和前端能力，而不是只改变 Plugin Center UI。
+- auto_translate / quick_reply / persona_styles 已进入服务端 runtime gate 实现；无真实 hook/Worker 的插件统一不可用。
+- Web 同轮处理 mode 请求透传、日期分隔气泡、重复同文案 optimistic reconciliation。
+- 开发环境 DevSpace 当前不可用，因此使用 GitHub 临时开发分支 + PR Actions 做隔离 RED/GREEN；生产服务器不参与开发。
+- 只有完整 CI 通过、目标分支远端确认后才允许生产部署。
+
 ## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
 
 - 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
