@@ -123,9 +123,7 @@ def test_auto_translate_plugin_off_stops_background_and_manual_translation(
         engine = create_engine(f"sqlite:///{database}")
         try:
             with engine.connect() as connection:
-                assert (
-                    connection.scalar(select(TranslationBatch.id).limit(1)) is None
-                )
+                assert connection.scalar(select(TranslationBatch.id).limit(1)) is None
         finally:
             engine.dispose()
         conversation_id, message_id = _conversation_and_message_ids(database)
@@ -154,9 +152,7 @@ def test_auto_translate_plugin_off_stops_background_and_manual_translation(
         engine = create_engine(f"sqlite:///{database}")
         try:
             with engine.connect() as connection:
-                assert (
-                    connection.scalar(select(TranslationBatch.id).limit(1)) is not None
-                )
+                assert connection.scalar(select(TranslationBatch.id).limit(1)) is not None
         finally:
             engine.dispose()
 
@@ -167,12 +163,10 @@ def test_quick_reply_plugin_off_blocks_ai_preview_but_direct_preview_stays_avail
     app, database = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
-        assert (
-            _post_event(
-                client, _event("evt-preview", "wa-preview", "hello", 1)
-            ).status_code
-            == 200
+        received = _post_event(
+            client, _event("evt-preview", "wa-preview", "hello", 1)
         )
+        assert received.status_code == 200
         conversation_id, _ = _conversation_and_message_ids(database)
 
         disabled = client.post(
