@@ -375,7 +375,9 @@ def build_standalone_app(
         max_age=600,
     )
     app.include_router(create_accounts_router(factory, bridge))
-    app.include_router(create_conversations_router(factory, bridge, runtime_config=runtime))
+    app.include_router(
+        create_conversations_router(factory, bridge, runtime_config=runtime)
+    )
     app.include_router(
         create_whatsapp_events_router(
             factory,
