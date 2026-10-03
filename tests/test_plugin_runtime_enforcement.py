@@ -58,12 +58,7 @@ def _login(client: TestClient) -> dict[str, str]:
     return {"x-session-token": response.json()["session_token"]}
 
 
-def _event(
-    event_id: str,
-    wa_message_id: str,
-    text_value: str,
-    sequence: int,
-) -> dict:
+def _event(event_id: str, wa_message_id: str, text_value: str, sequence: int) -> dict:
     return {
         "event_id": event_id,
         "event_type": "message.upsert",
