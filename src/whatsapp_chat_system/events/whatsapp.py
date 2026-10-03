@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -251,8 +252,14 @@ def _safe_payload(envelope: WhatsAppEventEnvelope) -> dict[str, Any]:
 
 
 class WhatsAppEventService:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        inbound_translation_enabled: Callable[[], bool] | None = None,
+    ) -> None:
         self.session = session
+        self.inbound_translation_enabled = inbound_translation_enabled or (lambda: True)
 
     def process(self, envelope: WhatsAppEventEnvelope) -> bool:
         payload_hash = canonical_hash(envelope)
@@ -320,9 +327,10 @@ class WhatsAppEventService:
                     enqueue_for_inbound_translation,
                 )
 
-                enqueue_for_inbound_translation(
-                    self.session, account, conversation, message
-                )
+                if self.inbound_translation_enabled():
+                    enqueue_for_inbound_translation(
+                        self.session, account, conversation, message
+                    )
         elif envelope.event_type in {"contacts.upsert", "contacts.update"}:
             self._upsert_contacts(
                 account, ContactBatchPayload.model_validate(envelope.payload)
