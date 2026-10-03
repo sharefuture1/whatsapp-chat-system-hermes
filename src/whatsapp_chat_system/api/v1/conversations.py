@@ -685,8 +685,11 @@ def create_conversations_router(
         )
         mode = (payload.mode or "direct").strip() or "direct"
         if payload.preview_only:
-            if mode != "direct" and runtime_config is not None:
-                require_plugin_enabled(runtime_config, "quick_reply")
+            if runtime_config is not None:
+                if mode == "smart":
+                    require_plugin_enabled(runtime_config, "quick_reply")
+                elif mode == "translate":
+                    require_plugin_enabled(runtime_config, "auto_translate")
             try:
                 from whatsapp_chat_system.rewriter import Rewriter
 
