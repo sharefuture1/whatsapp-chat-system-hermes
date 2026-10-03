@@ -1,3 +1,12 @@
+## 2026-10-03：插件运行时真开关与聊天正确性加固（In Progress）
+
+- 绑定规格：FR-PLG-001/002/007/008/009、PERF-008。
+- 插件目录只把真实接线能力标为 available；未完成 Worker/runtime hook 的能力保持 unavailable，历史配置不能把它伪装成 enabled。
+- auto_translate 关闭后同时阻断入站自动翻译入队和会话手动翻译；quick_reply 关闭后阻断非直发 AI 预览；persona_styles 关闭后目录项不可用并拒绝新的非默认分配，仍允许清除默认。
+- 插件中心 mutation 成功后立即更新本地状态并通知 App 刷新 effective settings，不再为了一个开关额外刷新插件目录与 Persona 目录；聊天模式按钮跟随有效插件状态。
+- 修复发送请求遗漏 mode、日期分隔项被误渲染为空白气泡、同文案 optimistic 消息一对多误对账。
+- TDD RED 已由 CI 复现；完整 GREEN 门禁和生产验收尚未完成，本条不得视为已发布。
+
 ## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
 
 - 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。
