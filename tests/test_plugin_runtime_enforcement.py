@@ -7,17 +7,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 
 from whatsapp_chat_system.db import Base
-from whatsapp_chat_system.db import models as _models  # noqa: F401
-from whatsapp_chat_system.db.models import (
-    Conversation,
-    Message,
-    TranslationBatch,
-    WhatsAppAccount,
-)
-from whatsapp_chat_system.standalone_api import (
-    _current_alembic_head,
-    build_standalone_app,
-)
+from whatsapp_chat_system.db import models
+from whatsapp_chat_system.standalone_api import build_standalone_app
+from whatsapp_chat_system.standalone_api import _current_alembic_head
 
 PASSWORD = "plugin-runtime-test-password"
 TOKEN = "plugin-runtime-internal-token"
@@ -31,72 +23,71 @@ def _app(tmp_path: Path):
     engine = create_engine(f"sqlite:///{database}")
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
+        ddl = "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+        connection.execute(text(ddl))
+        insert_revision = "INSERT INTO alembic_version (version_num) VALUES (:revision)"
         connection.execute(
-            text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-        )
-        connection.execute(
-            text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
+            text(insert_revision),
             {"revision": _current_alembic_head()},
         )
-        connection.execute(
-            WhatsAppAccount.__table__.insert().values(
-                id="acc-1",
-                name="WA1",
-                status="online",
-                enabled=True,
-                session_ref="account:acc-1",
-                is_primary=True,
-            )
+        account = models.WhatsAppAccount.__table__.insert().values(
+            id="acc-1",
+            name="WA1",
+            status="online",
+            enabled=True,
+            session_ref="account:acc-1",
+            is_primary=True,
         )
+        connection.execute(account)
     engine.dispose()
-    return build_standalone_app(runtime_dir=tmp_path / "runtime"), database
+    app = build_standalone_app(runtime_dir=tmp_path / "runtime")
+    return app, database
 
 
 def _login(client: TestClient) -> dict[str, str]:
     response = client.post("/api/login", json={"password": PASSWORD})
     assert response.status_code == 200
-    return {"x-session-token": response.json()["session_token"]}
+    token = response.json()["session_token"]
+    return {"x-session-token": token}
 
 
-def _event(event_id: str, wa_message_id: str, text_value: str, sequence: int) -> dict:
+def _event(event_id: str, message_id: str, body: str, sequence: int) -> dict:
+    payload = {
+        "schema_version": 1,
+        "wa_message_id": message_id,
+        "remote_jid": "85620@s.whatsapp.net",
+        "sender_jid": "85620@s.whatsapp.net",
+        "participant_jid": None,
+        "from_me": False,
+        "conversation_type": "dm",
+        "message_type": "text",
+        "timestamp": "2026-10-03T12:00:00Z",
+        "text": body,
+        "push_name": "Customer",
+        "quoted_wa_message_id": None,
+        "media": None,
+    }
     return {
         "event_id": event_id,
         "event_type": "message.upsert",
         "account_id": "acc-1",
         "occurred_at": "2026-10-03T12:00:00Z",
         "sequence": sequence,
-        "payload": {
-            "schema_version": 1,
-            "wa_message_id": wa_message_id,
-            "remote_jid": "85620@s.whatsapp.net",
-            "sender_jid": "85620@s.whatsapp.net",
-            "participant_jid": None,
-            "from_me": False,
-            "conversation_type": "dm",
-            "message_type": "text",
-            "timestamp": "2026-10-03T12:00:00Z",
-            "text": text_value,
-            "push_name": "Customer",
-            "quoted_wa_message_id": None,
-            "media": None,
-        },
+        "payload": payload,
     }
 
 
 def _post_event(client: TestClient, body: dict):
-    return client.post(
-        "/internal/events/whatsapp",
-        json=body,
-        headers={"X-Internal-Token": TOKEN},
-    )
+    headers = {"X-Internal-Token": TOKEN}
+    return client.post("/internal/events/whatsapp", json=body, headers=headers)
 
 
-def _conversation_and_message_ids(database: Path) -> tuple[str, str]:
+def _ids(database: Path) -> tuple[str, str]:
     engine = create_engine(f"sqlite:///{database}")
     try:
         with engine.connect() as connection:
-            conversation_id = connection.scalar(select(Conversation.id).limit(1))
-            message_id = connection.scalar(select(Message.id).limit(1))
+            conversation_id = connection.scalar(select(models.Conversation.id).limit(1))
+            message_id = connection.scalar(select(models.Message.id).limit(1))
     finally:
         engine.dispose()
     assert conversation_id is not None
@@ -104,120 +95,95 @@ def _conversation_and_message_ids(database: Path) -> tuple[str, str]:
     return conversation_id, message_id
 
 
-def test_auto_translate_plugin_off_stops_background_and_manual_translation(
-    tmp_path: Path,
-):
+def _batch_exists(database: Path) -> bool:
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        with engine.connect() as connection:
+            batch_id = connection.scalar(select(models.TranslationBatch.id).limit(1))
+    finally:
+        engine.dispose()
+    return batch_id is not None
+
+
+def test_auto_translate_switch_controls_runtime(tmp_path: Path):
     app, database = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
-        disabled = client.post(
-            "/api/v1/plugins/toggle",
-            json={"plugin_id": "auto_translate", "enabled": False},
-            headers=headers,
-        )
+        body = {"plugin_id": "auto_translate", "enabled": False}
+        disabled = client.post("/api/v1/plugins/toggle", json=body, headers=headers)
         assert disabled.status_code == 200
 
-        first = _post_event(client, _event("evt-1", "wa-1", "สวัสดีครับ", 1))
-        assert first.status_code == 200
+        event = _event("evt-1", "wa-1", "สวัสดีครับ", 1)
+        assert _post_event(client, event).status_code == 200
+        assert _batch_exists(database) is False
 
-        engine = create_engine(f"sqlite:///{database}")
-        try:
-            with engine.connect() as connection:
-                assert connection.scalar(select(TranslationBatch.id).limit(1)) is None
-        finally:
-            engine.dispose()
-        conversation_id, message_id = _conversation_and_message_ids(database)
-
-        manual = client.post(
-            f"/api/v1/conversations/{conversation_id}/translations",
-            json={
-                "anchor_message_id": message_id,
-                "target_lang": "zh-CN",
-                "window_size": 10,
-            },
-            headers=headers,
-        )
+        conversation_id, message_id = _ids(database)
+        path = f"/api/v1/conversations/{conversation_id}/translations"
+        request = {
+            "anchor_message_id": message_id,
+            "target_lang": "zh-CN",
+            "window_size": 10,
+        }
+        manual = client.post(path, json=request, headers=headers)
         assert manual.status_code == 409
         assert manual.json()["detail"]["code"] == "plugin_disabled"
 
-        translate_preview = client.post(
-            f"/api/v1/conversations/{conversation_id}/reply",
-            json={"message": "hello", "mode": "translate", "preview_only": True},
-            headers=headers,
-        )
-        assert translate_preview.status_code == 409
-        assert translate_preview.json()["detail"]["code"] == "plugin_disabled"
+        path = f"/api/v1/conversations/{conversation_id}/reply"
+        request = {"message": "hello", "mode": "translate", "preview_only": True}
+        preview = client.post(path, json=request, headers=headers)
+        assert preview.status_code == 409
+        assert preview.json()["detail"]["code"] == "plugin_disabled"
 
-        enabled = client.post(
-            "/api/v1/plugins/toggle",
-            json={"plugin_id": "auto_translate", "enabled": True},
-            headers=headers,
-        )
+        body = {"plugin_id": "auto_translate", "enabled": True}
+        enabled = client.post("/api/v1/plugins/toggle", json=body, headers=headers)
         assert enabled.status_code == 200
-        second = _post_event(client, _event("evt-2", "wa-2", "ขอสอบถามราคา", 2))
-        assert second.status_code == 200
-
-        engine = create_engine(f"sqlite:///{database}")
-        try:
-            with engine.connect() as connection:
-                assert connection.scalar(select(TranslationBatch.id).limit(1)) is not None
-        finally:
-            engine.dispose()
+        event = _event("evt-2", "wa-2", "ขอสอบถามราคา", 2)
+        assert _post_event(client, event).status_code == 200
+        assert _batch_exists(database) is True
 
 
-def test_quick_reply_plugin_off_blocks_ai_preview_but_direct_preview_stays_available(
-    tmp_path: Path,
-):
+def test_quick_reply_switch_controls_preview(tmp_path: Path):
     app, database = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
-        received = _post_event(client, _event("evt-preview", "wa-preview", "hello", 1))
-        assert received.status_code == 200
-        conversation_id, _ = _conversation_and_message_ids(database)
+        event = _event("evt-preview", "wa-preview", "hello", 1)
+        assert _post_event(client, event).status_code == 200
+        conversation_id, _ = _ids(database)
 
-        disabled = client.post(
-            "/api/v1/plugins/toggle",
-            json={"plugin_id": "quick_reply", "enabled": False},
-            headers=headers,
-        )
+        body = {"plugin_id": "quick_reply", "enabled": False}
+        disabled = client.post("/api/v1/plugins/toggle", json=body, headers=headers)
         assert disabled.status_code == 200
 
-        smart = client.post(
-            f"/api/v1/conversations/{conversation_id}/reply",
-            json={"message": "你好", "mode": "smart", "preview_only": True},
-            headers=headers,
-        )
+        path = f"/api/v1/conversations/{conversation_id}/reply"
+        request = {"message": "你好", "mode": "smart", "preview_only": True}
+        smart = client.post(path, json=request, headers=headers)
         assert smart.status_code == 409
         assert smart.json()["detail"]["code"] == "plugin_disabled"
 
-        direct = client.post(
-            f"/api/v1/conversations/{conversation_id}/reply",
-            json={"message": "你好", "mode": "direct", "preview_only": True},
-            headers=headers,
-        )
+        request = {"message": "你好", "mode": "direct", "preview_only": True}
+        direct = client.post(path, json=request, headers=headers)
         assert direct.status_code == 202
         assert direct.json()["success"] is True
         assert direct.json()["mode"] == "direct"
 
 
-def test_persona_plugin_off_disables_catalog_use_and_assignment(tmp_path: Path):
+def test_persona_switch_controls_catalog_and_assignment(tmp_path: Path):
     app, _ = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
-        disabled = client.post(
-            "/api/v1/plugins/toggle",
-            json={"plugin_id": "persona_styles", "enabled": False},
-            headers=headers,
-        )
+        body = {"plugin_id": "persona_styles", "enabled": False}
+        disabled = client.post("/api/v1/plugins/toggle", json=body, headers=headers)
         assert disabled.status_code == 200
 
         catalog = client.get("/api/v1/personas", headers=headers)
         assert catalog.status_code == 200
         assert catalog.json()["plugin_enabled"] is False
-        assert all(item["available"] is False for item in catalog.json()["items"])
+        items = catalog.json()["items"]
+        assert all(item["available"] is False for item in items)
 
+        path = "/api/v1/contacts/85620@s.whatsapp.net/persona"
         assign = client.put(
-            "/api/v1/contacts/85620@s.whatsapp.net/persona",
+            path,
             json={"persona_id": "mature-uncle"},
             headers=headers,
         )
@@ -225,7 +191,7 @@ def test_persona_plugin_off_disables_catalog_use_and_assignment(tmp_path: Path):
         assert assign.json()["detail"]["code"] == "plugin_disabled"
 
         clear = client.put(
-            "/api/v1/contacts/85620@s.whatsapp.net/persona",
+            path,
             json={"persona_id": "default"},
             headers=headers,
         )
