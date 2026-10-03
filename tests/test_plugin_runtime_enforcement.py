@@ -171,9 +171,7 @@ def test_quick_reply_plugin_off_blocks_ai_preview_but_direct_preview_stays_avail
     app, database = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
-        received = _post_event(
-            client, _event("evt-preview", "wa-preview", "hello", 1)
-        )
+        received = _post_event(client, _event("evt-preview", "wa-preview", "hello", 1))
         assert received.status_code == 200
         conversation_id, _ = _conversation_and_message_ids(database)
 
