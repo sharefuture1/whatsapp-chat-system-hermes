@@ -41,7 +41,7 @@ const ICON_BY_CATEGORY = {
   ),
 }
 
-export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadcast }) {
+export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadcast, onPluginsChanged }) {
   const { t } = useSettings()
   const [plugins, setPlugins] = useState([])
   const [personas, setPersonas] = useState({ items: [], available: false, plugin_enabled: true })
@@ -49,6 +49,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
+  const [busyPluginId, setBusyPluginId] = useState('')
 
   const refresh = async ({ manual = false } = {}) => {
     if (manual) setRefreshing(true)
@@ -76,24 +77,49 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
     refresh().finally(() => setLoading(false))
   }, [])
 
+  const applyPluginState = (pluginId, enabled) => {
+    setPlugins(previous => previous.map(plugin => (
+      plugin.id === pluginId ? { ...plugin, enabled } : plugin
+    )))
+    if (pluginId === 'persona_styles') {
+      setPersonas(previous => ({
+        ...previous,
+        plugin_enabled: enabled,
+        available: enabled && previous.items.length > 0,
+        items: previous.items.map(item => ({ ...item, available: enabled })),
+      }))
+    }
+  }
+
   const toggle = async plugin => {
-    if (plugin.available === false) return
+    if (plugin.available === false || busyPluginId) return
+    const enabled = !plugin.enabled
+    setBusyPluginId(plugin.id)
+    setError(null)
     try {
-      await api.post('/v1/plugins/toggle', { plugin_id: plugin.id, enabled: !plugin.enabled })
-      await refresh()
+      const result = await api.post('/v1/plugins/toggle', { plugin_id: plugin.id, enabled })
+      applyPluginState(plugin.id, Boolean(result.enabled))
+      await onPluginsChanged?.()
     } catch (e) {
       setError(e.message || t('error'))
+    } finally {
+      setBusyPluginId('')
     }
   }
 
   const remove = async plugin => {
-    if (plugin.available === false || !plugin.enabled) return
+    if (plugin.available === false || !plugin.enabled || busyPluginId) return
     if (!window.confirm(`${t('removePluginConfirm')} (${plugin.name})`)) return
+    setBusyPluginId(plugin.id)
+    setError(null)
     try {
       await api.delete(`/v1/plugins/${plugin.id}`)
-      await refresh()
+      applyPluginState(plugin.id, false)
+      await onPluginsChanged?.()
     } catch (e) {
       setError(e.message || t('error'))
+    } finally {
+      setBusyPluginId('')
     }
   }
 
@@ -156,13 +182,9 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
                 <article className="wx-persona-card" key={persona.id}>
                   <strong>{persona.name}</strong>
                   <p>{persona.description}</p>
-                  <button
-                    type="button"
-                    className="wx-inline-btn"
-                    disabled={!personas.available}
-                  >
-                    {personas.available ? t('personaUse') : t('personaUnavailable')}
-                  </button>
+                  <span className={`wx-pill-mini ${personas.available ? 'ok' : 'muted'}`}>
+                    {personas.available ? t('enabled') : t('disabled')}
+                  </span>
                 </article>
               ))}
             </div>
@@ -211,7 +233,7 @@ export default function PluginCenterPage({ onBack, onOpenScheduler, onOpenBroadc
                       <input
                         type="checkbox"
                         checked={!!plugin.enabled}
-                        disabled={plugin.available === false}
+                        disabled={plugin.available === false || Boolean(busyPluginId)}
                         onChange={() => toggle(plugin)}
                       />
                       <span className="wx-switch-slider" />
