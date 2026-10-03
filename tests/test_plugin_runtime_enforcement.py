@@ -8,8 +8,16 @@ from sqlalchemy import create_engine, select, text
 
 from whatsapp_chat_system.db import Base
 from whatsapp_chat_system.db import models as _models  # noqa: F401
-from whatsapp_chat_system.db.models import Conversation, Message, TranslationBatch, WhatsAppAccount
-from whatsapp_chat_system.standalone_api import _current_alembic_head, build_standalone_app
+from whatsapp_chat_system.db.models import (
+    Conversation,
+    Message,
+    TranslationBatch,
+    WhatsAppAccount,
+)
+from whatsapp_chat_system.standalone_api import (
+    _current_alembic_head,
+    build_standalone_app,
+)
 
 PASSWORD = "plugin-runtime-test-password"
 TOKEN = "plugin-runtime-internal-token"
@@ -23,12 +31,13 @@ def _app(tmp_path: Path):
     engine = create_engine(f"sqlite:///{database}")
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        connection.execute(
+            text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        )
         connection.execute(
             text("INSERT INTO alembic_version (version_num) VALUES (:revision)"),
             {"revision": _current_alembic_head()},
         )
-    with engine.begin() as connection:
         connection.execute(
             WhatsAppAccount.__table__.insert().values(
                 id="acc-1",
@@ -49,7 +58,12 @@ def _login(client: TestClient) -> dict[str, str]:
     return {"x-session-token": response.json()["session_token"]}
 
 
-def _event(event_id: str, wa_message_id: str, text_value: str, sequence: int) -> dict:
+def _event(
+    event_id: str,
+    wa_message_id: str,
+    text_value: str,
+    sequence: int,
+) -> dict:
     return {
         "event_id": event_id,
         "event_type": "message.upsert",
@@ -82,7 +96,22 @@ def _post_event(client: TestClient, body: dict):
     )
 
 
-def test_auto_translate_plugin_off_stops_background_and_manual_translation(tmp_path: Path):
+def _conversation_and_message_ids(database: Path) -> tuple[str, str]:
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        with engine.connect() as connection:
+            conversation_id = connection.scalar(select(Conversation.id).limit(1))
+            message_id = connection.scalar(select(Message.id).limit(1))
+    finally:
+        engine.dispose()
+    assert conversation_id is not None
+    assert message_id is not None
+    return conversation_id, message_id
+
+
+def test_auto_translate_plugin_off_stops_background_and_manual_translation(
+    tmp_path: Path,
+):
     app, database = _app(tmp_path)
     with TestClient(app) as client:
         headers = _login(client)
@@ -97,15 +126,22 @@ def test_auto_translate_plugin_off_stops_background_and_manual_translation(tmp_p
         assert first.status_code == 200
 
         engine = create_engine(f"sqlite:///{database}")
-        with engine.connect() as connection:
-            assert connection.scalar(select(TranslationBatch.id).limit(1)) is None
-            conversation_id = connection.scalar(select(Conversation.id).limit(1))
-            message_id = connection.scalar(select(Message.id).limit(1))
-        engine.dispose()
+        try:
+            with engine.connect() as connection:
+                assert (
+                    connection.scalar(select(TranslationBatch.id).limit(1)) is None
+                )
+        finally:
+            engine.dispose()
+        conversation_id, message_id = _conversation_and_message_ids(database)
 
         manual = client.post(
             f"/api/v1/conversations/{conversation_id}/translations",
-            json={"anchor_message_id": message_id, "target_lang": "zh-CN", "window_size": 10},
+            json={
+                "anchor_message_id": message_id,
+                "target_lang": "zh-CN",
+                "window_size": 10,
+            },
             headers=headers,
         )
         assert manual.status_code == 409
@@ -121,9 +157,47 @@ def test_auto_translate_plugin_off_stops_background_and_manual_translation(tmp_p
         assert second.status_code == 200
 
         engine = create_engine(f"sqlite:///{database}")
-        with engine.connect() as connection:
-            assert connection.scalar(select(TranslationBatch.id).limit(1)) is not None
-        engine.dispose()
+        try:
+            with engine.connect() as connection:
+                assert (
+                    connection.scalar(select(TranslationBatch.id).limit(1)) is not None
+                )
+        finally:
+            engine.dispose()
+
+
+def test_quick_reply_plugin_off_blocks_ai_preview_but_direct_preview_stays_available(
+    tmp_path: Path,
+):
+    app, database = _app(tmp_path)
+    with TestClient(app) as client:
+        headers = _login(client)
+        assert _post_event(client, _event("evt-preview", "wa-preview", "hello", 1)).status_code == 200
+        conversation_id, _ = _conversation_and_message_ids(database)
+
+        disabled = client.post(
+            "/api/v1/plugins/toggle",
+            json={"plugin_id": "quick_reply", "enabled": False},
+            headers=headers,
+        )
+        assert disabled.status_code == 200
+
+        smart = client.post(
+            f"/api/v1/conversations/{conversation_id}/reply",
+            json={"message": "你好", "mode": "smart", "preview_only": True},
+            headers=headers,
+        )
+        assert smart.status_code == 409
+        assert smart.json()["detail"]["code"] == "plugin_disabled"
+
+        direct = client.post(
+            f"/api/v1/conversations/{conversation_id}/reply",
+            json={"message": "你好", "mode": "direct", "preview_only": True},
+            headers=headers,
+        )
+        assert direct.status_code == 202
+        assert direct.json()["success"] is True
+        assert direct.json()["mode"] == "direct"
 
 
 def test_persona_plugin_off_disables_catalog_use_and_assignment(tmp_path: Path):
