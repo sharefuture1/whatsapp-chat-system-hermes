@@ -183,10 +183,11 @@ Intent/Context Detector
 
 本阶段把已有可用插件的开关从“配置展示”升级为服务端运行时合同：
 
-- `auto_translate`：关闭后，实时 `message.upsert` 不得自动创建 `TranslationBatch`；会话手动翻译批次/翻译 API 必须返回明确的 `plugin_disabled`，不能继续消耗 AI 请求。
+- `auto_translate`：关闭后，实时 `message.upsert` 不得自动创建 `TranslationBatch`；会话手动翻译批次/翻译 API 必须返回明确的 `plugin_disabled`；后台 `TranslationDispatcher` 也不得领取或执行既有 pending 批次，重新开启后原任务可恢复且关闭期间不消耗重试预算。
 - `quick_reply`：关闭后，`smart/translate` 等非直发预览必须在服务端拒绝；`direct` 直发能力保持可用。
 - `persona_styles`：关闭后，人设目录仍可读取元数据但所有项 `available=false`；禁止新的非默认人设分配，允许清除为 `default`，从而可安全卸载现有人设。
 - 前端插件中心在 mutation 成功后立即更新本地状态，并重新读取主应用有效 settings/capabilities；聊天输入区同时禁用对应模式。服务端仍必须重复校验，禁止仅依赖 UI。
+- 全局插件启停与全局 Persona 插件开关仅允许 admin 修改；operator/viewer 只能消费其账号范围内已经授权的能力，不得改变全局插件策略。
 - 没有真实 hook/Worker 的 `memory/analytics/schedule/broadcast/voice_tts` 等能力不得因为历史配置为 true 而显示为 enabled；只有实际可运行的能力才允许开启。
 - 插件开关不得通过轮询多个目录接口才能最终生效；一次 mutation 的返回值是当前插件状态的权威确认，附加 capabilities 刷新仅用于同步其他页面。
 
