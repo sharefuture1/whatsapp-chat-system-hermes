@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from whatsapp_chat_system.api.v1.plugins import plugin_enabled, require_plugin_enabled
+from whatsapp_chat_system.authz import require_admin
 from whatsapp_chat_system.personas import list_personas
 from whatsapp_chat_system.runtime import StandaloneRuntime
 
@@ -116,6 +117,7 @@ def create_personas_router(
     ):
         if not _is_authenticated(runtime, request):
             return _unauthorized(request)
+        require_admin(runtime, request)
         if not _is_valid_persona(persona_id):
             return JSONResponse(
                 {
