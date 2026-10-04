@@ -27,6 +27,7 @@ from whatsapp_chat_system.db.models import (
     TranslationBatch,
     WhatsAppAccount,
 )
+from whatsapp_chat_system.api.v1.plugins import require_plugin_enabled
 from whatsapp_chat_system.outbox import enqueue_outbox_message
 from whatsapp_chat_system.translation_hash import source_text_hash
 
@@ -100,7 +101,10 @@ def _account_payload(account: WhatsAppAccount) -> dict[str, Any]:
 
 
 def create_conversations_router(
-    session_factory: Callable[[], Session], bridge: Any | None = None
+    session_factory: Callable[[], Session],
+    bridge: Any | None = None,
+    *,
+    runtime_config: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["conversations"])
 
@@ -679,7 +683,13 @@ def create_conversations_router(
             write=True,
             not_found_detail="Conversation not found",
         )
+        mode = (payload.mode or "direct").strip() or "direct"
         if payload.preview_only:
+            if runtime_config is not None:
+                if mode == "smart":
+                    require_plugin_enabled(runtime_config, "quick_reply")
+                elif mode == "translate":
+                    require_plugin_enabled(runtime_config, "auto_translate")
             try:
                 from whatsapp_chat_system.rewriter import Rewriter
 
@@ -769,7 +779,6 @@ def create_conversations_router(
                     "name": conversation.title or conversation.remote_jid,
                 }
                 memory_md = ""
-                mode = (payload.mode or "smart").strip() or "smart"
                 if mode == "translate":
                     preview_translation = rewriter.translate_to_zh_result(
                         payload.message, "Unknown"
@@ -892,6 +901,8 @@ def create_conversations_router(
             write=True,
             not_found_detail="Conversation not found",
         )
+        if runtime_config is not None:
+            require_plugin_enabled(runtime_config, "auto_translate")
         anchor = session.scalar(
             select(Message).where(
                 Message.id == payload.anchor_message_id,
@@ -1091,6 +1102,8 @@ def create_conversations_router(
                 write=True,
                 not_found_detail="Conversation not found",
             )
+            if runtime_config is not None:
+                require_plugin_enabled(runtime_config, "auto_translate")
             # The cache namespace is derived from server-owned tenant data. The
             # legacy user_id field remains accepted for wire compatibility but
             # must never select a file path or another contact's cache.

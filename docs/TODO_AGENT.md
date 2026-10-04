@@ -1,3 +1,14 @@
+- [x] 全局插件/Persona 开关 admin-only；关闭翻译时 Dispatcher 不执行已有 pending 批次且不消耗重试次数。
+## 2026-10-03 当前执行：FR-PLG-009 插件运行时真开关
+
+- [>] auto_translate：关闭后阻断入站自动翻译与手动翻译，开启后恢复新消息入队。
+- [>] quick_reply：关闭后阻断智能/翻译 AI 预览，direct 保持可用。
+- [>] persona_styles：关闭后目录不可用、禁止新分配、允许清除默认。
+- [>] Plugin Center mutation 后立即同步 App 有效能力，减少无意义目录刷新请求。
+- [>] 修复发送 mode 透传、日期空白气泡、重复同文案 optimistic 对账。
+- [ ] 全量 Python/Web/Bridge/Ruff/Tauri/diff-quality 通过。
+- [ ] 远端目标分支确认后再做生产真实开关、翻译、消息与健康验收。
+
 ## 2026-09-11：审查后第一轮 P0 隔离修复（Implemented，未部署）
 
 - 规格：`docs/sdd/12-session-translation-isolation.md`；计划：`docs/plans/2026-09-11-p0-isolation-round1.md`。

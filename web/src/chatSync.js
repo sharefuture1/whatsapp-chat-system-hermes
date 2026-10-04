@@ -65,13 +65,32 @@ export function mergeNewMessagesWithStats(currentItems, incomingItems) {
 
 export function mergeFreshMessages(serverItems, currentItems) {
   const currentById = new Map(currentItems.map(item => [String(item.message_id), item]))
+  const currentPlatformIds = new Set(
+    currentItems.map(item => String(item.platform_message_id || '')).filter(Boolean),
+  )
   const sentByContent = new Map(
     currentItems
       .filter(item => item.role === 'assistant' && item.sent)
       .map(item => [`${item.role}:${item.content}`, item]),
   )
-  const serverPlatformIds = new Set(serverItems.map(item => String(item.platform_message_id || '')).filter(Boolean))
-  const serverKeys = new Set(serverItems.map(item => `${item.role}:${item.content}`))
+  const serverPlatformIds = new Set(
+    serverItems.map(item => String(item.platform_message_id || '')).filter(Boolean),
+  )
+
+  // Only genuinely new server rows may reconcile optimistic local rows by content.
+  // Existing history must never consume a newly-created optimistic message merely
+  // because role/content happen to be identical. The budget makes fallback
+  // reconciliation one-to-one instead of the previous Set-based one-to-many match.
+  const contentBudget = new Map()
+  for (const item of serverItems) {
+    const id = String(item.message_id || '')
+    const platformId = String(item.platform_message_id || '')
+    const alreadyKnown = currentById.has(id) || (platformId && currentPlatformIds.has(platformId))
+    if (alreadyKnown) continue
+    const key = `${item.role}:${item.content}`
+    contentBudget.set(key, (contentBudget.get(key) || 0) + 1)
+  }
+
   const mergedServer = serverItems.map(item => {
     const local = currentById.get(String(item.message_id))
     const merged = sentByContent.has(`${item.role}:${item.content}`) ? { ...item, sent: true } : { ...item }
@@ -87,13 +106,21 @@ export function mergeFreshMessages(serverItems, currentItems) {
     }
     return merged
   })
+
   const unresolvedLocal = currentItems.filter(item => {
     const id = String(item.message_id || '')
     if (!id.startsWith('tmp-') && !item.local_only) return false
     if (!item.pending && !item.failed && !item.local_only) return false
     const platformId = String(item.platform_message_id || '')
     if (platformId && serverPlatformIds.has(platformId)) return false
-    return !serverKeys.has(`${item.role}:${item.content}`)
+
+    const key = `${item.role}:${item.content}`
+    const remaining = contentBudget.get(key) || 0
+    if (remaining > 0) {
+      contentBudget.set(key, remaining - 1)
+      return false
+    }
+    return true
   })
   const next = [...mergedServer, ...unresolvedLocal]
   // PERF-008：数据等价时返回原数组引用，避免每轮轮询触发整列表重渲染

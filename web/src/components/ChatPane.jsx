@@ -207,6 +207,8 @@ export default function ChatPane({
   const [currentPersona, setCurrentPersona] = useState(null)
   const [hideOwnMessages, setHideOwnMessages] = useState(false)
   const defaultMode = uiSettings?.reply?.default_mode || 'smart'
+  const quickReplyPluginEnabled = uiSettings?.plugins?.quick_reply !== false
+  const translationPluginEnabled = uiSettings?.plugins?.auto_translate !== false
   const conversationKey = standalone && conversationId ? `standalone:${conversationId}` : `legacy:${userId}`
   useEffect(() => {
     messagesRef.current = messages
@@ -218,6 +220,16 @@ export default function ChatPane({
   if (translationQueueVersionRef.current !== translationQueueVersion) translationQueueVersionRef.current = translationQueueVersion
 
   useEffect(() => {
+    if (
+      (mode === 'smart' && !quickReplyPluginEnabled)
+      || (mode === 'translate' && !translationPluginEnabled)
+    ) {
+      setMode('direct')
+      setPreview(null)
+      setPreviewError(false)
+      setPreviewLoading(false)
+      return
+    }
     if (mode === 'direct') {
       setPreview({ mode: 'direct', language: 'direct', message: composer, used_fallback: false })
       setPreviewError(false)
@@ -227,7 +239,7 @@ export default function ChatPane({
     setPreview(null)
     setPreviewError(false)
     setPreviewLoading(false)
-  }, [composer, mode])
+  }, [composer, mode, quickReplyPluginEnabled, translationPluginEnabled])
 
   useEffect(() => {
     setContactDraft({
@@ -825,6 +837,9 @@ export default function ChatPane({
             const windowed = grouped.length > WINDOW ? grouped.slice(-WINDOW) : grouped
             return windowed.map((item, idx) => {
               const realIdx = grouped.length > WINDOW ? grouped.length - WINDOW + idx : idx
+              if (item.type === 'day') {
+                return <div className="wx-day-separator" key={`day-${item.key}-${realIdx}`}><span>{item.label}</span></div>
+              }
               const isOut = item.role === 'assistant'
               const pending = item.pending
               const failed = item.failed
@@ -977,8 +992,8 @@ export default function ChatPane({
           <div className="wx-composer-tools-panel">
             <div className="wx-mode-choices" role="radiogroup" aria-label={t('mode')}>
               <button type="button" role="radio" aria-checked={mode === 'direct'} className={`wx-mode-choice ${mode === 'direct' ? 'active' : ''}`} onClick={() => setMode('direct')}>{t('modeDirect')}</button>
-              <button type="button" role="radio" aria-checked={mode === 'smart'} className={`wx-mode-choice ${mode === 'smart' ? 'active' : ''}`} onClick={() => setMode('smart')}>{t('modeSmart')}</button>
-              <button type="button" role="radio" aria-checked={mode === 'translate'} className={`wx-mode-choice ${mode === 'translate' ? 'active' : ''}`} onClick={() => setMode('translate')}>{t('modeTranslate')}</button>
+              <button type="button" role="radio" aria-checked={mode === 'smart'} className={`wx-mode-choice ${mode === 'smart' ? 'active' : ''}`} disabled={!quickReplyPluginEnabled} onClick={() => setMode('smart')}>{t('modeSmart')}</button>
+              <button type="button" role="radio" aria-checked={mode === 'translate'} className={`wx-mode-choice ${mode === 'translate' ? 'active' : ''}`} disabled={!translationPluginEnabled} onClick={() => setMode('translate')}>{t('modeTranslate')}</button>
               {mode !== 'direct' ? <button type="button" className="wx-mode-choice" onClick={previewReply} disabled={!composer.trim() || previewLoading}>{previewLoading ? t('loading') : (t('preview') || '预览')}</button> : null}
             </div>
             <div className="wx-composer-emoji-grid" aria-label={t('quickEmoji')}>

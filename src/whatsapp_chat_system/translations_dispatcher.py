@@ -85,11 +85,13 @@ class TranslationDispatcher:
         *,
         runtime_manager: Any = None,
         config: TranslationDispatcherConfig | None = None,
+        enabled: Callable[[], bool] | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.runtime = runtime
         self.runtime_manager = runtime_manager
         self.config = config or TranslationDispatcherConfig()
+        self.enabled = enabled or (lambda: True)
         self.last_heartbeat: datetime | None = None
         self.last_error: str | None = None
         self.processed_batches = 0
@@ -98,6 +100,8 @@ class TranslationDispatcher:
 
     def run_once(self) -> bool:
         self.last_heartbeat = datetime.now(timezone.utc)
+        if not self.enabled():
+            return False
 
         # 阶段一：短事务——领取批次并收集待翻译快照
         try:
@@ -107,6 +111,9 @@ class TranslationDispatcher:
             self.last_error = "claim_failed"
             return False
         if plan is None:
+            return False
+        if not self.enabled():
+            self._release_disabled_claim(plan.batch_id)
             return False
 
         # 阶段二：无数据库会话状态下调用 AI（最长可达 Provider 超时 × 重试）
@@ -141,6 +148,22 @@ class TranslationDispatcher:
             self.last_error = None
         self.processed_batches += 1
         return True
+
+    def _release_disabled_claim(self, batch_id: str) -> None:
+        """Release a just-claimed batch when the runtime switch turns off.
+
+        Disabling translation must stop new provider calls without consuming the
+        batch retry budget. Persisted translations produced from local/cache-only
+        planning remain valid and will be reused when the plugin is re-enabled.
+        """
+
+        with self.session_factory() as session:
+            batch = session.get(TranslationBatch, batch_id)
+            if batch is None or batch.status != "running":
+                return
+            batch.status = "pending"
+            batch.attempt_count = max(0, (batch.attempt_count or 0) - 1)
+            session.commit()
 
     # ------------------------------------------------------------------ 阶段一
 

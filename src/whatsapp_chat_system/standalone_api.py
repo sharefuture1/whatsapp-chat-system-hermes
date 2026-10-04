@@ -36,7 +36,7 @@ from .api.v1.accounts import BridgeProtocol, create_accounts_router
 from .api.v1.conversations import create_conversations_router
 from .api.v1.operations import create_operations_router
 from .api.v1.personas import create_personas_router
-from .api.v1.plugins import create_plugins_router
+from .api.v1.plugins import create_plugins_router, plugin_enabled
 from .api.v1.settings import create_settings_router
 from .bridge.client import BridgeClient, BridgeError
 from .db import Base, create_engine, create_session_factory
@@ -236,8 +236,17 @@ def build_standalone_app(
     outbox_dispatcher = OutboxDispatcher(factory, bridge)
     auto_reply_worker = AutoReplyWorker(factory, runtime_ai_settings)
     auto_reply_reconciler = AutoReplyReconciler(factory)
+
+    def translation_enabled() -> bool:
+        return plugin_enabled(runtime, "auto_translate") and bool(
+            (runtime.web_settings.get("message_ops") or {}).get("auto_translate", True)
+        )
+
     translation_dispatcher = TranslationDispatcher(
-        factory, runtime, runtime_manager=runtime_ai_settings
+        factory,
+        runtime,
+        runtime_manager=runtime_ai_settings,
+        enabled=translation_enabled,
     )
     login_lock = RLock()
 
@@ -375,13 +384,16 @@ def build_standalone_app(
         max_age=600,
     )
     app.include_router(create_accounts_router(factory, bridge))
-    app.include_router(create_conversations_router(factory, bridge))
+    app.include_router(
+        create_conversations_router(factory, bridge, runtime_config=runtime)
+    )
     app.include_router(
         create_whatsapp_events_router(
             factory,
             runtime.internal_event_token,
             hmac_secret=runtime.internal_event_hmac_secret,
             replay_guard=InternalReplayGuard(),
+            inbound_translation_enabled=translation_enabled,
         )
     )
     app.include_router(create_personas_router(runtime, factory))
