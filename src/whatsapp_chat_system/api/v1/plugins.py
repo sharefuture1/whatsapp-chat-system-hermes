@@ -168,9 +168,7 @@ def create_plugins_router(runtime: StandaloneRuntime) -> APIRouter:
         }
 
     @router.post("/toggle")
-    def toggle_plugin(
-        request: Request, payload: PluginToggleRequest
-    ) -> dict[str, Any]:
+    def toggle_plugin(request: Request, payload: PluginToggleRequest) -> dict[str, Any]:
         require_admin(runtime, request)
         item = plugin_definition(payload.plugin_id)
         if item is None:
