@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from whatsapp_chat_system.authz import require_admin
 from whatsapp_chat_system.runtime import StandaloneRuntime, save_runtime_settings
 
 
@@ -167,7 +168,10 @@ def create_plugins_router(runtime: StandaloneRuntime) -> APIRouter:
         }
 
     @router.post("/toggle")
-    def toggle_plugin(payload: PluginToggleRequest) -> dict[str, Any]:
+    def toggle_plugin(
+        request: Request, payload: PluginToggleRequest
+    ) -> dict[str, Any]:
+        require_admin(runtime, request)
         item = plugin_definition(payload.plugin_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Unknown plugin")
@@ -189,7 +193,8 @@ def create_plugins_router(runtime: StandaloneRuntime) -> APIRouter:
         }
 
     @router.delete("/{plugin_id}")
-    def disable_plugin(plugin_id: str) -> dict[str, Any]:
+    def disable_plugin(request: Request, plugin_id: str) -> dict[str, Any]:
+        require_admin(runtime, request)
         item = plugin_definition(plugin_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Unknown plugin")
