@@ -176,11 +176,19 @@ def _seed(factory, texts: list[str]):
         return message_ids[-1], message_ids, account.id, conversation.id
 
 
-def _make_dispatcher(factory, tracker, worker, **config_kwargs):
+def _make_dispatcher(
+    factory,
+    tracker,
+    worker,
+    *,
+    enabled=None,
+    **config_kwargs,
+):
     dispatcher = TranslationDispatcher(
         tracker,
         runtime=object(),
         config=TranslationDispatcherConfig(**config_kwargs),
+        enabled=enabled,
     )
     dispatcher._rewriter = lambda: worker  # type: ignore[method-assign]
     return dispatcher
@@ -213,6 +221,32 @@ def _make_batch(
         session.add(batch)
         session.commit()
         return batch.id
+
+
+def test_disabled_dispatcher_leaves_pending_batch_without_ai_or_retry_cost(factory):
+    anchor, _messages, account_id, conversation_id = _seed(factory, ["hello"])
+    batch_id = _make_batch(
+        factory,
+        anchor_id=anchor,
+        account_id=account_id,
+        conversation_id=conversation_id,
+    )
+    tracker = _SessionTracker(factory)
+    worker = _FakeWorker(tracker, batch_payload={"items": []})
+    dispatcher = _make_dispatcher(
+        factory,
+        tracker,
+        worker,
+        enabled=lambda: False,
+    )
+
+    assert dispatcher.run_once() is False
+    assert tracker.ai_call_count == 0
+
+    with factory() as session:
+        batch = session.get(TranslationBatch, batch_id)
+        assert batch.status == "pending"
+        assert batch.attempt_count == 0
 
 
 def test_ai_is_never_called_while_a_db_session_is_open(factory):
