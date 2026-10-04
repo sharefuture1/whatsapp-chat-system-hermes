@@ -51,7 +51,9 @@ def _login(client: TestClient) -> dict[str, str]:
     return {"x-session-token": token}
 
 
-def _register_operator(client: TestClient, admin_headers: dict[str, str]) -> dict[str, str]:
+def _register_operator(
+    client: TestClient, admin_headers: dict[str, str]
+) -> dict[str, str]:
     password = "operator-runtime-password"
     response = client.post(
         "/api/v1/users/register",
