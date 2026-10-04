@@ -82,7 +82,7 @@ It is intentionally practical and grouped by delivery order so future work can r
 ## Operational notes
 - Current backend port: `127.0.0.1:8792`
 - Current frontend dev port: `127.0.0.1:38998`
-- Current Vercel API target: `https://whats.future1.us/api`
+- Current Vercel API target: `https://whats.wending.ai/api`
 - Runtime secrets policy: keep login/bootstrap secrets only in runtime config or secret stores, never in repo docs
 
 Keep this file updated whenever major architecture or UX work lands.

@@ -41,6 +41,11 @@ const defaultScheduler = Object.freeze({
   clearTimeout: (timer) => clearTimeout(timer),
 });
 
+const AVATAR_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const AVATAR_FAILURE_TTL_MS = 60 * 60 * 1000;
+const AVATAR_QUEUE_LIMIT = 200;
+const AVATAR_CONCURRENCY = 2;
+
 function defaultReconnectJitter(delay) {
   return Math.round(delay * (0.8 + Math.random() * 0.4));
 }
@@ -158,6 +163,10 @@ export class AccountSession {
     this.qrExpiryTimer = null;
     this.sendReceiptStore = new SendReceiptStore(spoolDir);
     this.sendInFlight = new Map();
+    this.avatarCache = new Map();
+    this.avatarQueued = new Set();
+    this.enrichmentLanes = Array.from({ length: AVATAR_CONCURRENCY }, () => Promise.resolve());
+    this.enrichmentCursor = 0;
   }
 
   async initialize() {
@@ -233,6 +242,7 @@ export class AccountSession {
               const payload = normalizeMessage(message, this.now);
               if (!payload || typeof payload.wa_message_id !== 'string' || typeof payload.remote_jid !== 'string') continue;
               await this.#emitEvent('message.upsert', payload, `message:${payload.wa_message_id}`);
+              if (payload.conversation_type === 'dm') this.#scheduleAvatarSync(generation, socket, payload.remote_jid);
             }
           })
           .catch((error) => {
@@ -241,9 +251,11 @@ export class AccountSession {
           });
       });
       socket.ev.on('messages.update', (updates) => {
+        const occurrenceId = randomUUID();
         this.eventWork = this.eventWork
           .then(async () => {
             if (generation !== this.generation) return;
+            let occurrenceIndex = 0;
             for (const update of updates ?? []) {
               const receipt = normalizeReceipt(update, this.now);
               if (!receipt) continue;
@@ -251,7 +263,7 @@ export class AccountSession {
               await this.#emitEvent(
                 receipt.eventType,
                 receipt.payload,
-                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}:${randomUUID()}`,
+                `receipt:${receipt.payload.wa_message_id}:${receipt.eventType}:${occurrenceId}:${occurrenceIndex++}`,
               );
             }
           })
@@ -426,6 +438,58 @@ export class AccountSession {
     await this.eventWork;
   }
 
+  async whenEnrichmentIdle() {
+    await Promise.allSettled(this.enrichmentLanes);
+    await this.eventWork;
+  }
+
+  #scheduleAvatarSync(generation, socket, remoteJid) {
+    if (
+      generation !== this.generation
+      || this.socket !== socket
+      || typeof socket?.profilePictureUrl !== 'function'
+      || typeof remoteJid !== 'string'
+      || (!remoteJid.endsWith('@s.whatsapp.net') && !remoteJid.endsWith('@lid'))
+    ) return;
+    const cached = this.avatarCache.get(remoteJid);
+    if (cached && cached.expiresAt > this.now()) return;
+    if (this.avatarQueued.has(remoteJid) || this.avatarQueued.size >= AVATAR_QUEUE_LIMIT) return;
+
+    this.avatarQueued.add(remoteJid);
+    const laneIndex = this.enrichmentCursor++ % this.enrichmentLanes.length;
+    const operation = this.enrichmentLanes[laneIndex].then(async () => {
+      try {
+        if (generation !== this.generation || this.socket !== socket) return;
+        const avatarUrl = await socket.profilePictureUrl(remoteJid, 'image');
+        if (typeof avatarUrl !== 'string' || !avatarUrl.trim()) {
+          this.avatarCache.set(remoteJid, { expiresAt: this.now() + AVATAR_FAILURE_TTL_MS });
+          return;
+        }
+        const url = avatarUrl.trim();
+        this.avatarCache.set(remoteJid, { url, expiresAt: this.now() + AVATAR_CACHE_TTL_MS });
+        this.eventWork = this.eventWork
+          .then(async () => {
+            if (generation !== this.generation || this.socket !== socket) return;
+            await this.#emitEvent('contacts.update', {
+              schema_version: 1,
+              items: [{ remote_jid: remoteJid, avatar_url: url }],
+            });
+          })
+          .catch((error) => {
+            if (generation === this.generation) this.#recordEventError(error);
+          });
+        await this.eventWork;
+      } catch {
+        // Missing/hidden profile pictures are normal WhatsApp behavior. Cache the
+        // miss briefly so reconnect/history sync cannot hammer the remote API.
+        this.avatarCache.set(remoteJid, { expiresAt: this.now() + AVATAR_FAILURE_TTL_MS });
+      } finally {
+        this.avatarQueued.delete(remoteJid);
+      }
+    });
+    this.enrichmentLanes[laneIndex] = operation;
+  }
+
   #queueSyncBatch(generation, occurrenceId, eventType, rawItems, normalizer, size, maxItems = Infinity) {
     this.eventWork = this.eventWork.then(async () => {
       if (generation !== this.generation) return;
@@ -437,6 +501,10 @@ export class AccountSession {
         const item = normalizer(rawItem);
         if (!item) continue;
         chunk.push(item);
+        if (
+          eventType.startsWith('contacts.')
+          || (eventType.startsWith('chats.') && item.conversation_type === 'dm')
+        ) this.#scheduleAvatarSync(generation, this.socket, item.remote_jid);
         accepted += 1;
         if (chunk.length < size) continue;
         if (generation !== this.generation) return;
@@ -456,28 +524,38 @@ export class AccountSession {
     const cutoff = this.now() - (90 * 24 * 60 * 60 * 1000);
     this.eventWork = this.eventWork.then(async () => {
       const perConversation = new Map();
-      let chunk = [];
-      let chunkIndex = 0;
-      let accepted = 0;
       for (const rawItem of rawItems ?? []) {
-        if (accepted >= 2000 || generation !== this.generation) break;
+        if (generation !== this.generation) return;
         const seconds = Number(rawItem?.messageTimestamp);
         if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 < cutoff) continue;
         const item = normalizeMessage(rawItem, this.now);
         if (!item) continue;
-        const count = perConversation.get(item.remote_jid) ?? 0;
-        if (count >= 200) continue;
-        perConversation.set(item.remote_jid, count + 1);
-        chunk.push(item);
-        accepted += 1;
-        if (chunk.length < 100) continue;
+        const bucket = perConversation.get(item.remote_jid) ?? [];
+        bucket.push(item);
+        perConversation.set(item.remote_jid, bucket);
+      }
+
+      const candidates = [];
+      for (const [remoteJid, bucket] of perConversation) {
+        bucket.sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+        candidates.push(...bucket.slice(0, 200));
+        this.#scheduleAvatarSync(generation, this.socket, remoteJid);
+      }
+      const selected = candidates
+        .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+        .slice(0, 2000)
+        .sort((left, right) => {
+          const delta = Date.parse(left.timestamp) - Date.parse(right.timestamp);
+          return delta || String(left.wa_message_id).localeCompare(String(right.wa_message_id));
+        });
+
+      let chunkIndex = 0;
+      for (let index = 0; index < selected.length; index += 100) {
+        if (generation !== this.generation) return;
+        const chunk = selected.slice(index, index + 100);
         await this.#emitEvent('history.messages.upsert', { schema_version: 1, items: chunk },
           occurrenceChunkIdentity(occurrenceId, 'history.messages.upsert', chunk, chunkIndex++));
-        chunk = [];
       }
-      if (chunk.length && generation === this.generation) await this.#emitEvent(
-        'history.messages.upsert', { schema_version: 1, items: chunk },
-        occurrenceChunkIdentity(occurrenceId, 'history.messages.upsert', chunk, chunkIndex));
     }).catch((error) => {
       if (generation === this.generation) this.#recordEventError(error);
     });

@@ -26,6 +26,13 @@ export function loadConfig(env = process.env) {
   const internalToken = canonicalToken || legacyToken;
   if (!internalToken) throw new Error('Bridge internal token is required');
 
+  // 可选：与 API 端同名变量保持一致即可启用请求签名。
+  // 开启后 API 会额外校验 HMAC-SHA256 签名、时间戳窗口与 nonce。
+  const hmacSecret = String(env.WHATSAPP_BRIDGE_HMAC_SECRET ?? '').trim();
+  if (hmacSecret && hmacSecret === internalToken) {
+    throw new Error('WHATSAPP_BRIDGE_HMAC_SECRET must differ from the internal token');
+  }
+
   const host = String(env.BRIDGE_HOST ?? '127.0.0.1').trim().toLowerCase();
   if (!LOOPBACK_HOSTS.has(host)) throw new Error('Bridge host must be loopback');
 
@@ -68,6 +75,7 @@ export function loadConfig(env = process.env) {
   return Object.freeze({
     internalToken,
     eventToken: internalToken,
+    hmacSecret,
     eventUrl: parsedEventUrl.toString(),
     host,
     port,

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSettings } from '../settings'
 import { filterInbox } from '../inboxModel'
 
@@ -13,6 +13,16 @@ function avatarColor(name) {
   let hash = 0
   for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   return colors[hash % colors.length]
+}
+
+function ContactAvatar({ src, name }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [src])
+  return <div className="wx-avatar" style={{ background: avatarColor(name) }}>
+    {src && !failed
+      ? <img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+      : initials(name)}
+  </div>
 }
 
 function platformLabel(platform) {
@@ -79,7 +89,7 @@ export default function ContactsPage({ contacts = [], accounts = [], onSelect })
       ) : grouped.map(group => <section className="wx-contact-account-group" key={group.account?.id || group.items[0]?.account_id}>
         <div className="wx-contact-group-title"><span>{group.account?.label || group.items[0]?.account_label || 'WA'}</span><strong>{group.account?.name || group.items[0]?.account_name}</strong><em>{group.items.length}</em></div>
         <div className="wx-contact-list">{group.items.map(item => <button key={item.contact_key} type="button" className="wx-contact-row" onClick={() => onSelect(item)}>
-          <div className="wx-avatar" style={{ background: avatarColor(item.user_name) }}>{initials(item.user_name)}</div>
+          <ContactAvatar src={item.avatar_url} name={item.user_name} />
           <div className="wx-contact-meta"><div className="wx-contact-name">{item.user_name}</div><div className="wx-contact-subid"><span>{item.account_label}</span>{item.remote_jid || item.user_id}</div></div>
           <svg className="wx-cell-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
         </button>)}</div>

@@ -44,8 +44,9 @@ test('WeChat translation is rendered inside the owning message bubble', () => {
   assert.doesNotMatch(source, /<div className="wx-translation-line">/)
 })
 
-test('WeChat bubble rows render square avatars for both incoming and outgoing messages', () => {
+test('WeChat bubble rows render avatars for both incoming and outgoing messages', () => {
   const source = read('components/ChatPane.jsx')
-  assert.match(source, /isOut \? 'operatorAvatar' : userName/)
-  assert.match(source, /initials\(isOut \?/)
+  assert.match(source, /RemoteAvatar src=\{avatarUrl\} name=\{userName\} className="bubble-avatar"/)
+  assert.match(source, /avatarColor\('operatorAvatar'\)/)
+  assert.match(source, /initials\(t\('operator'\)\)/)
 })

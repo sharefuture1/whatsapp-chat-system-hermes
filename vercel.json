@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm --prefix web install",
+  "git": { "deploymentEnabled": false },
+  "installCommand": "npm ci --prefix web",
   "buildCommand": "npm --prefix web run build",
   "outputDirectory": "web/dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://whats.future1.us/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

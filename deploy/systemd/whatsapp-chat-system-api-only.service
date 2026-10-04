@@ -1,0 +1,46 @@
+[Unit]
+Description=WhatsApp Chat System standalone API (API-only, frontend deployed separately)
+Documentation=file:/opt/whatsapp-chat-system/docs/STANDALONE-DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=whatsapp-chat-system
+Group=whatsapp-chat-system
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+ReadWritePaths=/var/lib/whatsapp-chat-system/api
+WorkingDirectory=/opt/whatsapp-chat-system
+EnvironmentFile=-/etc/whatsapp-chat-system/api.env
+# Required from api.env:
+#   DATABASE_URL                  (sqlite:////abs/path/app.db 或 postgresql://...)
+#   WHATSAPP_BRIDGE_INTERNAL_TOKEN
+# Required when the frontend is served from another origin:
+#   CHAT_SYSTEM_ALLOWED_ORIGINS   (例如 https://console.example.com)
+# Strongly recommended:
+#   WHATSAPP_BRIDGE_HMAC_SECRET   (须与 bridge.env 中同名变量一致)
+#   AI_SECRET_ENCRYPTION_KEY      (生产必须显式设置并备份)
+# First boot only:
+#   CHAT_SYSTEM_BOOTSTRAP_PASSWORD (至少 12 位，初始化完成后可移除)
+#
+# 本单元不传 --web-dist，因此不托管前端静态文件：
+# 前端请独立部署，并在构建时用 VITE_API_BASE_URL 指向 https://whats.wending.ai/api。
+Environment=CHAT_SYSTEM_RUNTIME_DIR=/var/lib/whatsapp-chat-system/api
+Environment=PYTHONUNBUFFERED=1
+# Nginx 与 API 同机，FastAPI 仅监听 loopback，不直接暴露 8792 到公网。
+ExecStart=/opt/whatsapp-chat-system/.venv/bin/python -m whatsapp_chat_system.cli serve --host 127.0.0.1 --port 8792
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

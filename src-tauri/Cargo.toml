@@ -1,0 +1,17 @@
+[package]
+name = "hermes-messaging-console"
+version = "0.1.0"
+description = "Tauri shell for the Hermes messaging operations console"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "hermes_messaging_console_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-http = "2"

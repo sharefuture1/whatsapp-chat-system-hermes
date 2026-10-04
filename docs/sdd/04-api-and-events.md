@@ -24,6 +24,13 @@
 - 所有响应附 `X-Request-ID`。
 - API key、内部 token 和 WhatsApp credentials 不得返回客户端。
 
+### 健康检查（NFR-OPS-002）
+
+- `GET /health/live`：只证明 FastAPI 进程可响应 HTTP；进程运行时固定 `200 {"live": true, "runtime_mode": "standalone"}`，不依赖 Bridge 或业务账号在线状态。
+- `GET /health/ready`：仅在 Standalone startup/schema readiness 完成时返回 `200 {"ready": true, ...}`；未 ready 时必须返回 `503 {"ready": false, ...}`。
+- `GET /api/health`：保留聚合运行状态与 Worker heartbeat，用于控制台/运维诊断，不替代 live/readiness 探针。
+- Nginx 可公开上述两个窄健康路径，但 `/internal/*` 仍必须拒绝公网访问。
+
 ## 2. 鉴权
 
 ### 外部 Web

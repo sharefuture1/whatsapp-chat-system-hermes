@@ -1,12 +1,20 @@
-const PREFIX = 'whatsapp-standalone-cache:v1:'
+import { isTauri } from '@tauri-apps/api/core'
+
+const PREFIX = 'whatsapp-standalone-cache:v2:'
+const memoryCache = new Map()
+let cacheScope = 'anonymous'
 const MAX_MESSAGES = 300
 const MAX_CONVERSATIONS = 30
 const MESSAGE_TTL_MS = 5 * 60 * 1000
 const TRANSLATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
+function scopedKey(key) {
+  return `${PREFIX}${safeId(cacheScope)}:${key}`
+}
+
 function read(key, fallback = null) {
   try {
-    const raw = localStorage.getItem(`${PREFIX}${key}`)
+    const raw = isTauri() ? memoryCache.get(scopedKey(key)) : localStorage.getItem(scopedKey(key))
     return raw ? JSON.parse(raw) : fallback
   } catch {
     return fallback
@@ -15,7 +23,9 @@ function read(key, fallback = null) {
 
 function write(key, value) {
   try {
-    localStorage.setItem(`${PREFIX}${key}`, JSON.stringify(value))
+    const raw = JSON.stringify(value)
+    if (isTauri()) memoryCache.set(scopedKey(key), raw)
+    else localStorage.setItem(scopedKey(key), raw)
   } catch {
     // Quota errors must never break chat rendering.
   }
@@ -36,15 +46,27 @@ export function loadConversationCache(conversationId) {
 // 在浏览器空闲时批量落盘（requestIdleCallback，降级 setTimeout）。
 const pendingCacheWrites = new Map()
 let cacheFlushScheduled = false
+let cacheGeneration = 0
+
+function invalidatePendingWrites() {
+  cacheGeneration += 1
+  pendingCacheWrites.clear()
+  cacheFlushScheduled = false
+}
 
 function scheduleCacheFlush() {
   if (cacheFlushScheduled) return
   cacheFlushScheduled = true
+  const generation = cacheGeneration
+  const scope = cacheScope
   const flush = () => {
+    // An old idle callback must not drain or re-key a newer login's queue.
+    if (generation !== cacheGeneration || scope !== cacheScope) return
     cacheFlushScheduled = false
     const entries = Array.from(pendingCacheWrites.entries())
     pendingCacheWrites.clear()
-    for (const [conversationId, { messages, meta }] of entries) {
+    for (const [conversationId, { messages, meta, generation: queuedGeneration, scope: queuedScope }] of entries) {
+      if (queuedGeneration !== cacheGeneration || queuedScope !== cacheScope) continue
       writeConversationCacheNow(conversationId, messages, meta)
     }
   }
@@ -68,12 +90,21 @@ function writeConversationCacheNow(conversationId, messages, meta = {}) {
 
 export function saveConversationCache(conversationId, messages, meta = {}) {
   if (!conversationId || !Array.isArray(messages)) return
-  pendingCacheWrites.set(String(conversationId), { messages, meta })
+  pendingCacheWrites.set(String(conversationId), {
+    messages, meta, generation: cacheGeneration, scope: cacheScope,
+  })
   scheduleCacheFlush()
 }
 
 export function isConversationCacheFresh(item, now = Date.now()) {
   return Boolean(item?.savedAt && now - Number(item.savedAt) < MESSAGE_TTL_MS)
+}
+
+export function canShortCircuitConversationFetch(
+  item,
+  { appendOlder = false, cachePolicy = 'cache-first', now = Date.now() } = {},
+) {
+  return !appendOlder && cachePolicy === 'cache-first' && isConversationCacheFresh(item, now)
 }
 
 export function loadTranslationCache(messageId, content) {
@@ -92,7 +123,33 @@ export function saveTranslationCache(messageId, content, value) {
 
 export function clearConversationCache(conversationId) {
   if (!conversationId) return
-  try { localStorage.removeItem(`${PREFIX}conversation:${safeId(conversationId)}`) } catch {}
+  pendingCacheWrites.delete(String(conversationId))
+  try {
+    if (isTauri()) memoryCache.delete(scopedKey(`conversation:${safeId(conversationId)}`))
+    else localStorage.removeItem(scopedKey(`conversation:${safeId(conversationId)}`))
+  } catch {}
+}
+
+export function setChatCacheScope(username) {
+  const next = safeId(username || 'anonymous') || 'anonymous'
+  if (next !== cacheScope) {
+    invalidatePendingWrites()
+    memoryCache.clear()
+  }
+  cacheScope = next
+}
+
+export function clearAllChatCaches() {
+  invalidatePendingWrites()
+  memoryCache.clear()
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index)
+      if (key?.startsWith(PREFIX) || key?.startsWith('whatsapp-standalone-cache:v1:')) {
+        localStorage.removeItem(key)
+      }
+    }
+  } catch {}
 }
 
 export const CHAT_CACHE_LIMITS = { MAX_MESSAGES, MAX_CONVERSATIONS }

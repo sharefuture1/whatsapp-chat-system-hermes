@@ -27,6 +27,7 @@ from .api.v1.conversations import create_conversations_router
 from .api.v1.personas import create_personas_router
 from .api.internal.whatsapp_events import (
     create_whatsapp_events_router,
+    internal_auth_exception_handler,
     whatsapp_validation_exception_handler,
 )
 from .bridge.client import BridgeClient, BridgeError
@@ -41,6 +42,7 @@ from .db import create_engine, create_session_factory, session_scope
 from .db.models import AIRuntimeSetting
 from .forwarder import AdminForwarder
 from .runtime import StandaloneRuntime
+from .security.internal_auth import InternalAuthError, ReplayGuard
 from .settings import AISettings
 from .memory_refresh import MemoryRefresher
 from .origins import OriginsCache
@@ -932,7 +934,8 @@ def _build_standalone_app(
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
     app.state.runtime_mode = "standalone"
-    # authz.py 的 RBAC 依赖 app.state.runtime；standalone_api 与此处必须同步设置
+    # V1 object routers resolve role and account scope from the app runtime.
+    # Keep this compatibility builder aligned with standalone_api.build_standalone_app.
     app.state.runtime = runtime
     app.add_middleware(
         CORSMiddleware,
@@ -944,7 +947,12 @@ def _build_standalone_app(
     app.include_router(create_accounts_router(factory, bridge))
     app.include_router(create_conversations_router(factory, bridge))
     app.include_router(
-        create_whatsapp_events_router(factory, runtime.internal_event_token)
+        create_whatsapp_events_router(
+            factory,
+            runtime.internal_event_token,
+            hmac_secret=runtime.internal_event_hmac_secret,
+            replay_guard=ReplayGuard(),
+        )
     )
     app.include_router(create_personas_router(runtime, factory))
 
@@ -986,7 +994,18 @@ def _build_standalone_app(
         token = secrets.token_urlsafe(24)
         ttl = int(runtime.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(runtime.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(runtime.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        runtime.web_settings["users"] = users
         runtime.web_settings["sessions"] = sessions
         _save_runtime_settings(runtime)
         return {"success": True, "session_token": token, "expires_in": ttl}
@@ -1262,7 +1281,9 @@ def build_app(
             await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(title="WhatsApp Chat System API", version="0.5.2", lifespan=lifespan)
-    # authz.py 的 RBAC 读 app.state.runtime.web_settings；legacy 模式下由 config 提供同构接口
+    # V1 routers resolve the authenticated user's role and account scope from
+    # the app runtime. Keep the legacy factory compatible while callers are
+    # migrated to the standalone production factory.
     app.state.runtime = config
     app.add_middleware(
         CORSMiddleware,
@@ -1285,9 +1306,23 @@ def build_app(
         if internal_event_token is not None
         else (os.getenv("WHATSAPP_BRIDGE_INTERNAL_TOKEN") or "").strip()
     )
+    resolved_hmac_secret = (
+        os.getenv("WHATSAPP_BRIDGE_HMAC_SECRET") or ""
+    ).strip() or None
     app.include_router(
-        create_whatsapp_events_router(resolved_account_factory, resolved_event_token)
+        create_whatsapp_events_router(
+            resolved_account_factory,
+            resolved_event_token,
+            hmac_secret=resolved_hmac_secret,
+            replay_guard=ReplayGuard(),
+        )
     )
+
+    @app.exception_handler(InternalAuthError)
+    async def internal_auth_exception_handler_legacy(
+        request: Request, exc: InternalAuthError
+    ):
+        return internal_auth_exception_handler(request, exc)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(request: Request, exc: RequestValidationError):
@@ -1336,7 +1371,18 @@ def build_app(
         token = secrets.token_urlsafe(24)
         ttl = int(config.web_settings.get("auth_ttl_seconds") or 86400)
         sessions = dict(config.web_settings.get("sessions") or {})
-        sessions[token] = {"issued_at": time.time(), "expires_at": time.time() + ttl}
+        users = dict(config.web_settings.get("users") or {})
+        admin = dict(users.get("admin") or stored)
+        admin["role"] = "admin"
+        admin.setdefault("allowed_account_ids", [])
+        admin.setdefault("created_at", time.time())
+        users["admin"] = admin
+        sessions[token] = {
+            "issued_at": time.time(),
+            "expires_at": time.time() + ttl,
+            "username": "admin",
+        }
+        config.web_settings["users"] = users
         config.web_settings["sessions"] = sessions
         save_json(config.paths.web_settings_file, config.web_settings)
         return {"success": True, "session_token": token, "expires_in": ttl}
@@ -1699,8 +1745,10 @@ def build_app(
     def settings() -> dict[str, Any]:
         safe_web_settings = dict(config.web_settings)
         safe_web_settings.pop("auth", None)
+        safe_web_settings.pop("auth_policy", None)
         safe_web_settings.pop("sessions", None)
         safe_web_settings.pop("login_attempts", None)
+        safe_web_settings.pop("users", None)
         account_model = str(
             (config.web_settings.get("reply") or {}).get("ai_model") or ""
         ).strip()

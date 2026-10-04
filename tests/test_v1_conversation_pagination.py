@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -58,8 +59,26 @@ def build_client() -> tuple[TestClient, str]:
         conversation_id = conversation.id
 
     app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        web_settings={
+            "sessions": {
+                "pagination-test-token": {
+                    "username": "pagination-reader",
+                    "expires_at": 9_999_999_999,
+                }
+            },
+            "users": {
+                "pagination-reader": {
+                    "role": "viewer",
+                    "allowed_account_ids": [account.id],
+                }
+            },
+        }
+    )
     app.include_router(create_conversations_router(factory))
-    return TestClient(app), conversation_id
+    client = TestClient(app)
+    client.headers.update({"x-session-token": "pagination-test-token"})
+    return client, conversation_id
 
 
 def test_cursor_paginates_without_overlap() -> None:

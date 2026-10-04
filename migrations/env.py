@@ -7,12 +7,16 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from whatsapp_chat_system.db.base import Base
+from whatsapp_chat_system.db.url import normalize_database_url
 import whatsapp_chat_system.db.models  # noqa: F401
 
 
 config = context.config
-if environ.get('DATABASE_URL') and not config.attributes.get('ignore_database_url_env'):
-    config.set_main_option('sqlalchemy.url', environ['DATABASE_URL'])
+if environ.get("DATABASE_URL") and not config.attributes.get("ignore_database_url_env"):
+    # 与运行时保持同一套归一化规则，确保 alembic 与 API 连的是同一个数据库
+    config.set_main_option(
+        "sqlalchemy.url", normalize_database_url(environ["DATABASE_URL"])
+    )
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -20,12 +24,12 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option('sqlalchemy.url')
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
-        dialect_opts={'paramstyle': 'named'},
+        dialect_opts={"paramstyle": "named"},
         compare_type=True,
     )
     with context.begin_transaction():
@@ -35,14 +39,16 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
-        prefix='sqlalchemy.',
+        prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        if connection.dialect.name == 'sqlite':
-            connection.exec_driver_sql('PRAGMA foreign_keys=ON')
+        if connection.dialect.name == "sqlite":
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             connection.commit()
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection, target_metadata=target_metadata, compare_type=True
+        )
         with context.begin_transaction():
             context.run_migrations()
 
