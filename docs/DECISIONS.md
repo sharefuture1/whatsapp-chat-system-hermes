@@ -1,3 +1,5 @@
+**补充决策**：全局插件 mutation 仅允许 admin。自动翻译开关不仅阻断新任务入队和手动 API，也阻断 TranslationDispatcher 开始新的 provider 调用；pending 批次保留以便重新开启后恢复，关闭期间不消耗 retry budget。
+
 ## 2026-10-03：插件开关由服务端运行时能力统一裁决
 
 **决策**：插件的 `available` 与 `enabled` 分离。只有存在真实 API/hook/Worker 的能力才可 `available=true`；历史配置不能让未实现能力显示为 enabled。插件关闭必须由服务端 gate 阻止实际执行，前端禁用只作为 UX 层，不构成安全或计费边界。
