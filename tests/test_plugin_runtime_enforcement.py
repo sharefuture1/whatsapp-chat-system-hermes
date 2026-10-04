@@ -51,6 +51,27 @@ def _login(client: TestClient) -> dict[str, str]:
     return {"x-session-token": token}
 
 
+def _register_operator(client: TestClient, admin_headers: dict[str, str]) -> dict[str, str]:
+    password = "operator-runtime-password"
+    response = client.post(
+        "/api/v1/users/register",
+        json={
+            "username": "operator1",
+            "password": password,
+            "role": "operator",
+            "allowed_account_ids": ["acc-1"],
+        },
+        headers=admin_headers,
+    )
+    assert response.status_code == 201
+    login = client.post(
+        "/api/login",
+        json={"username": "operator1", "password": password},
+    )
+    assert login.status_code == 200
+    return {"x-session-token": login.json()["session_token"]}
+
+
 def _event(event_id: str, message_id: str, body: str, sequence: int) -> dict:
     payload = {
         "schema_version": 1,
@@ -103,6 +124,33 @@ def _batch_exists(database: Path) -> bool:
     finally:
         engine.dispose()
     return batch_id is not None
+
+
+def test_global_plugin_switches_require_admin(tmp_path: Path):
+    app, _ = _app(tmp_path)
+    with TestClient(app) as client:
+        admin_headers = _login(client)
+        operator_headers = _register_operator(client, admin_headers)
+
+        toggle = client.post(
+            "/api/v1/plugins/toggle",
+            json={"plugin_id": "auto_translate", "enabled": False},
+            headers=operator_headers,
+        )
+        assert toggle.status_code == 403
+
+        remove = client.delete(
+            "/api/v1/plugins/quick_reply",
+            headers=operator_headers,
+        )
+        assert remove.status_code == 403
+
+        persona = client.put(
+            "/api/v1/personas/tong-jincheng/enable",
+            json={"enabled": False},
+            headers=operator_headers,
+        )
+        assert persona.status_code == 403
 
 
 def test_auto_translate_switch_controls_runtime(tmp_path: Path):
