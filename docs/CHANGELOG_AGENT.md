@@ -1,3 +1,4 @@
+- 收口：全局插件 mutation 与 Persona 全局开关改为 admin-only；关闭自动翻译后 TranslationDispatcher 不再领取/执行 pending 批次，重新开启可恢复且关闭期间不消耗 retry budget。
 ## 2026-10-03：插件运行时真开关与聊天正确性加固（In Progress）
 
 - 绑定规格：FR-PLG-001/002/007/008/009、PERF-008。
