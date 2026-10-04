@@ -1,3 +1,4 @@
+- [x] 全局插件/Persona 开关 admin-only；关闭翻译时 Dispatcher 不执行已有 pending 批次且不消耗重试次数。
 ## 2026-10-03 当前执行：FR-PLG-009 插件运行时真开关
 
 - [>] auto_translate：关闭后阻断入站自动翻译与手动翻译，开启后恢复新消息入队。
