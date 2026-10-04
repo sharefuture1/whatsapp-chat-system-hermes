@@ -1,3 +1,4 @@
+- 最终收口新增：admin-only 全局插件控制；TranslationDispatcher 遵循有效翻译开关，关闭期间 pending 批次保持等待且不调用 AI。
 ## 2026-10-03：插件运行时控制与聊天正确性（开发中，未部署）
 
 - 当前开发目标：插件开关必须真实影响后端 hook/API 和前端能力，而不是只改变 Plugin Center UI。
