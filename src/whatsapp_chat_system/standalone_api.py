@@ -236,8 +236,19 @@ def build_standalone_app(
     outbox_dispatcher = OutboxDispatcher(factory, bridge)
     auto_reply_worker = AutoReplyWorker(factory, runtime_ai_settings)
     auto_reply_reconciler = AutoReplyReconciler(factory)
+
+    def translation_enabled() -> bool:
+        return plugin_enabled(runtime, "auto_translate") and bool(
+            (runtime.web_settings.get("message_ops") or {}).get(
+                "auto_translate", True
+            )
+        )
+
     translation_dispatcher = TranslationDispatcher(
-        factory, runtime, runtime_manager=runtime_ai_settings
+        factory,
+        runtime,
+        runtime_manager=runtime_ai_settings,
+        enabled=translation_enabled,
     )
     login_lock = RLock()
 
@@ -384,14 +395,7 @@ def build_standalone_app(
             runtime.internal_event_token,
             hmac_secret=runtime.internal_event_hmac_secret,
             replay_guard=InternalReplayGuard(),
-            inbound_translation_enabled=lambda: (
-                plugin_enabled(runtime, "auto_translate")
-                and bool(
-                    (runtime.web_settings.get("message_ops") or {}).get(
-                        "auto_translate", True
-                    )
-                )
-            ),
+            inbound_translation_enabled=translation_enabled,
         )
     )
     app.include_router(create_personas_router(runtime, factory))
