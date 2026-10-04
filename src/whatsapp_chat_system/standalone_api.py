@@ -239,9 +239,7 @@ def build_standalone_app(
 
     def translation_enabled() -> bool:
         return plugin_enabled(runtime, "auto_translate") and bool(
-            (runtime.web_settings.get("message_ops") or {}).get(
-                "auto_translate", True
-            )
+            (runtime.web_settings.get("message_ops") or {}).get("auto_translate", True)
         )
 
     translation_dispatcher = TranslationDispatcher(
